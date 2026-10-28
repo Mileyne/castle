@@ -63,3 +63,7 @@ region-royal = The Haunted Royal Chambers
 title-continue = Enter: resume the current game
 title-new = N: new game
 level-word = Level
+quest-hunt = Defeat the monsters
+quest-retrieve = Find the relics
+quest-rescue = Free the prisoners
+quest-done = Objective complete: reach the portal!

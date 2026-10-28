@@ -230,6 +230,14 @@ impl Rng {
 }
 
 fn main() {
+    // Lancé par le client: on s'arrête dès que son tube d'entrée se ferme (client fermé ou tué).
+    if std::env::var_os("CASTLE_EMBEDDED").is_some() {
+        std::thread::spawn(|| {
+            let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+            std::process::exit(0);
+        });
+    }
+
     let seed = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
@@ -278,6 +286,9 @@ fn main() {
                     monster_ai,
                     reap_dead,
                     collect_pickups,
+                    collect_relics,
+                    rescue_captives,
+                    open_portal,
                     down_players,
                     revive_players,
                     check_wipe,
@@ -731,15 +742,23 @@ fn reap_dead(
     mut commands: Commands,
     mut rng: ResMut<Rng>,
     dead: Query<
-        (Entity, &Health, &Position, Has<Generator>),
+        (Entity, &Health, &Position, Has<Generator>, Has<Monster>),
         (With<Hurtbox>, Without<Player>),
     >,
+    mut quests: Query<&mut Quest>,
 ) {
-    for (entity, health, pos, is_generator) in &dead {
+    for (entity, health, pos, is_generator, is_monster) in &dead {
         if health.current > 0.0 {
             continue;
         }
         commands.entity(entity).despawn();
+        if is_monster || is_generator {
+            for mut quest in &mut quests {
+                if quest.kind == QuestKind::Hunt && !quest.is_done() {
+                    quest.progress += 1;
+                }
+            }
+        }
         if is_generator {
             commands.server_trigger(ToClients { targets: SendTargets::All, message: ScreenShake(0.6) });
             for _ in 0..3 {
@@ -763,6 +782,73 @@ fn reap_dead(
                 spawn_pickup(&mut commands, kind, pos.0, &mut rng);
             }
         }
+    }
+}
+
+/// Ramasse les reliques de la quête de récupération.
+fn collect_relics(
+    mut commands: Commands,
+    players: Query<&Position, (With<Player>, Without<Downed>)>,
+    relics: Query<(Entity, &Position), (With<Relic>, Without<Player>)>,
+    mut quests: Query<&mut Quest>,
+) {
+    for (entity, relic_pos) in &relics {
+        if players.iter().any(|pos| pos.0.distance(relic_pos.0) <= PICKUP_RANGE) {
+            commands.entity(entity).despawn();
+            for mut quest in &mut quests {
+                if quest.kind == QuestKind::Retrieve && !quest.is_done() {
+                    quest.progress += 1;
+                }
+            }
+        }
+    }
+}
+
+/// Un héros qui reste près d'un prisonnier le délivre.
+fn rescue_captives(
+    mut commands: Commands,
+    time: Res<Time>,
+    players: Query<&Position, (With<Player>, Without<Downed>)>,
+    mut captives: Query<(Entity, &Position, &mut RescueHold), (With<Captive>, Without<Player>)>,
+    mut quests: Query<&mut Quest>,
+) {
+    for (entity, captive_pos, mut hold) in &mut captives {
+        if players.iter().any(|pos| pos.0.distance(captive_pos.0) <= RESCUE_RANGE) {
+            hold.0 += time.delta_secs();
+        } else {
+            hold.0 = (hold.0 - time.delta_secs()).max(0.0);
+        }
+        if hold.0 >= RESCUE_TIME {
+            commands.entity(entity).despawn();
+            for mut quest in &mut quests {
+                if quest.kind == QuestKind::Rescue && !quest.is_done() {
+                    quest.progress += 1;
+                }
+            }
+        }
+    }
+}
+
+/// L'objectif est rempli: le portail de sortie apparaît dans la salle de sortie, avec une secousse.
+fn open_portal(
+    mut commands: Commands,
+    layout: Res<Layout>,
+    mut quests: Query<&mut Quest>,
+    portals: Query<(), With<Portal>>,
+    remaining: Query<(), Or<(With<Monster>, With<Generator>)>>,
+) {
+    // Plus rien à combattre: la chasse est réputée accomplie, pour ne jamais bloquer la sortie.
+    if remaining.is_empty() {
+        for mut quest in &mut quests {
+            if quest.kind == QuestKind::Hunt && !quest.is_done() {
+                quest.progress = quest.goal;
+            }
+        }
+    }
+    if quests.iter_mut().any(|quest| quest.is_changed() && quest.is_done()) && portals.is_empty() {
+        let exit = &layout.rooms[layout.exit];
+        commands.spawn((Replicated, Portal, Position(tile_to_world(exit.center()))));
+        commands.server_trigger(ToClients { targets: SendTargets::All, message: ScreenShake(0.5) });
     }
 }
 
@@ -893,11 +979,19 @@ fn start_first_expedition(mut commands: Commands, mut rng: ResMut<Rng>) {
     commands.insert_resource(dungeon.layout);
 }
 
-/// Remplit un nouveau château: générateurs, énigme, pièges, trésor, portes, portail et dialogues.
 /// Numéro du niveau en cours.
 #[derive(Resource)]
 struct Level(u32);
 
+/// Temps pendant lequel un héros est resté près d'un prisonnier.
+#[derive(Component)]
+struct RescueHold(f32);
+
+/// Secondes à passer près d'un prisonnier pour le délivrer, et distance de rencontre.
+const RESCUE_TIME: f32 = 1.2;
+const RESCUE_RANGE: f32 = 22.0;
+
+/// Remplit un nouveau château: générateurs, énigme, pièges, trésor, portes, objectif de niveau et dialogues.
 fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, first: bool, rng: &mut Rng) {
     let (room, layout) = (&dungeon.room, &dungeon.layout);
     let region = Region::ALL[(rng.next_u64() % Region::ALL.len() as u64) as usize];
@@ -994,8 +1088,27 @@ fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, f
         ));
     }
 
-    let exit = &layout.rooms[layout.exit];
-    commands.spawn((Replicated, Portal, Position(tile_to_world(exit.center()))));
+    // L'objectif du niveau. Le portail de sortie n'apparaît qu'une fois celui-ci rempli (voir `open_portal`).
+    let (kind, goal) = QuestKind::for_level(level);
+    commands.spawn((Replicated, Quest { kind, goal, progress: 0 }));
+    let fights: Vec<&RoomInfo> = layout.rooms.iter().filter(|r| r.kind == RoomKind::Combat).collect();
+    if !fights.is_empty() {
+        for i in 0..goal {
+            let info = fights[(rng.next_u64() % fights.len() as u64) as usize];
+            let pos = random_point(room, info, 2, rng);
+            match kind {
+                QuestKind::Retrieve => {
+                    commands.spawn((Replicated, Relic, Position(pos)));
+                }
+                QuestKind::Rescue => {
+                    commands.spawn((Replicated, Captive, Position(pos), RescueHold(0.0)));
+                }
+                QuestKind::Hunt => {
+                    let _ = i;
+                }
+            }
+        }
+    }
 
     if first {
         commands.spawn((

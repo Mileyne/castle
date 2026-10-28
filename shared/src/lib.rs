@@ -347,6 +347,59 @@ pub enum PickupKind {
 #[derive(Component, Clone, Copy, Serialize, Deserialize)]
 pub struct Pickup(pub PickupKind);
 
+/// Genres d'objectifs de niveau: le portail de sortie n'apparaît qu'une fois l'objectif rempli.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QuestKind {
+    /// Vaincre un nombre de monstres.
+    Hunt,
+    /// Retrouver des reliques dispersées dans les salles de combat.
+    Retrieve,
+    /// Délivrer des prisonniers enfermés dans les salles de combat.
+    Rescue,
+}
+
+impl QuestKind {
+    /// Clé de traduction de l'intitulé.
+    pub fn name_key(self) -> &'static str {
+        match self {
+            Self::Hunt => "quest-hunt",
+            Self::Retrieve => "quest-retrieve",
+            Self::Rescue => "quest-rescue",
+        }
+    }
+
+    /// Objectif du niveau `level` (le premier est toujours une chasse), et nombre à atteindre.
+    pub fn for_level(level: u32) -> (Self, u32) {
+        match (level.max(1) - 1) % 3 {
+            0 => (Self::Hunt, (6 + 2 * ((level.max(1) - 1) / 3)).min(18)),
+            1 => (Self::Retrieve, 3),
+            _ => (Self::Rescue, 2),
+        }
+    }
+}
+
+/// L'objectif du niveau en cours. Entité répliquée: les clients l'affichent.
+#[derive(Component, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct Quest {
+    pub kind: QuestKind,
+    pub goal: u32,
+    pub progress: u32,
+}
+
+impl Quest {
+    pub fn is_done(&self) -> bool {
+        self.progress >= self.goal
+    }
+}
+
+/// Relique à retrouver (quête de récupération): se ramasse au contact.
+#[derive(Component, Serialize, Deserialize)]
+pub struct Relic;
+
+/// Prisonnier à délivrer (quête de sauvetage): un héros doit rester près de lui un instant.
+#[derive(Component, Serialize, Deserialize)]
+pub struct Captive;
+
 /// Pièces d'un héros.
 #[derive(Component, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Gold(pub u32);
@@ -576,6 +629,9 @@ impl Plugin for CastleSharedPlugin {
             .replicate::<Monster>()
             .replicate::<Generator>()
             .replicate::<Pickup>()
+            .replicate::<Quest>()
+            .replicate::<Relic>()
+            .replicate::<Captive>()
             .replicate::<Gold>()
             .replicate::<Keys>()
             .replicate::<Projectile>()
@@ -680,5 +736,19 @@ mod tests {
         let end = room.move_and_collide_solids(start, Vec2::new(30.0, 0.0), HERO_HALF_SIZE, &wall);
         assert_eq!(end, start);
         assert!(room.move_and_collide(start, Vec2::new(30.0, 0.0), HERO_HALF_SIZE).x > start.x);
+    }
+}
+
+#[cfg(test)]
+mod quest_tests {
+    use super::*;
+
+    #[test]
+    fn quests_rotate_with_the_level() {
+        assert_eq!(QuestKind::for_level(1), (QuestKind::Hunt, 6));
+        assert_eq!(QuestKind::for_level(2), (QuestKind::Retrieve, 3));
+        assert_eq!(QuestKind::for_level(3), (QuestKind::Rescue, 2));
+        assert_eq!(QuestKind::for_level(4), (QuestKind::Hunt, 8));
+        assert!(QuestKind::for_level(100).1 > 0);
     }
 }

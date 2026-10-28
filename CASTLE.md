@@ -173,6 +173,7 @@ Objectif: 2 à 4 joueurs se déplacent dans une même salle.
 - [x] Troisième jeu d'art, le **mode médiéval** (visages des sprites paramétrés d'après les photos: cheveux, barbe, yeux, sourcils, nez, bouche, lunettes rectangulaires du Rôdeur), inspiré de quatre portraits fournis (dossier `photos/`): le Chevalier (tabard crème à bandes rouges et lion, mailles et plates, écu en amande, épée longue), l'Ensorceleur (chapeau violet à pointe retombante et broche solaire, robe brodée de lunes et d'étoiles, bâton torsadé à anneau et orbe), le Rôdeur (cape verte à capuche, broche en feuille, carquois à plumes, brassards gravés, grand arc recourbé) et le Forgebraise (casque de fer à nasal, tablier de cuir, ceinture à boucle d'enclume avec tenailles, énorme masse). Proportions plus réalistes; les ennemis, objets et décors reprennent le style manga
 - [x] Écran titre: l'illustration `photos/castle.jpg` (copiée en `client/assets/title.png`) couvre la fenêtre. Entrée/clic reprend la partie en cours sur le serveur, N demande une nouvelle partie (événement `NewGame`: nouveau château, héros au départ, or et clés à zéro; vaut pour tous les joueurs connectés). Le jeu et le dialogue d'intro attendent le choix. Le héros actif est dessiné au premier plan
 - [x] Annonce de niveau: écran noir « Niveau N » + nom de la région (fondu de 0,8 s après 2,2 s), au lancement de la partie (une fois l'écran titre fermé) et à chaque passage de portail. Le niveau est numéroté par le serveur (`Expedition.level`, 1 au départ ou en nouvelle partie, +1 par portail); les touches de jeu et le dialogue attendent la fin de l'annonce
+- [x] Lancement unique: `./play.sh` (ou `castle_client`) démarre aussi le serveur local, qui s'arrête avec le client; avec une adresse en argument ou `--no-server`, le client se connecte à un serveur distant. Le serveur reste un programme à part, prêt pour le futur serveur autonome multi-clients
 - [x] Un seul style: le mode médiéval. Les jeux manga et sanglant restent générés mais ne sont plus chargés; F2 et les options `--gore`/`--medieval` sont désactivés
 - [x] Vignettes des héros: recadrages directs des photos de référence, détourés (fond effacé, bord ovale adouci), affichés en colonne à gauche de l'écran (`photos/`, identiques dans tous les styles; coordonnées dans `sprite_forge/src/main.rs`), affichées dans le panneau d'équipe et à côté du nom de celui qui parle dans les dialogues
 - [x] L'Ensorceleuse devient **l'Ensorceleur**, dans les trois styles, les textes et les dialogues
@@ -223,7 +224,7 @@ Objectif: une expédition complète et rejouable.
 
 ### Phase 5 — Quêtes et boss
 Objectif: de vrais objectifs de mission.
-- [ ] Système de quêtes: chasse, récupération, sauvetage, défense, expédition longue
+- [x] Système de quêtes (première version): un objectif par niveau, en rotation chasse (6 monstres, +2 tous les 3 niveaux) → récupération (3 reliques) → sauvetage (2 prisonniers, à rester près d'eux 1,2 s). Entité répliquée `Quest`, affichée en haut de l'écran; le portail de sortie n'apparaît qu'une fois l'objectif rempli (secousse d'écran). Si plus aucun monstre ni générateur ne subsiste, la chasse est réputée accomplie. Sprites des reliques et prisonniers provisoires. À venir: défense, expédition longue
 - [ ] Les 4 boss avec leurs mécaniques
 - [ ] Artefacts légendaires
 - [ ] Récompenses de fin de mission

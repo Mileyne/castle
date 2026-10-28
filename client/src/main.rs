@@ -18,9 +18,11 @@ mod art;
 mod camera;
 mod dialogue;
 mod gore;
+mod host;
 mod i18n;
 mod lighting;
 mod level_intro;
+mod quest;
 mod title;
 mod ui;
 
@@ -28,18 +30,18 @@ mod ui;
 const SMOOTHING: f32 = 20.0;
 
 fn main() {
+    // Le serveur local vit tant que `_server` existe: il s'arrête avec le client.
+    let _server = host::start_local_server();
+    // Assets du dépôt si on lance depuis une compilation du dépôt, sinon à côté du programme.
+    let dev_assets = concat!(env!("CARGO_MANIFEST_DIR"), "/assets");
+    let assets_path = if std::path::Path::new(dev_assets).exists() { dev_assets } else { "assets" };
     App::new()
         .add_plugins((
             // `nearest` garde les pixels nets.
             DefaultPlugins
                 .set(ImagePlugin::default_nearest())
                 .set(AssetPlugin {
-                    // En développement on lit les assets du dépôt, quel que soit le dossier de lancement.
-                    file_path: if cfg!(debug_assertions) {
-                        concat!(env!("CARGO_MANIFEST_DIR"), "/assets").into()
-                    } else {
-                        "assets".into()
-                    },
+                    file_path: assets_path.into(),
                     ..default()
                 })
                 .set(WindowPlugin {
@@ -55,6 +57,7 @@ fn main() {
             i18n::I18nPlugin,
             ui::UiPlugin,
             title::TitlePlugin,
+            quest::QuestPlugin,
             level_intro::LevelIntroPlugin,
             art::ArtPlugin,
             camera::CameraPlugin,

@@ -63,3 +63,7 @@ region-royal = Les appartements royaux hantés
 title-continue = Entrée : reprendre la partie en cours
 title-new = N : nouvelle partie
 level-word = Niveau
+quest-hunt = Éliminez les monstres
+quest-retrieve = Retrouvez les reliques
+quest-rescue = Délivrez les prisonniers
+quest-done = Objectif accompli : rejoignez le portail !
