@@ -1,0 +1,9 @@
+[package]
+name = "sprite_forge"
+version = "0.1.0"
+edition = "2024"
+description = "Génère les planches de sprites des héros en rendant un squelette de volumes depuis huit directions"
+
+[dependencies]
+glam = "0.32"
+png = "0.17"

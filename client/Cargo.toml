@@ -1,0 +1,15 @@
+[package]
+name = "castle_client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+castle_shared = { path = "../shared" }
+bevy = { workspace = true, default-features = true }
+bevy_replicon.workspace = true
+bevy_replicon_renet.workspace = true
+bevy_fluent.workspace = true
+bevy_yarnspinner.workspace = true
+fluent_content = "0.0.5"
+unic-langid = { version = "0.9", features = ["macros"] }
+sys-locale = "0.3"

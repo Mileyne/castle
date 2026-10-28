@@ -1,0 +1,26 @@
+title: intro
+---
+knight: Le château est silencieux. Trop silencieux. Restez groupés. #line:intro_01
+sorcerer: Silencieux ? Écoute... il murmure. Tu ne l'entends pas ? #line:intro_02
+ranger: Je n'entends que du vent et des ennuis. Gardez les yeux ouverts. #line:intro_03
+forgebraise: Des ennuis ? Parfait ! J'ai apporté de quoi tout faire sauter ! #line:intro_04
+knight: Pas dans mon dos. Et pas sans mon ordre. #line:intro_05
+castle: Bienvenue, petits héros. #line:intro_06
+sorcerer: Vous avez entendu ça aussi ? #line:intro_07
+===
+title: royal_door
+---
+knight: La porte royale. Elle ne cédera pas par la seule force. #line:royal_door_01
+ranger: Il y a un mécanisme secret quelque part. Un levier caché, sûrement. Je le trouverai. #line:royal_door_02
+sorcerer: Je sens une rune de scellement dans la salle du haut. Je peux la dissiper. #line:royal_door_03
+forgebraise: Et le mécanisme du bas est rouillé. Rien qu'un marteau ne puisse réparer ! #line:royal_door_04
+knight: Alors chacun sa part. Je pousserai la porte quand tout sera prêt. #line:royal_door_05
+===
+title: alcove
+---
+forgebraise: Une alcôve verrouillée. Je pourrais la faire sauter. #line:alcove_01
+-> On cherche une clé. #line:alcove_opt_key
+    ranger: Sage. Les monstres et les générateurs en portent parfois. #line:alcove_02
+-> Boum ! #line:alcove_opt_boom
+    forgebraise: Euh... mes bombes ne sont pas encore prêtes. Cherchons une clé. #line:alcove_03
+===
