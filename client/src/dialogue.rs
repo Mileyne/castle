@@ -30,12 +30,16 @@ impl Plugin for DialoguePlugin {
                 Update,
                 (
                     spawn_runner.run_if(resource_added::<YarnProject>),
-                    dialogue_input.run_if(in_state(ClientState::Connected)).run_if(crate::level_intro::player_can_act),
+                    dialogue_input
+                        .run_if(in_state(ClientState::Connected))
+                        .run_if(crate::level_intro::player_can_act)
+                        .run_if(crate::pause::not_paused),
                     update_panel,
                 )
                     .chain(),
             )
             .add_observer(on_begin)
+            .add_observer(reset_dialogue)
             .add_observer(on_advance)
             .add_observer(on_select)
             .add_observer(on_present_line)
@@ -356,4 +360,9 @@ fn update_panel(
     if prompt.key != prompt_key {
         prompt.key = prompt_key;
     }
+}
+
+/// Retour à l'écran titre: la scène en cours disparaît.
+fn reset_dialogue(_: On<crate::title::ReturnToTitle>, mut state: ResMut<DialogueState>) {
+    *state = DialogueState::default();
 }

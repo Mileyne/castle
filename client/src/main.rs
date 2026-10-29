@@ -1,6 +1,6 @@
 //! Client de Castle: fenêtre, rendu pixel-art et saisie.
 
-use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::{Ipv4Addr, UdpSocket};
 use std::time::SystemTime;
 
 use bevy::{color::palettes::css, prelude::*};
@@ -21,6 +21,7 @@ mod gore;
 mod host;
 mod i18n;
 mod lighting;
+mod pause;
 mod level_intro;
 mod quest;
 mod title;
@@ -30,8 +31,6 @@ mod ui;
 const SMOOTHING: f32 = 20.0;
 
 fn main() {
-    // Le serveur local vit tant que `_server` existe: il s'arrête avec le client.
-    let _server = host::start_local_server();
     // Assets du dépôt si on lance depuis une compilation du dépôt, sinon à côté du programme.
     let dev_assets = concat!(env!("CARGO_MANIFEST_DIR"), "/assets");
     let assets_path = if std::path::Path::new(dev_assets).exists() { dev_assets } else { "assets" };
@@ -57,6 +56,7 @@ fn main() {
             i18n::I18nPlugin,
             ui::UiPlugin,
             title::TitlePlugin,
+            pause::PausePlugin,
             quest::QuestPlugin,
             level_intro::LevelIntroPlugin,
             art::ArtPlugin,
@@ -68,7 +68,8 @@ fn main() {
         .insert_resource(ClearColor(Color::BLACK))
         // Fenêtre au premier plan: rendu continu. En arrière-plan: le jeu se met presque au repos.
         .insert_resource(bevy::winit::WinitSettings::game())
-        .add_systems(Startup, connect)
+        .add_systems(Startup, connect_from_command_line)
+        .add_systems(Update, begin_connection.run_if(resource_exists::<host::ConnectAt>))
         .add_observer(mark_local_player)
         .add_observer(spawn_attack_fx)
         .add_systems(
@@ -107,12 +108,26 @@ fn mark_local_player(you: On<YouAre>, mut commands: Commands, previous: Query<En
     commands.insert_resource(LocalParty(you.party));
 }
 
-fn connect(mut commands: Commands, channels: Res<RepliconChannels>) -> Result {
-    // L'adresse du serveur est le premier argument qui n'est pas une option (`--gore`...).
-    let addr: SocketAddr = match std::env::args().skip(1).find(|a| !a.starts_with("--")) {
-        Some(arg) => arg.parse()?,
-        None => (Ipv4Addr::LOCALHOST, DEFAULT_PORT).into(),
+/// Une adresse en argument (ou `--no-server`) rejoint directement un serveur, sans passer par le menu.
+fn connect_from_command_line(mut commands: Commands) {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let addr = match args.iter().find(|a| !a.starts_with("--")) {
+        Some(arg) => arg.parse().ok(),
+        None if args.iter().any(|a| a == "--no-server") => Some((Ipv4Addr::LOCALHOST, DEFAULT_PORT).into()),
+        None => None,
     };
+    if let Some(addr) = addr {
+        commands.insert_resource(host::ConnectAt::now(addr));
+    }
+}
+
+/// Ouvre la connexion au serveur une fois l'heure venue (le serveur local a besoin d'un instant pour démarrer).
+fn begin_connection(mut commands: Commands, channels: Res<RepliconChannels>, request: Res<host::ConnectAt>) -> Result {
+    if std::time::Instant::now() < request.at {
+        return Ok(());
+    }
+    let addr = request.addr;
+    commands.remove_resource::<host::ConnectAt>();
 
     let client = RenetClient::new(ConnectionConfig {
         server_channels_config: channels.server_configs(),
@@ -145,6 +160,7 @@ fn send_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut last: Local<(Vec2, bool, bool, bool)>,
     dialogue: Res<dialogue::DialogueState>,
+    pause: Res<pause::PauseMenu>,
 ) {
     let mut dir = Vec2::ZERO;
     if keys.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]) {
@@ -159,10 +175,12 @@ fn send_input(
     if keys.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]) {
         dir.x += 1.0;
     }
-    let dir = dir.normalize_or_zero();
-    let attack = keys.pressed(KeyCode::Space);
-    let special = keys.pressed(KeyCode::KeyE);
-    let interact = keys.pressed(KeyCode::KeyF);
+    // Menu de pause ouvert: on lâche tout, et on ne change pas de héros.
+    let held = |key| !pause.open && keys.pressed(key);
+    let dir = if pause.open { Vec2::ZERO } else { dir.normalize_or_zero() };
+    let attack = held(KeyCode::Space);
+    let special = held(KeyCode::KeyE);
+    let interact = held(KeyCode::KeyF);
     if (dir, attack, special, interact) != *last {
         *last = (dir, attack, special, interact);
         commands.client_trigger(PlayerInput {
@@ -174,7 +192,7 @@ fn send_input(
     }
 
     // Pendant un vote de dialogue, 1 à 4 servent à voter et non à changer de héros.
-    if dialogue.is_voting() {
+    if dialogue.is_voting() || pause.open {
         return;
     }
     for (key, class) in [

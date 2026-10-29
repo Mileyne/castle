@@ -7,3 +7,4 @@ edition = "2024"
 bevy = { workspace = true, features = ["bevy_log"] }
 bevy_replicon.workspace = true
 serde.workspace = true
+ron = "0.12"

@@ -229,6 +229,15 @@ Objectif: de vrais objectifs de mission.
 - [ ] Artefacts légendaires
 - [ ] Récompenses de fin de mission
 
+### Phase 5b — Modes de jeu et sauvegardes *(première version, menu à valider en jeu)*
+- [x] Parties nommées, listées séparément en solo et en coopératif (`shared/src/save.rs`): fichier RON par partie dans le dossier de données de l'utilisateur (`~/Library/Application Support/Castle/saves` sous macOS, `CASTLE_SAVE_DIR` pour le changer), écriture atomique, copie `.bak`, version de format
+- [x] Sauvegarde à chaque entrée de niveau, pas en cours de salle: elle garde le niveau, l'état du générateur aléatoire à l'entrée (qui régénère le même château), l'or et les clés de chaque équipe, et si l'intro a été vue
+- [x] Équipe entièrement à terre: retour au début du niveau (même château, monstres revenus, or et clés de l'entrée)
+- [x] Menu titre: solo, coopératif (héberger / rejoindre par adresse IP du réseau local), quitter; liste des parties avec « nouvelle partie », suppression avec confirmation. Le client lance le serveur de la partie (`--mode solo|coop --save NOM`); solo n'écoute que `127.0.0.1` pour un joueur, coopératif écoute le réseau local (4 joueurs) et l'hôte voit l'adresse à communiquer. Une adresse en argument rejoint directement un serveur
+- [ ] Les équipes retrouvent leur bourse dans l'ordre d'arrivée; une identité de joueur persistante (UUID) sera nécessaire dès qu'il y aura de l'XP par héros
+- [x] Menu de pause (Échap): reprendre, ou abandonner le niveau et revenir au menu principal (la progression depuis l'entrée du niveau est perdue). En solo le serveur est figé pendant la pause; en coopératif non, et l'hôte qui quitte déconnecte les autres
+- [ ] Sauvegarde en cours de niveau, reconnexion après coupure
+
 ### Phase 6 — Progression
 - [ ] Niveaux, XP, évolutions de classe (3 par héros)
 - [ ] Sauvegarde du profil (compte, progression)

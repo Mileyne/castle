@@ -12,17 +12,22 @@ use bevy_replicon_renet::{
     netcode::{NetcodeServerTransport, ServerAuthentication, ServerConfig},
     renet::ConnectionConfig,
 };
+use castle_shared::save::{self, GameMode, SaveGame};
 use castle_shared::*;
 
 /// Compagnons: distance de détection des ennemis, portée de tir, retour auprès du chef.
-const AI_AGGRO: f32 = 110.0;
+const AI_AGGRO: f32 = 80.0;
 /// Un itinéraire est recalculé quand le but a bougé de plus que cela, ou après ce délai.
 const ROUTE_GOAL_DRIFT: f32 = 24.0;
 const ROUTE_MAX_AGE: f32 = 0.6;
 const AI_SHOT_REACH: f32 = 150.0;
 const AI_LEASH: f32 = 220.0;
 /// Les compagnons n'engagent que les ennemis à cette distance du héros dirigé.
-const AI_GROUP_RADIUS: f32 = 170.0;
+const AI_GROUP_RADIUS: f32 = 120.0;
+/// Les compagnons soutiennent le héros dirigé sans le remplacer: leurs coups font moins mal et sont plus lents, et
+/// ils ne s'attaquent qu'aux monstres (les générateurs restent l'affaire du joueur).
+const AI_DAMAGE_FACTOR: f32 = 0.35;
+const AI_COOLDOWN_FACTOR: f32 = 1.6;
 /// Les corps se bloquent: marge ajoutée à la portée de frappe d'un monstre.
 const MONSTER_REACH_SLACK: f32 = 6.0;
 
@@ -238,11 +243,9 @@ fn main() {
         });
     }
 
-    let seed = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(1)
-        | 1;
+    let options = Options::from_args();
+    let campaign = options.open_campaign();
+    info!("campaign '{}' ({:?}), level {}", campaign.0.name, campaign.0.mode, campaign.0.level);
     App::new()
         .add_plugins((
             // Sans cadence, la boucle d'un serveur sans fenêtre tourne à vide et occupe un cœur entier.
@@ -253,8 +256,11 @@ fn main() {
             RepliconRenetPlugins,
             CastleSharedPlugin,
         ))
-        .insert_resource(Rng(seed))
+        .insert_resource(Rng(campaign.0.entry_rng))
+        .insert_resource(campaign)
+        .insert_resource(options)
         .init_resource::<DialogueSession>()
+        .init_resource::<Paused>()
         .init_resource::<NextParty>()
         .add_systems(Startup, (start_server, start_first_expedition))
         .add_systems(
@@ -296,12 +302,13 @@ fn main() {
                 )
                     .chain(),
             )
-                .chain(),
+                .chain()
+                .run_if(not_paused),
         )
         .add_observer(spawn_party)
         .add_observer(despawn_party)
         .add_observer(switch_hero)
-        .add_observer(new_game)
+        .add_observer(set_pause)
         .add_observer(apply_input)
         .add_observer(dialogue_advance)
         .add_observer(dialogue_vote)
@@ -309,12 +316,77 @@ fn main() {
         .run();
 }
 
-fn start_server(mut commands: Commands, channels: Res<RepliconChannels>) -> Result {
-    let port = std::env::args()
-        .nth(1)
-        .map(|p| p.parse())
-        .transpose()?
-        .unwrap_or(DEFAULT_PORT);
+/// Réglages de la ligne de commande: `--port N`, `--mode solo|coop`, `--save NOM`.
+#[derive(Resource)]
+struct Options {
+    port: u16,
+    mode: GameMode,
+    save: String,
+}
+
+impl Options {
+    fn from_args() -> Self {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1));
+        Self {
+            port: value("--port").and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT),
+            mode: value("--mode").and_then(|m| GameMode::from_arg(m)).unwrap_or(GameMode::Coop),
+            save: value("--save").cloned().unwrap_or_else(|| "Castle".into()),
+        }
+    }
+
+    /// Reprend la partie de ce nom, ou en commence une nouvelle.
+    fn open_campaign(&self) -> Campaign {
+        let save = match save::load(&self.save) {
+            Some(save) => save,
+            None => {
+                let seed = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or(1);
+                let fresh = SaveGame::new(&self.save, self.mode, seed);
+                if let Err(err) = save::write(&fresh) {
+                    warn!("cannot write save: {err}");
+                }
+                fresh
+            }
+        };
+        Campaign(save)
+    }
+}
+
+/// La simulation est en pause (menu de pause d'une partie solo).
+#[derive(Resource, Default)]
+struct Paused(bool);
+
+fn not_paused(paused: Res<Paused>) -> bool {
+    !paused.0
+}
+
+/// Le menu de pause fige la partie, mais seulement en solo: en coopératif les autres joueurs continuent.
+fn set_pause(request: On<FromClient<SetPause>>, options: Res<Options>, mut paused: ResMut<Paused>) {
+    paused.0 = options.mode == GameMode::Solo && request.0;
+}
+
+/// La partie en cours: le niveau où l'équipe est entrée, de quoi le régénérer et ce qu'elle portait.
+#[derive(Resource)]
+struct Campaign(SaveGame);
+
+impl Campaign {
+    fn write(&self) {
+        if let Err(err) = save::write(&self.0) {
+            warn!("cannot write save: {err}");
+        }
+    }
+}
+
+fn start_server(mut commands: Commands, channels: Res<RepliconChannels>, options: Res<Options>) -> Result {
+    let port = options.port;
+    // Solo: le serveur n'écoute que cette machine et n'accepte qu'un joueur.
+    let (bind, max_clients) = match options.mode {
+        GameMode::Solo => (Ipv4Addr::LOCALHOST, 1),
+        GameMode::Coop => (Ipv4Addr::UNSPECIFIED, MAX_PLAYERS),
+    };
 
     let server = RenetServer::new(ConnectionConfig {
         server_channels_config: channels.server_configs(),
@@ -323,11 +395,11 @@ fn start_server(mut commands: Commands, channels: Res<RepliconChannels>) -> Resu
     });
 
     let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
-    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port))?;
+    let socket = UdpSocket::bind((bind, port))?;
     let transport = NetcodeServerTransport::new(
         ServerConfig {
             current_time,
-            max_clients: MAX_PLAYERS,
+            max_clients,
             protocol_id: PROTOCOL_ID,
             authentication: ServerAuthentication::Unsecure,
             public_addresses: Default::default(),
@@ -337,7 +409,7 @@ fn start_server(mut commands: Commands, channels: Res<RepliconChannels>) -> Resu
 
     commands.insert_resource(server);
     commands.insert_resource(transport);
-    info!("Castle server listening on UDP port {port}");
+    info!("Castle server listening on {bind}:{port}");
     Ok(())
 }
 
@@ -346,6 +418,7 @@ fn spawn_party(
     add: On<Add, AuthorizedClient>,
     mut commands: Commands,
     layout: Res<Layout>,
+    campaign: Res<Campaign>,
     mut next_party: ResMut<NextParty>,
     heroes: Query<(), With<Player>>,
 ) {
@@ -353,6 +426,8 @@ fn spawn_party(
     next_party.0 += 1;
     info!("player joined ({:?}), party {party}", add.entity);
     let first_slot = heroes.iter().count();
+    // Les équipes arrivent dans le même ordre qu'à la sauvegarde: la n-ième retrouve sa bourse.
+    let (gold, keys) = campaign.0.purses.get(party as usize).copied().unwrap_or_default();
     let mut active = None;
     for (i, class) in HeroClass::ALL.into_iter().enumerate() {
         let stats = class.stats();
@@ -364,8 +439,8 @@ fn spawn_party(
                 class,
                 Health::full(stats.max_hp as f32),
                 Mana::full(stats.max_mana),
-                Gold::default(),
-                Keys::default(),
+                Gold(if i == 0 { gold } else { 0 }),
+                Keys(if i == 0 { keys } else { 0 }),
                 Position(spawn_point(first_slot + i, &layout)),
             ))
             .insert((
@@ -538,16 +613,16 @@ fn player_attacks(
     mut commands: Commands,
     time: Res<Time>,
     mut players: Query<
-        (Entity, &Attacking, &HeroClass, &mut Cooldown, &mut Strikes),
+        (Entity, &Attacking, &HeroClass, &mut Cooldown, &mut Strikes, Has<Controlled>),
         (With<Player>, Without<Downed>),
     >,
 ) {
-    for (entity, attacking, class, mut cooldown, mut strikes) in &mut players {
+    for (entity, attacking, class, mut cooldown, mut strikes, controlled) in &mut players {
         cooldown.0 = (cooldown.0 - time.delta_secs()).max(0.0);
         if !attacking.0 || cooldown.0 > 0.0 {
             continue;
         }
-        cooldown.0 = class.stats().attack.cooldown();
+        cooldown.0 = class.stats().attack.cooldown() * if controlled { 1.0 } else { AI_COOLDOWN_FACTOR };
         // Le client joue le geste; l'effet suit à l'instant de la frappe (`resolve_attacks`).
         strikes.0 = strikes.0.wrapping_add(1);
         commands.spawn(PendingAttack { hero: entity, timer: ATTACK_WINDUP });
@@ -559,7 +634,7 @@ fn resolve_attacks(
     mut commands: Commands,
     time: Res<Time>,
     mut pending: Query<(Entity, &mut PendingAttack)>,
-    heroes: Query<(&Position, &Facing, &HeroClass), (With<Player>, Without<Downed>)>,
+    heroes: Query<(&Position, &Facing, &HeroClass, Has<Controlled>), (With<Player>, Without<Downed>)>,
     mut targets: Query<(&Position, &mut Health, &Hurtbox), Without<Player>>,
 ) {
     for (entity, mut attack) in &mut pending {
@@ -569,9 +644,10 @@ fn resolve_attacks(
         }
         commands.entity(entity).despawn();
         // Le héros peut être tombé ou parti entre-temps: le coup est alors perdu.
-        let Ok((pos, facing, class)) = heroes.get(attack.hero) else {
+        let Ok((pos, facing, class, controlled)) = heroes.get(attack.hero) else {
             continue;
         };
+        let power = if controlled { 1.0 } else { AI_DAMAGE_FACTOR };
         match class.stats().attack {
             Attack::Melee { range, damage, .. } => {
                 for (target_pos, mut health, hurtbox) in &mut targets {
@@ -580,7 +656,7 @@ fn resolve_attacks(
                     // Cône d'environ 150° devant le héros, ou au contact.
                     let in_front = dist < 8.0 || to.normalize_or_zero().dot(facing.0) > 0.25;
                     if dist <= range + hurtbox.0 && in_front {
-                        health.current -= damage;
+                        health.current -= damage * power;
                     }
                 }
                 commands.server_trigger(ToClients {
@@ -594,7 +670,7 @@ fn resolve_attacks(
                     Projectile { class: *class, dir: facing.0 },
                     Position(pos.0 + facing.0 * 8.0),
                     Velocity(facing.0 * speed),
-                    Damage(damage),
+                    Damage(damage * power),
                     Lifetime(lifetime),
                 ));
             }
@@ -788,7 +864,7 @@ fn reap_dead(
 /// Ramasse les reliques de la quête de récupération.
 fn collect_relics(
     mut commands: Commands,
-    players: Query<&Position, (With<Player>, Without<Downed>)>,
+    players: Query<&Position, (With<Player>, With<Controlled>, Without<Downed>)>,
     relics: Query<(Entity, &Position), (With<Relic>, Without<Player>)>,
     mut quests: Query<&mut Quest>,
 ) {
@@ -808,7 +884,7 @@ fn collect_relics(
 fn rescue_captives(
     mut commands: Commands,
     time: Res<Time>,
-    players: Query<&Position, (With<Player>, Without<Downed>)>,
+    players: Query<&Position, (With<Player>, With<Controlled>, Without<Downed>)>,
     mut captives: Query<(Entity, &Position, &mut RescueHold), (With<Captive>, Without<Player>)>,
     mut quests: Query<&mut Quest>,
 ) {
@@ -856,7 +932,7 @@ fn collect_pickups(
     mut commands: Commands,
     mut players: Query<
         (&Position, &mut Health, &mut Gold, &mut Keys),
-        (With<Player>, Without<Downed>),
+        (With<Player>, With<Controlled>, Without<Downed>),
     >,
     pickups: Query<(Entity, &Position, &Pickup), Without<Player>>,
 ) {
@@ -923,28 +999,46 @@ fn revive_players(
 }
 
 /// Tous les héros à terre: la salle est réinitialisée.
+/// Toute l'équipe est à terre: retour au début du niveau, tel qu'à l'entrée (même château, monstres revenus, bourse
+/// de l'entrée).
 fn check_wipe(
     mut commands: Commands,
-    layout: Res<Layout>,
-    mut players: Query<(Entity, &mut Position, &mut Health, Has<Downed>), With<Player>>,
-    mut generators: Query<&mut Health, (With<Generator>, Without<Player>)>,
-    transient: Query<Entity, Or<(With<Monster>, With<Projectile>, With<Pickup>, With<Zone>, With<Turret>)>>,
+    mut rng: ResMut<Rng>,
+    mut session: ResMut<DialogueSession>,
+    campaign: Res<Campaign>,
+    mut players: Query<
+        (Entity, &mut Position, &mut Health, &mut Gold, &mut Keys, &PartyId, Has<Downed>),
+        With<Player>,
+    >,
+    world: Query<Entity, (With<Replicated>, Without<Player>)>,
+    triggers: Query<Entity, With<DialogueTrigger>>,
 ) {
     if players.is_empty() || !players.iter().all(|(.., downed)| downed) {
         return;
     }
-    info!("all heroes down, resetting the room");
-    for (slot, (entity, mut pos, mut health, _)) in players.iter_mut().enumerate() {
-        pos.0 = spawn_point(slot, &layout);
+    info!("all heroes down, back to the start of level {}", campaign.0.level);
+    let dungeon = generate_level(&mut commands, &mut rng, &campaign, &mut session, world.iter().chain(triggers.iter()));
+    // La n-ième équipe retrouve la bourse qu'elle portait en entrant; son premier héros la tient.
+    let mut order: Vec<u32> = players.iter().map(|(.., party, _)| party.0).collect();
+    order.sort_unstable();
+    order.dedup();
+    let mut given = Vec::new();
+    for (slot, (entity, mut pos, mut health, mut gold, mut keys, party, _)) in players.iter_mut().enumerate() {
+        pos.0 = spawn_point(slot, &dungeon.layout);
         health.current = health.max;
         commands.entity(entity).remove::<Downed>();
+        let index = order.iter().position(|p| *p == party.0).unwrap_or(0);
+        let (purse_gold, purse_keys) = if given.contains(&party.0) {
+            (0, 0)
+        } else {
+            given.push(party.0);
+            campaign.0.purses.get(index).copied().unwrap_or_default()
+        };
+        gold.0 = purse_gold;
+        keys.0 = purse_keys;
     }
-    for mut health in &mut generators {
-        health.current = health.max;
-    }
-    for entity in &transient {
-        commands.entity(entity).despawn();
-    }
+    commands.insert_resource(dungeon.room);
+    commands.insert_resource(dungeon.layout);
 }
 
 /// Point d'apparition d'un héros dans la salle de départ: quatre par rangée.
@@ -970,11 +1064,35 @@ fn random_point(room: &Room, info: &RoomInfo, margin: u32, rng: &mut Rng) -> Vec
     tile_to_world(info.center())
 }
 
-fn start_first_expedition(mut commands: Commands, mut rng: ResMut<Rng>) {
+/// Génère le niveau de la campagne, en rejouant l'état aléatoire sauvegardé à son entrée: le même château revient
+/// à chaque chargement et à chaque retour au début du niveau. `old` est l'ancien château, à effacer.
+fn generate_level(
+    commands: &mut Commands,
+    rng: &mut Rng,
+    campaign: &Campaign,
+    session: &mut DialogueSession,
+    old: impl IntoIterator<Item = Entity>,
+) -> Dungeon {
+    for entity in old {
+        commands.entity(entity).despawn();
+    }
+    *session = DialogueSession::default();
+    rng.0 = campaign.0.entry_rng;
     let seed = rng.next_u64();
     let dungeon = Dungeon::generate(seed);
-    commands.insert_resource(Level(1));
-    populate(&mut commands, &dungeon, seed, 1, true, &mut rng);
+    let first = campaign.0.level == 1 && !campaign.0.intro_done;
+    populate(commands, &dungeon, seed, campaign.0.level, first, rng);
+    dungeon
+}
+
+fn start_first_expedition(
+    mut commands: Commands,
+    mut rng: ResMut<Rng>,
+    campaign: Res<Campaign>,
+    mut session: ResMut<DialogueSession>,
+) {
+    let dungeon = generate_level(&mut commands, &mut rng, &campaign, &mut session, []);
+    commands.insert_resource(Level(campaign.0.level));
     commands.insert_resource(dungeon.room);
     commands.insert_resource(dungeon.layout);
 }
@@ -1118,47 +1236,32 @@ fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, f
     }
 }
 
-/// Un joueur demande de repartir de zéro depuis l'écran titre: nouveau château, héros ramenés au départ, or et clés
-/// remis à zéro.
-fn new_game(
-    _request: On<FromClient<NewGame>>,
-    mut commands: Commands,
-    mut rng: ResMut<Rng>,
-    mut session: ResMut<DialogueSession>,
-    mut level: ResMut<Level>,
-    mut players: Query<(Entity, &mut Position, &mut Health, &mut Gold, &mut Keys), With<Player>>,
-    world: Query<Entity, (With<Replicated>, Without<Player>)>,
-    triggers: Query<Entity, With<DialogueTrigger>>,
-) {
-    for entity in world.iter().chain(triggers.iter()) {
-        commands.entity(entity).despawn();
+/// Or et clés de chaque équipe, dans l'ordre d'arrivée des équipes.
+fn purses<'a>(heroes: impl Iterator<Item = (&'a PartyId, &'a Gold, &'a Keys)>) -> Vec<(u32, u32)> {
+    let mut by_party: std::collections::BTreeMap<u32, (u32, u32)> = Default::default();
+    for (party, gold, keys) in heroes {
+        let purse = by_party.entry(party.0).or_default();
+        purse.0 += gold.0;
+        purse.1 += keys.0;
     }
-    *session = DialogueSession::default();
-    let seed = rng.next_u64();
-    let dungeon = Dungeon::generate(seed);
-    level.0 = 1;
-    populate(&mut commands, &dungeon, seed, 1, true, &mut rng);
-    for (slot, (entity, mut pos, mut health, mut gold, mut keys)) in players.iter_mut().enumerate() {
-        pos.0 = spawn_point(slot, &dungeon.layout);
-        health.current = health.max;
-        gold.0 = 0;
-        keys.0 = 0;
-        commands.entity(entity).remove::<Downed>();
-    }
-    commands.insert_resource(dungeon.room);
-    commands.insert_resource(dungeon.layout);
+    by_party.into_values().collect()
 }
 
-/// Quand tous les héros debout sont dans le portail, un nouveau château est généré.
+/// Quand tous les héros debout sont dans le portail, l'équipe entre dans le niveau suivant: la partie est sauvegardée
+/// à cet instant, puis le château est généré.
 fn run_portal(
     mut commands: Commands,
     time: Res<Time>,
     mut rng: ResMut<Rng>,
     mut session: ResMut<DialogueSession>,
     mut level: ResMut<Level>,
+    mut campaign: ResMut<Campaign>,
     mut countdown: Local<f32>,
     portals: Query<&Position, (With<Portal>, Without<Player>)>,
-    mut players: Query<(Entity, &mut Position, &mut Health, Has<Downed>, Has<Controlled>), With<Player>>,
+    mut players: Query<
+        (Entity, &mut Position, &mut Health, &PartyId, &Gold, &Keys, Has<Downed>, Has<Controlled>),
+        With<Player>,
+    >,
     world: Query<Entity, (With<Replicated>, Without<Player>)>,
     triggers: Query<Entity, With<DialogueTrigger>>,
 ) {
@@ -1168,7 +1271,7 @@ fn run_portal(
     // Seuls les héros dirigés comptent: les compagnons sont ramenés avec eux.
     let standing: Vec<_> = players
         .iter()
-        .filter(|(_, _, _, downed, controlled)| !downed && *controlled)
+        .filter(|(.., downed, controlled)| !downed && *controlled)
         .collect();
     let all_in = !standing.is_empty()
         && standing.iter().all(|(_, p, ..)| p.0.distance(portal.0) <= PORTAL_RADIUS);
@@ -1182,15 +1285,14 @@ fn run_portal(
     }
     *countdown = 0.0;
 
-    // On efface l'ancien château (tout ce qui est répliqué sauf les héros) et on en génère un autre.
-    for entity in world.iter().chain(triggers.iter()) {
-        commands.entity(entity).despawn();
-    }
-    *session = DialogueSession::default();
-    let seed = rng.next_u64();
-    let dungeon = Dungeon::generate(seed);
-    level.0 += 1;
-    populate(&mut commands, &dungeon, seed, level.0, false, &mut rng);
+    // Entrée dans le niveau suivant: c'est ici que la partie est sauvegardée.
+    campaign.0.level += 1;
+    campaign.0.entry_rng = rng.0;
+    campaign.0.purses = purses(players.iter().map(|(_, _, _, party, gold, keys, ..)| (party, gold, keys)));
+    campaign.write();
+    level.0 = campaign.0.level;
+
+    let dungeon = generate_level(&mut commands, &mut rng, &campaign, &mut session, world.iter().chain(triggers.iter()));
     for (slot, (entity, mut pos, mut health, ..)) in players.iter_mut().enumerate() {
         pos.0 = spawn_point(slot, &dungeon.layout);
         health.current = health.max;
@@ -1567,7 +1669,15 @@ fn dialogue_vote(vote: On<FromClient<DialogueVote>>, mut session: ResMut<Dialogu
     }
 }
 
-fn dialogue_finished(_done: On<FromClient<DialogueFinished>>, mut session: ResMut<DialogueSession>) {
+fn dialogue_finished(
+    _done: On<FromClient<DialogueFinished>>,
+    mut session: ResMut<DialogueSession>,
+    mut campaign: ResMut<Campaign>,
+) {
+    if session.active.as_deref() == Some("intro") && !campaign.0.intro_done {
+        campaign.0.intro_done = true;
+        campaign.write();
+    }
     *session = DialogueSession::default();
 }
 
@@ -1633,7 +1743,7 @@ fn hero_ai(
     >,
     leaders: Query<(&PartyId, &Position), (With<Controlled>, Without<Downed>)>,
     downed: Query<(&PartyId, &Position), (With<Player>, With<Downed>)>,
-    enemies: Query<&Position, (With<Hurtbox>, Without<Player>)>,
+    enemies: Query<&Position, (With<Monster>, Without<Player>)>,
 ) {
     let dt = time.delta_secs();
     let solids: Vec<_> = doors.iter().map(|(p, s)| (p.0, s.0)).collect();

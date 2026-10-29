@@ -4,7 +4,7 @@ use bevy::{color::palettes::css, prelude::*};
 use castle_shared::Expedition;
 
 use crate::i18n::Tr;
-use crate::title::TitleActive;
+use crate::title::{ReturnToTitle, TitleActive};
 use crate::ui::ui_font;
 
 /// Secondes d'affichage plein, puis de fondu vers le jeu.
@@ -29,6 +29,7 @@ pub struct LevelIntroPlugin;
 impl Plugin for LevelIntroPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LevelIntro>()
+            .add_observer(reset_intro)
             .add_systems(Update, (queue_intro, start_intro, run_intro).chain());
     }
 }
@@ -121,5 +122,13 @@ fn run_intro(
     }
     if *elapsed >= HOLD + FADE {
         intro.elapsed = None;
+    }
+}
+
+/// Retour à l'écran titre: plus d'annonce en cours ni en attente.
+fn reset_intro(_: On<ReturnToTitle>, mut commands: Commands, mut intro: ResMut<LevelIntro>, screens: Query<Entity, With<IntroScreen>>) {
+    *intro = LevelIntro::default();
+    for screen in &screens {
+        commands.entity(screen).despawn();
     }
 }

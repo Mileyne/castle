@@ -1,15 +1,18 @@
-//! Lancement unique: le client démarre lui-même le serveur local, et l'arrête à sa fermeture.
+//! Lancement du serveur local: le client démarre lui-même le serveur d'une partie, et l'arrête à sa fermeture.
 //!
 //! Le serveur reste un programme à part (`castle_server`, placé à côté du client), prêt à servir un jour de serveur
-//! autonome. Le client ne le lance que si aucune adresse n'est donnée et si personne n'écoute déjà sur le port.
+//! autonome. Solo et coopératif utilisent le même programme: seul le mode change, et avec lui l'ouverture au réseau.
 
-use std::net::UdpSocket;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::process::{Child, Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use bevy::prelude::*;
 use castle_shared::DEFAULT_PORT;
+use castle_shared::save::GameMode;
 
-/// Le serveur lancé par ce client: il est arrêté quand le client se ferme.
+/// Le serveur lancé par ce client: il est arrêté quand le client se ferme (ou quand la ressource disparaît).
+#[derive(Resource)]
 pub struct LocalServer(Child);
 
 impl Drop for LocalServer {
@@ -19,30 +22,54 @@ impl Drop for LocalServer {
     }
 }
 
-/// Démarre le serveur local si nécessaire. `None` si on se connecte à un autre serveur, si un serveur tourne déjà
-/// sur ce port, ou si le programme serveur est introuvable.
-pub fn start_local_server() -> Option<LocalServer> {
-    // Une adresse explicite désigne un serveur distant.
-    if std::env::args().skip(1).any(|a| !a.starts_with("--")) || std::env::args().any(|a| a == "--no-server") {
-        return None;
+/// Laisse au serveur le temps d'ouvrir son port avant que le client ne s'y connecte.
+const SERVER_STARTUP: Duration = Duration::from_millis(1500);
+
+/// Connexion à ouvrir dès que `at` est passé.
+#[derive(Resource)]
+pub struct ConnectAt {
+    pub addr: SocketAddr,
+    pub at: Instant,
+}
+
+impl ConnectAt {
+    pub fn now(addr: SocketAddr) -> Self {
+        Self { addr, at: Instant::now() }
     }
-    // Port déjà pris: un serveur tourne déjà, on s'y connecte.
+
+    pub fn after_server_start(addr: SocketAddr) -> Self {
+        Self { addr, at: Instant::now() + SERVER_STARTUP }
+    }
+}
+
+/// Démarre le serveur de la partie `save`. L'erreur est la clé du message à afficher.
+pub fn start_local_server(mode: GameMode, save: &str) -> Result<LocalServer, &'static str> {
+    // Port déjà pris: un autre serveur (ou une autre partie) tourne déjà.
     if UdpSocket::bind(("0.0.0.0", DEFAULT_PORT)).is_err() {
-        return None;
+        return Err("menu-port-busy");
     }
     let name = if cfg!(windows) { "castle_server.exe" } else { "castle_server" };
-    let path = std::env::current_exe().ok()?.with_file_name(name);
-    let child = match Command::new(&path)
+    let path = std::env::current_exe().map_err(|_| "menu-server-missing")?.with_file_name(name);
+    Command::new(&path)
+        .args(["--mode", mode.arg(), "--save", save])
         .env("CASTLE_EMBEDDED", "1")
         // Le serveur s'arrête quand ce tube se ferme, même si le client est tué sans fermeture propre.
-        .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
-        Ok(child) => child,
-        Err(err) => {
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(LocalServer)
+        .map_err(|err| {
             eprintln!("serveur local introuvable ({}): {err}", path.display());
-            return None;
-        }
-    };
-    // Laisse au serveur le temps d'ouvrir son port avant que le client ne se connecte.
-    std::thread::sleep(Duration::from_millis(1500));
-    Some(LocalServer(child))
+            "menu-server-missing"
+        })
+}
+
+/// Adresse de cette machine sur le réseau local, à donner aux autres joueurs. Aucun paquet n'est envoyé: on
+/// demande seulement au système par quelle interface il sortirait.
+pub fn lan_address() -> Option<SocketAddr> {
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
+    let ip: IpAddr = socket.local_addr().ok()?.ip();
+    Some(SocketAddr::new(ip, DEFAULT_PORT))
 }

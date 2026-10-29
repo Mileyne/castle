@@ -3,6 +3,7 @@
 use bevy::{ecs::entity::MapEntities, prelude::*};
 
 mod dungeon;
+pub mod save;
 pub use dungeon::*;
 use bevy_replicon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -586,9 +587,9 @@ pub struct DialogueFinished;
 #[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct ScreenShake(pub f32);
 
-/// Le joueur choisit sur l'écran titre de repartir de zéro: le serveur génère un nouveau château.
+/// Le joueur ouvre ou ferme le menu de pause. Le serveur ne s'arrête que pour une partie solo.
 #[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct NewGame;
+pub struct SetPause(pub bool);
 
 /// Le joueur prend le contrôle du héros de cette classe dans son équipe.
 #[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
@@ -649,7 +650,7 @@ impl Plugin for CastleSharedPlugin {
             .add_client_event::<DialogueFinished>(Channel::Ordered)
             .add_client_event::<PlayerInput>(Channel::Unordered)
             .add_client_event::<SwitchHero>(Channel::Ordered)
-            .add_client_event::<NewGame>(Channel::Ordered);
+            .add_client_event::<SetPause>(Channel::Ordered);
     }
 }
 
