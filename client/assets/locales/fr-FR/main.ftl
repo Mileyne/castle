@@ -19,7 +19,7 @@ hud-gold = Or
 hud-keys = Clés
 
 # Dialogues: interface
-dialogue-continue = Entrée : continuer
+dialogue-continue = Entrée : continuer (maintenir : tout passer)
 dialogue-vote = 1-4 : voter
 dialogue-waiting = En attente des autres joueurs
 
@@ -40,11 +40,21 @@ dlg-intro_06 = Bienvenue, petits héros.
 dlg-intro_07 = Vous avez entendu ça aussi ?
 
 # Dialogues: la porte royale
-dlg-royal_door_01 = La porte royale. Elle ne cédera pas par la seule force.
-dlg-royal_door_02 = Il y a un mécanisme secret quelque part. Un levier caché, sûrement. Je le trouverai.
-dlg-royal_door_03 = Je sens une rune de scellement dans la salle du haut. Je peux la dissiper.
-dlg-royal_door_04 = Et le mécanisme du bas est rouillé. Rien qu'un marteau ne puisse réparer !
-dlg-royal_door_05 = Alors chacun sa part. Je pousserai la porte quand tout sera prêt.
+dlg-royal_door_01 = La porte royale. Impossible de m'en approcher : un enchantement me repousse.
+dlg-royal_door_02 = Une garde violette. Je peux la dissiper, mais il me faut trois ingrédients. Ils doivent traîner dans le château.
+dlg-royal_door_03 = Et ce mécanisme orange est complètement grippé ! Il me faut une pièce de rechange.
+dlg-royal_door_04 = Cette herse, c'est pour moi : il faut toucher une cible d'une flèche. Reste à trouver le disque de la cible.
+dlg-royal_door_05 = Bien. Chacun sa couleur : violet pour l'Ensorceleur, orange pour le Forgebraise, vert pour le Rôdeur.
+dlg-royal_door_06 = Quant à la porte, elle est d'acier. Il y faudra de la force et du courage. Ce sera pour moi.
+dlg-puzzle_rune_01 = Un cercle de runes violettes. Trois logements vides : il me faut trois ingrédients.
+dlg-puzzle_rune_02 = Des cristaux violets, sans doute. Trouvons-les, et je dissiperai la garde ici même.
+dlg-puzzle_rune_03 = Rapportes-en trois. Nous te couvrirons.
+dlg-puzzle_gears_01 = Un mécanisme grippé ! Une barre tordue bloque les rouages orange.
+dlg-puzzle_gears_02 = Avec la pièce de rechange, orange elle aussi, je le remets en marche. Elle traîne quelque part.
+dlg-puzzle_gears_03 = Je la signalerai si je la vois. Ne t'énerve pas sur la rouille.
+dlg-puzzle_target_01 = Un support vide, tout vert. Il y manque le disque de la cible.
+dlg-puzzle_target_02 = Une fois le disque fixé, il faudra le toucher d'une flèche : c'est ce qui lève la herse.
+dlg-puzzle_target_03 = Une flèche, hein. Pas un sort. Sois précis.
 
 # Dialogues: l'alcôve verrouillée
 dlg-alcove_01 = Une alcôve verrouillée. Je pourrais la faire sauter.
@@ -90,3 +100,7 @@ pause-resume = Reprendre
 pause-quit = Abandonner et revenir au menu
 pause-warning = La progression du niveau en cours est perdue
 pause-host-warning = Les autres joueurs seront déconnectés
+puzzle-ingredients = Ingrédients
+puzzle-gear = Pièce
+puzzle-target = Cible
+dialogue-skipping = Maintenez Entrée pour tout passer...

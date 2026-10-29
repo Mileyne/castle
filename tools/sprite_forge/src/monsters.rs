@@ -19,12 +19,16 @@ const SOUL: u32 = 0x9a70ff;
 pub enum Monster {
     Skeleton,
     Bat,
+    Goblin,
+    Orc,
+    Ghoul,
 }
 
-pub const MONSTERS: [Monster; 2] = [Monster::Skeleton, Monster::Bat];
+/// Ordre des lignes dans la planche (le client utilise les mêmes indices).
+pub const MONSTERS: [Monster; 5] = [Monster::Skeleton, Monster::Bat, Monster::Goblin, Monster::Orc, Monster::Ghoul];
 
 pub(crate) fn skeleton_dims() -> Dims {
-    Dims {
+    let dims = Dims {
         thigh: 0.4,
         shin: 0.4,
         torso: 0.42,
@@ -38,7 +42,8 @@ pub(crate) fn skeleton_dims() -> Dims {
         arm_r: 0.035,
         torso_rx: 0.16,
         torso_rz: 0.11,
-    }
+    };
+    dims.tweak(&crate::tuning::monster_key(Monster::Skeleton))
 }
 
 pub(crate) fn skeleton(pose: Pose) -> Vec<Part> {
@@ -154,15 +159,20 @@ pub(crate) fn bat(pose: Pose) -> Vec<Part> {
 }
 
 pub fn build(monster: Monster, pose: Pose, theme: Theme) -> Vec<Part> {
-    match theme {
+    let mut parts = match theme {
         Theme::Manga | Theme::Medieval => build_manga(monster, pose),
         Theme::Gore => crate::monsters_gore::build(monster, pose),
-    }
+    };
+    crate::tuning::apply(&crate::tuning::monster_key(monster), &mut parts);
+    parts
 }
 
 pub(crate) fn build_manga(monster: Monster, pose: Pose) -> Vec<Part> {
     match monster {
         Monster::Skeleton => skeleton(pose),
         Monster::Bat => bat(pose),
+        Monster::Goblin => crate::monsters_more::goblin(pose),
+        Monster::Orc => crate::monsters_more::orc(pose),
+        Monster::Ghoul => crate::monsters_more::ghoul(pose),
     }
 }

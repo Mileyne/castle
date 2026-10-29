@@ -19,6 +19,8 @@ pub const HERO_ATTACK_FRAMES: usize = 6;
 /// Images par ligne pour les héros (repos, marche, attaque) et pour les ennemis (repos, marche).
 const HERO_FRAMES: usize = HERO_IDLE_FRAMES + HERO_WALK_FRAMES + HERO_ATTACK_FRAMES;
 const MONSTER_FRAMES: usize = HERO_IDLE_FRAMES + HERO_WALK_FRAMES;
+/// Une ligne par monstre et par direction (cinq monstres, huit directions).
+const MONSTER_ROWS: u32 = 5 * 8;
 /// Durée du geste d'une attaque, en secondes (la frappe tombe vers 60 % du geste).
 const ATTACK_DURATION: f32 = 0.38;
 const HERO_CELL: u32 = 96;
@@ -138,15 +140,25 @@ pub mod object {
     pub const COIN: usize = 2;
     pub const FOOD: usize = 3;
     pub const KEY: usize = 4;
-    pub const LEVER: usize = 5;
+    // Les lignes 5 (levier) et 7 (mécanisme) de la planche sont des objets au sol que l'énigme n'utilise plus.
     pub const RUNE: usize = 6;
-    pub const MECHANISM: usize = 7;
     pub const TRAP_ARMED: usize = 8;
     pub const TRAP_OFF: usize = 9;
     pub const DOOR_LOCKED: usize = 10;
     pub const DOOR_ROYAL: usize = 11;
     pub const DOOR_ROYAL_EMBLEM: usize = 12;
     pub const PORTAL: usize = 13;
+    pub const POTION: usize = 14;
+    pub const WALL_RUNE: usize = 15;
+    pub const WALL_GEARS_JAMMED: usize = 16;
+    pub const WALL_GEARS_FIXED: usize = 17;
+    pub const WALL_TARGET_EMPTY: usize = 18;
+    pub const WALL_TARGET_MOUNTED: usize = 19;
+    pub const WALL_TARGET_HIT: usize = 20;
+    pub const PORTCULLIS: usize = 21;
+    pub const INGREDIENT: usize = 22;
+    pub const GEAR_PART: usize = 23;
+    pub const TARGET_DISC: usize = 24;
 }
 
 /// Cases de la planche de projectiles (dessinés vers la droite, orientés par le jeu).
@@ -192,6 +204,9 @@ pub fn monster_index(kind: MonsterKind, direction: usize, frame: usize) -> usize
     let row = match kind {
         MonsterKind::Skeleton => 0,
         MonsterKind::Bat => 1,
+        MonsterKind::Goblin => 2,
+        MonsterKind::Orc => 3,
+        MonsterKind::Ghoul => 4,
     };
     (row * 8 + direction) * MONSTER_FRAMES + frame
 }
@@ -203,6 +218,9 @@ pub fn object_index(row: usize, frame: usize) -> usize {
 
 /// Les objets et les ennemis posent leur point d'origine au sol, vers le bas de la case.
 pub const PROP_ANCHOR: Anchor = Anchor(Vec2::new(0.0, -0.417));
+
+/// Les panneaux de mur sont dessinés centrés dans leur case (vus de face), pas posés au sol.
+pub const WALL_ANCHOR: Anchor = Anchor(Vec2::ZERO);
 
 /// Ligne d'objet affichée par une entité: l'animation (impulsions, rotation) choisit l'image.
 #[derive(Component)]
@@ -248,8 +266,8 @@ fn load_set(assets: &AssetServer, layouts: &mut Assets<TextureAtlasLayout>, them
             atlas("tiles_blur3.png", TILE_COLUMNS as u32, 6, TILE_CELL, false),
         ],
         heroes: atlas("heroes.png", HERO_FRAMES as u32, 32, HERO_CELL, true),
-        monsters: atlas("monsters.png", MONSTER_FRAMES as u32, 16, HERO_CELL, true),
-        objects: atlas("objects.png", PROP_FRAMES as u32, 14, HERO_CELL, true),
+        monsters: atlas("monsters.png", MONSTER_FRAMES as u32, MONSTER_ROWS, HERO_CELL, true),
+        objects: atlas("objects.png", PROP_FRAMES as u32, 25, HERO_CELL, true),
         projectiles: atlas("projectiles.png", 4, 1, 64, true),
         fx: atlas("fx.png", 2, 1, 96, true),
         decals: atlas("decals.png", 13, 1, 128, true),
@@ -715,5 +733,27 @@ fn spawn_decals(commands: &mut Commands, art: &Art, dungeon: &Dungeon, region_ro
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_monster_has_its_own_rows_inside_the_sheet() {
+        let kinds = [MonsterKind::Skeleton, MonsterKind::Bat, MonsterKind::Goblin, MonsterKind::Orc, MonsterKind::Ghoul];
+        let mut seen = std::collections::HashSet::new();
+        for kind in kinds {
+            for direction in 0..8 {
+                for frame in 0..MONSTER_FRAMES {
+                    let index = monster_index(kind, direction, frame);
+                    assert!(index < MONSTER_ROWS as usize * MONSTER_FRAMES, "{kind:?} hors de la planche");
+                    assert!(seen.insert(index), "case en double pour {kind:?}");
+                }
+            }
+        }
+        // La planche est entièrement utilisée: autant de lignes que de monstres et de directions.
+        assert_eq!(seen.len(), MONSTER_ROWS as usize * MONSTER_FRAMES);
     }
 }

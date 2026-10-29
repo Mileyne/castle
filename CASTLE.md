@@ -66,7 +66,7 @@ Chaque personnage doit être immédiatement identifiable à l'écran et utile en
 - **Caractère :** curieuse, sarcastique, ambitieuse, fascinée par le château.
 - **Attaque principale :** projectiles magiques.
 - **Pouvoir spécial : Tempête Arcane** — explosion de magie touchant toute une zone.
-- **Passifs :** détecte les secrets, révèle les pièges magiques, régénération lente de mana.
+- **Passifs :** détecte les secrets, régénération lente de mana.
 - **Évolutions :** Sorcière runique, Archimage, Tempête vivante.
 
 ### 3. Le Rôdeur — Distance / exploration
@@ -190,6 +190,7 @@ Objectif: 2 à 4 joueurs se déplacent dans une même salle.
 - [x] Animation de passage entre les modes (F2): sang qui coule en bandes vers le mode sanglant, éclat clair vers le mode manga, échange des sprites au plus fort et petit à-coup
 - [x] Tremblement d'écran léger (environ une seconde), signalé par le serveur: générateur détruit, étape d'énigme résolue, porte royale qui cède, porte à clé ouverte
 - [x] Zoom d'ambiance: la caméra se rapproche en douceur (x1,4) quand le héros dirigé est dans un passage étroit entre deux salles
+- [x] Zoom d'équipe: quand les quatre héros sont groupés, la caméra se rapproche jusqu'à les cadrer tous (jusqu'à x2,2 en plus de l'échelle de base) et se centre sur le groupe; dès qu'ils s'éloignent trop pour tenir dans la vue, elle revient en douceur. Constantes `TEAM_ZOOM_MAX`, `TEAM_MARGIN` dans `client/src/camera.rs`
 
 ### Phase 2 — Combat de base
 Objectif: tuer des monstres à plusieurs.
@@ -206,14 +207,23 @@ Objectif: les personnages parlent, dans la langue de chaque joueur.
 - [x] Dialogues partagés: tous les joueurs voient la même scène, chacun dans sa langue
 - [x] Règle de vote ou de décision quand un choix engage le groupe
 - [ ] Répliques de caractère propres à chaque héros (réactions, remarques entre eux)
-- [ ] Outil de vérification: clés manquantes dans une langue, textes trop longs
+- [ ] Outil de vérification: textes trop longs pour l'interface
 
 ### Phase 3 — Pouvoirs et coopération
 Objectif: les classes ont chacune un rôle.
 - [x] Pouvoirs spéciaux: Rempart, Tempête Arcane, Pluie de Flèches, Tourelle (touche E)
 - [x] Mana et temps de recharge
-- [x] Passifs (détection de secrets et de pièges par l'Ensorceleur et le Rôdeur, désamorçage par le Rôdeur, porte royale poussée par le Chevalier; portes à clé)
-- [x] Premier puzzle coopératif: la porte royale (levier caché, rune, mécanisme, puis poussée)
+- [x] Passifs (détection des leviers et mécanismes cachés par l'Ensorceleur et le Rôdeur, désamorçage des pièges par le Rôdeur, porte royale poussée par le Chevalier; portes à clé)
+- [x] Pièges toujours visibles: endormis (pointes rentrées) tant que personne n'est à moins de 56 px, ils se réveillent (pointes sorties, 12 dégâts à qui marche dessus) à l'approche d'un héros debout et se rendorment 1,2 s après son départ. Le Rôdeur peut les désarmer pour de bon en maintenant l'action; ils restent alors visibles et inoffensifs
+- [x] Puzzle coopératif de la **porte royale**, refondu: trois obstacles posés comme des **panneaux dans le mur** de l'antichambre (jamais au sol), chacun **dans la couleur de la classe qui doit le débloquer**, plus la porte elle-même:
+  - **Violet, Ensorceleur**: un enchantement repousse tout héros à moins de 72 px de la porte. Il faut trouver **3 ingrédients** (cristaux violets, dispersés dans le château) et les verser dans le panneau de runes (maintenir F 1,5 s) pour dissiper la garde
+  - **Orange, Forgebraise**: un mécanisme grippé (barre tordue, rouille). Il faut trouver la **pièce de rechange** (engrenage orange) puis la monter (maintenir F 2,5 s); les rouages tournent ensuite
+  - **Vert, Rôdeur**: une herse barre le couloir devant la porte. Il faut trouver le **disque de cible** (vert), le fixer au support vide (maintenir F 0,8 s), puis le **toucher d'une flèche** du Rôdeur (un sort ne compte pas): la herse se lève
+  - **Acier bleu, Chevalier**: une fois les trois levés, il pousse la porte (maintenir F 3 s, force et courage)
+  Les pièces trouvées forment une réserve commune à l'équipe, affichée sous l'objectif (ingrédients, pièce, cible, en violet, orange et vert; « OK » une fois l'obstacle vaincu). Dialogues: la porte annonce les trois obstacles et les couleurs, chaque panneau a sa propre scène. Option de développement `CASTLE_DEBUG_START=royal` pour apparaître dans l'antichambre
+- [x] Les dialogues non terminés sont **purgés à chaque changement de niveau et à chaque retour au début du niveau** (le serveur le signale à tous les clients, et chaque client le refait de son côté dès qu'un nouveau château arrive), ainsi qu'après 90 s sans activité: plus de scène fantôme qui reparaît bloquée au niveau suivant
+- [x] Dialogues: **maintenir Entrée 0,7 s purge** la scène en cours et celles qui allaient démarrer (un héros dans leur zone); pour tous les joueurs, une introduction purgée n'est plus rejouée
+- [x] Outil de vérification des textes: des tests contrôlent que chaque réplique existe en français et en anglais, sans clé orpheline, et que chaque scène lancée par le serveur existe dans le script
 
 ### Phase 4 — Le château procédural
 Objectif: une expédition complète et rejouable.
@@ -225,6 +235,9 @@ Objectif: une expédition complète et rejouable.
 ### Phase 5 — Quêtes et boss
 Objectif: de vrais objectifs de mission.
 - [x] Système de quêtes (première version): un objectif par niveau, en rotation chasse (6 monstres, +2 tous les 3 niveaux) → récupération (3 reliques) → sauvetage (2 prisonniers, à rester près d'eux 1,2 s). Entité répliquée `Quest`, affichée en haut de l'écran; le portail de sortie n'apparaît qu'une fois l'objectif rempli (secousse d'écran). Si plus aucun monstre ni générateur ne subsiste, la chasse est réputée accomplie. Sprites des reliques et prisonniers provisoires. À venir: défense, expédition longue
+- [x] Trois monstres de plus: le **gobelin** (petit, vif, fragile: 18 PV), l'**orque** (massif, lent, hache: 70 PV, 14 dégâts) et la **goule** (décharnée, rapide: 40 PV). Ils apparaissent progressivement via les générateurs (`MonsterKind::spawn_table`): gobelin dès le niveau 1, goule au niveau 2, orque au niveau 3. Sprites générés par `sprite_forge` (`monsters_more.rs`), éditables dans l'éditeur d'art
+- [x] Équilibrage de la difficulté: PV des héros augmentés d'environ 75 % (Chevalier 260, Ensorceleur 150, Rôdeur 180, Forgebraise 200); beaucoup plus d'ennemis: 2 à 6 monstres posés d'avance dans chaque salle de combat (selon le niveau), 2 à 3 générateurs par salle au lieu de 1 à 2, apparition toutes les 2,2 s au lieu de 3,5 s, et jusqu'à 28 monstres vivants au lieu de 12
+- [x] **Potion de régénération**: 2 à 5 par niveau (salles de combat, plus une dans la salle au trésor) et 4 % de chance sur un monstre tué. Seul le héros dirigé la ramasse; elle rend 6 % des PV maximum par seconde pendant 8 s à tous les héros de son équipe (pas aux héros à terre), qui pulsent en vert pendant l'effet
 - [ ] Les 4 boss avec leurs mécaniques
 - [ ] Artefacts légendaires
 - [ ] Récompenses de fin de mission
@@ -237,6 +250,14 @@ Objectif: de vrais objectifs de mission.
 - [ ] Les équipes retrouvent leur bourse dans l'ordre d'arrivée; une identité de joueur persistante (UUID) sera nécessaire dès qu'il y aura de l'XP par héros
 - [x] Menu de pause (Échap): reprendre, ou abandonner le niveau et revenir au menu principal (la progression depuis l'entrée du niveau est perdue). En solo le serveur est figé pendant la pause; en coopératif non, et l'hôte qui quitte déconnecte les autres
 - [ ] Sauvegarde en cours de niveau, reconnexion après coupure
+
+### Éditeur d'art (`./edit.sh`, outil `tools/sprite_editor`, egui)
+- [x] **Tuiles**: peinture pixel (crayon, gomme qui rend l'original, pipette, remplissage, pinceau, symétrie, annuler/rétablir, grille des tuiles, aperçu en répétition) sur chaque groupe de tuiles de chaque région. Seules les tuiles modifiées sont enregistrées, en PNG de 48x48 dans `tools/sprite_forge/art_overrides/<thème>/tiles/`, et recouvrent la tuile générée (et ses versions floutées): relancer `sprite_forge` ne les écrase jamais
+- [x] **Sprites** (héros, monstres, objets): taille du modèle; pour les héros et le squelette, proportions du corps (13 mesures); pour les héros médiévaux, traits du visage (yeux, sourcils, nez, bouche, mâchoire, oreilles, barbe, rides, lunettes); pour chaque matière (toutes les parties d'une même couleur d'origine): couleur, taille, brillance, lueur, avec surlignage en magenta. Aperçu en direct dans les 8 directions et les animations de repos, de marche et d'attaque. Réglages dans `art_overrides/<thème>/models.ron`, appliqués par-dessus le code des modèles
+- [x] « Appliquer au jeu » enregistre puis régénère les planches du thème dans `client/assets/art/` (environ 4 secondes); relancer le jeu pour les voir. Sans retouche ni réglage, la génération reste identique à l'octet près
+- [x] Couvre-chef amovible pour les quatre héros (bassinet du Chevalier, chapeau de l'Ensorceleur, chapeau de feutre à plume du Rôdeur, casque du Forgebraise; style médiéval), et zoom de l'aperçu des sprites: jusqu'à x32, Ctrl+molette ou pincement centré sur le curseur, glisser pour se déplacer, rendu détaillé x2 ou x4, raccourcis « Tout voir » et « Tête »; options `--modele <clé>` et `--tete`
+- [ ] Couvre-chefs amovibles des styles manga et sanglant
+- [ ] Éditeur de volumes complet (déplacer, ajouter ou supprimer chaque sphère, capsule ou cône); visage des héros des styles manga et sanglant; retouche des objets au pixel près
 
 ### Phase 6 — Progression
 - [ ] Niveaux, XP, évolutions de classe (3 par héros)

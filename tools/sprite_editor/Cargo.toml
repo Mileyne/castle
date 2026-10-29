@@ -1,0 +1,9 @@
+[package]
+name = "sprite_editor"
+version = "0.1.0"
+edition = "2024"
+description = "Éditeur d'art de Castle: retouche des tuiles et réglage des modèles de sprites, avec aperçu en direct"
+
+[dependencies]
+eframe = "0.37.0"
+sprite_forge = { path = "../sprite_forge" }

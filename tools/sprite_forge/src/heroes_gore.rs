@@ -20,12 +20,13 @@ const IRON: u32 = 0x585c68;
 const THREAD: u32 = 0x1c1418;
 
 pub(crate) fn dims(class: Class) -> Dims {
-    match class {
+    let dims = match class {
         Class::Knight => Dims { thigh: 0.36, shin: 0.36, torso: 0.45, hip_x: 0.1, shoulder_x: 0.22, upper: 0.3, fore: 0.3, head_r: 0.4, head_rise: 0.1, leg_r: 0.06, arm_r: 0.05, torso_rx: 0.2, torso_rz: 0.14 },
         Class::Sorcerer => Dims { thigh: 0.36, shin: 0.36, torso: 0.44, hip_x: 0.09, shoulder_x: 0.19, upper: 0.32, fore: 0.32, head_r: 0.4, head_rise: 0.1, leg_r: 0.05, arm_r: 0.045, torso_rx: 0.17, torso_rz: 0.12 },
         Class::Ranger => Dims { thigh: 0.38, shin: 0.38, torso: 0.45, hip_x: 0.1, shoulder_x: 0.21, upper: 0.32, fore: 0.32, head_r: 0.38, head_rise: 0.1, leg_r: 0.055, arm_r: 0.05, torso_rx: 0.19, torso_rz: 0.13 },
         Class::Forgebraise => Dims { thigh: 0.28, shin: 0.28, torso: 0.42, hip_x: 0.14, shoulder_x: 0.33, upper: 0.26, fore: 0.26, head_r: 0.43, head_rise: 0.08, leg_r: 0.09, arm_r: 0.085, torso_rx: 0.34, torso_rz: 0.26 },
-    }
+    };
+    dims.tweak(&crate::tuning::hero_key(class))
 }
 
 /// Visage loufoque: yeux dépareillés (un énorme, un minuscule), paupières tombantes, cernes, grosse bouche

@@ -38,9 +38,9 @@ const REVIVE_TIME: f32 = 1.5;
 const GENERATOR_HEALTH: f32 = 40.0;
 /// Un générateur ne produit que si un héros est à moins de cette distance.
 const GENERATOR_ACTIVATION: f32 = 220.0;
-const GENERATOR_INTERVAL: f32 = 3.5;
+const GENERATOR_INTERVAL: f32 = 2.2;
 /// Nombre maximal de monstres vivants dans la salle.
-const MAX_MONSTERS: usize = 12;
+const MAX_MONSTERS: usize = 28;
 /// Le portail s'active quand tous les héros debout sont dans ce rayon, pendant ce délai.
 const PORTAL_RADIUS: f32 = 36.0;
 const PORTAL_DELAY: f32 = 1.5;
@@ -71,6 +71,23 @@ const TRAP_DAMAGE: f32 = 12.0;
 const TRAP_COOLDOWN: f32 = 1.0;
 const TRAP_TRIGGER_RADIUS: f32 = 8.0;
 const TRAP_DISARM_TIME: f32 = 0.6;
+/// Enchantement de la porte royale: vitesse à laquelle il repousse un héros trop proche.
+const WARD_PUSH_SPEED: f32 = 130.0;
+/// Une flèche du Rôdeur qui passe à moins de cette distance de la cible fixée la touche.
+const TARGET_HIT_RADIUS: f32 = 14.0;
+
+/// Un piège dort, pointes rentrées, tant que personne n'est proche: un héros à moins de `TRAP_WAKE_RADIUS` le réveille
+/// (pointes sorties), et il se rendort `TRAP_SLEEP_DELAY` secondes après le départ du dernier héros.
+const TRAP_WAKE_RADIUS: f32 = 56.0;
+const TRAP_SLEEP_DELAY: f32 = 1.2;
+
+/// Temps écoulé depuis qu'un héros était proche d'un piège réveillé.
+#[derive(Component, Default)]
+struct TrapIdle(f32);
+
+/// Piège désarmé pour de bon par le Rôdeur: il ne se réveille plus.
+#[derive(Component)]
+struct Disarmed;
 /// Une porte à clé s'ouvre quand un héros muni d'une clé s'en approche à moins de cette distance.
 const DOOR_OPEN_RANGE: f32 = 16.0;
 
@@ -81,6 +98,25 @@ const DIALOGUE_IDLE_TIMEOUT: f32 = 90.0;
 
 const PICKUP_RANGE: f32 = 10.0;
 const FOOD_HEAL: f32 = 25.0;
+
+/// Potion de régénération: durée de l'effet et part des PV maximum rendue chaque seconde, pour tous les héros de l'équipe.
+const POTION_DURATION: f32 = 8.0;
+const POTION_HEAL_PER_SECOND: f32 = 0.06;
+/// Nombre de potions posées dans un niveau, et chance qu'un monstre en laisse une en mourant.
+const POTION_DROP_CHANCE: f32 = 0.04;
+
+/// Régénération en cours sur un héros: secondes restantes.
+#[derive(Component)]
+struct Regen(f32);
+
+fn potions_in_level(level: u32) -> u32 {
+    2 + level.min(9) / 3
+}
+
+/// Monstres posés d'avance dans chaque salle de combat, en plus de ceux des générateurs.
+fn monsters_per_room(level: u32) -> u32 {
+    (2 + level / 2).min(6)
+}
 
 /// Direction demandée par le joueur, jamais répliquée.
 #[derive(Component, Default)]
@@ -287,11 +323,13 @@ fn main() {
                     run_dialogue_triggers,
                     tick_dialogue,
                     run_interactions,
+                    run_ward,
                     run_traps,
                     open_locked_doors,
                     monster_ai,
                     reap_dead,
                     collect_pickups,
+                    run_regen,
                     collect_relics,
                     rescue_captives,
                     open_portal,
@@ -311,6 +349,7 @@ fn main() {
         .add_observer(set_pause)
         .add_observer(apply_input)
         .add_observer(dialogue_advance)
+        .add_observer(dialogue_skip)
         .add_observer(dialogue_vote)
         .add_observer(dialogue_finished)
         .run();
@@ -683,17 +722,37 @@ fn move_projectiles(
     time: Res<Time>,
     room: Res<Room>,
     mut projectiles: Query<
-        (Entity, &mut Position, &Velocity, &Damage, &mut Lifetime),
+        (Entity, &mut Position, &Velocity, &Damage, &mut Lifetime, &Projectile),
         With<Projectile>,
     >,
     mut targets: Query<
         (&Position, &mut Health, &Hurtbox),
         (Without<Player>, Without<Projectile>),
     >,
+    mut panels: Query<(&Position, &mut Interactable), Without<Projectile>>,
+    portcullises: Query<Entity, With<Portcullis>>,
 ) {
-    for (entity, mut pos, velocity, damage, mut lifetime) in &mut projectiles {
+    for (entity, mut pos, velocity, damage, mut lifetime, shot) in &mut projectiles {
         let next = pos.0 + velocity.0 * time.delta_secs();
         lifetime.0 -= time.delta_secs();
+        // Une flèche du Rôdeur qui touche la cible garnie lève la herse. Le test précède celui du mur: la cible est
+        // dans le mur, la flèche s'y arrête.
+        if shot.class == HeroClass::Ranger {
+            let hit = panels.iter_mut().find(|(p, t)| {
+                t.kind == InteractKind::Target && t.mounted && !t.done && p.0.distance(next) <= TARGET_HIT_RADIUS
+            });
+            if let Some((_, mut target)) = hit {
+                target.done = true;
+                target.progress = 1.0;
+                commands.entity(entity).despawn();
+                for herse in &portcullises {
+                    commands.entity(herse).despawn();
+                }
+                commands.server_trigger(ToClients { targets: SendTargets::All, message: ScreenShake(0.7) });
+                info!("target hit, portcullis raised");
+                continue;
+            }
+        }
         if lifetime.0 <= 0.0 || room.overlaps_wall(next, PROJECTILE_RADIUS) {
             commands.entity(entity).despawn();
             continue;
@@ -718,6 +777,7 @@ fn run_generators(
     mut generators: Query<(&Position, &mut SpawnTimer), With<Generator>>,
     players: Query<&Position, (With<Player>, Without<Downed>, Without<Generator>)>,
     monsters: Query<(), With<Monster>>,
+    level: Res<Level>,
 ) {
     let mut alive = monsters.iter().count();
     for (pos, mut timer) in &mut generators {
@@ -733,11 +793,7 @@ fn run_generators(
             continue;
         }
         timer.0 = GENERATOR_INTERVAL;
-        let kind = if rng.next_f32() < 0.7 {
-            MonsterKind::Skeleton
-        } else {
-            MonsterKind::Bat
-        };
+        let kind = MonsterKind::pick(level.0, rng.next_f32());
         // Le monstre sort du côté du héros, sauf si un mur gêne.
         let out = pos.0 + (target - pos.0).normalize_or_zero() * (GENERATOR_HALF_SIZE + 6.0);
         let at = if room.overlaps_wall(out, kind.stats().half_size) { pos.0 } else { out };
@@ -851,6 +907,8 @@ fn reap_dead(
                 Some(PickupKind::Food)
             } else if roll < 0.58 {
                 Some(PickupKind::Key)
+            } else if roll < 0.58 + POTION_DROP_CHANCE {
+                Some(PickupKind::Potion)
             } else {
                 None
             };
@@ -931,19 +989,45 @@ fn open_portal(
 fn collect_pickups(
     mut commands: Commands,
     mut players: Query<
-        (&Position, &mut Health, &mut Gold, &mut Keys),
+        (&Position, &mut Health, &mut Gold, &mut Keys, &PartyId),
         (With<Player>, With<Controlled>, Without<Downed>),
     >,
+    team: Query<(Entity, &PartyId), With<Player>>,
+    mut kit: Query<&mut PuzzleKit>,
     pickups: Query<(Entity, &Position, &Pickup), Without<Player>>,
 ) {
     for (entity, pickup_pos, pickup) in &pickups {
-        for (pos, mut health, mut gold, mut keys) in &mut players {
+        for (pos, mut health, mut gold, mut keys, party) in &mut players {
             if pos.0.distance(pickup_pos.0) > PICKUP_RANGE {
                 continue;
             }
             match pickup.0 {
                 PickupKind::Coin => gold.0 += 1,
                 PickupKind::Key => keys.0 += 1,
+                // Les pièces de l'énigme vont dans la réserve commune de l'équipe.
+                PickupKind::Ingredient => {
+                    if let Ok(mut stock) = kit.single_mut() {
+                        stock.ingredients = stock.ingredients.saturating_add(1);
+                    }
+                }
+                PickupKind::GearPart => {
+                    if let Ok(mut stock) = kit.single_mut() {
+                        stock.gear = stock.gear.saturating_add(1);
+                    }
+                }
+                PickupKind::TargetDisc => {
+                    if let Ok(mut stock) = kit.single_mut() {
+                        stock.target = stock.target.saturating_add(1);
+                    }
+                }
+                PickupKind::Potion => {
+                    // Toute l'équipe de celui qui boit se régénère (boire une deuxième fois relance la durée).
+                    for (hero, hero_party) in &team {
+                        if hero_party == party {
+                            commands.entity(hero).insert((Regen(POTION_DURATION), Regenerating));
+                        }
+                    }
+                }
                 PickupKind::Food => {
                     // La nourriture reste au sol si le héros est déjà en pleine forme.
                     if health.current >= health.max {
@@ -954,6 +1038,24 @@ fn collect_pickups(
             }
             commands.entity(entity).despawn();
             break;
+        }
+    }
+}
+
+/// Les héros sous potion regagnent des PV chaque seconde; l'effet s'arrête à la fin du délai ou si le héros tombe.
+fn run_regen(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut heroes: Query<(Entity, &mut Health, &mut Regen, Has<Downed>), With<Player>>,
+) {
+    for (entity, mut health, mut regen, downed) in &mut heroes {
+        let step = time.delta_secs().min(regen.0);
+        regen.0 -= step;
+        if !downed {
+            health.current = (health.current + health.max * POTION_HEAL_PER_SECOND * step).min(health.max);
+        }
+        if regen.0 <= 0.0 || downed {
+            commands.entity(entity).remove::<(Regen, Regenerating)>();
         }
     }
 }
@@ -1043,7 +1145,13 @@ fn check_wipe(
 
 /// Point d'apparition d'un héros dans la salle de départ: quatre par rangée.
 fn spawn_point(slot: usize, layout: &Layout) -> Vec2 {
-    let center = tile_to_world(layout.rooms[layout.start].center());
+    // Option de développement: `CASTLE_DEBUG_START=royal` fait apparaître l'équipe dans l'antichambre de la porte royale,
+    // pour essayer l'énigme sans traverser tout le château.
+    let room = match std::env::var("CASTLE_DEBUG_START").as_deref() {
+        Ok("royal") => layout.royal_connection().b,
+        _ => layout.start,
+    };
+    let center = tile_to_world(layout.rooms[room].center());
     center + Vec2::new((slot % 4) as f32 * 22.0 - 33.0, (slot / 4) as f32 * 24.0)
 }
 
@@ -1064,6 +1172,14 @@ fn random_point(room: &Room, info: &RoomInfo, margin: u32, rng: &mut Rng) -> Vec
     tile_to_world(info.center())
 }
 
+/// Purge tout dialogue en cours ou en attente (nouveau niveau, retour au début du niveau): la session du serveur est remise à
+/// zéro et chaque client est prévenu d'abandonner la scène qu'il affiche. Sans cela, une scène non terminée resterait à l'écran
+/// du niveau suivant, bloquée, puisque le serveur ne la connaît plus.
+fn reset_dialogues(commands: &mut Commands, session: &mut DialogueSession) {
+    *session = DialogueSession::default();
+    commands.server_trigger(ToClients { targets: SendTargets::All, message: DialogueAbort });
+}
+
 /// Génère le niveau de la campagne, en rejouant l'état aléatoire sauvegardé à son entrée: le même château revient
 /// à chaque chargement et à chaque retour au début du niveau. `old` est l'ancien château, à effacer.
 fn generate_level(
@@ -1076,7 +1192,7 @@ fn generate_level(
     for entity in old {
         commands.entity(entity).despawn();
     }
-    *session = DialogueSession::default();
+    reset_dialogues(commands, session);
     rng.0 = campaign.0.entry_rng;
     let seed = rng.next_u64();
     let dungeon = Dungeon::generate(seed);
@@ -1120,7 +1236,8 @@ fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, f
         match info.kind {
             RoomKind::Combat => {
                 let area = info.size().x * info.size().y;
-                let count = if area > 130 && rng.next_f32() < 0.6 { 2 } else { 1 };
+                // Une salle de taille moyenne a deux générateurs, une grande salle en a parfois trois.
+                let count = 1 + u32::from(area > 90) + u32::from(area > 200 && rng.next_f32() < 0.5);
                 for _ in 0..count {
                     commands.spawn((
                         Replicated,
@@ -1131,14 +1248,19 @@ fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, f
                         SpawnTimer(GENERATOR_INTERVAL),
                     ));
                 }
+                for _ in 0..monsters_per_room(level) {
+                    let kind = MonsterKind::pick(level, rng.next_f32());
+                    spawn_monster(commands, kind, random_point(room, info, 2, rng));
+                }
                 if rng.next_f32() < 0.4 {
                     for _ in 0..3 {
                         commands.spawn((
                             Replicated,
-                            Trap { armed: true },
+                            Trap { armed: false },
                             Position(random_point(room, info, 2, rng)),
                             Hold::default(),
                             TrapCooldown::default(),
+                            TrapIdle::default(),
                         ));
                     }
                 }
@@ -1149,22 +1271,57 @@ fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, f
                     spawn_pickup(commands, PickupKind::Coin, center + Vec2::from(offset), rng);
                 }
                 spawn_pickup(commands, PickupKind::Food, center, rng);
+                spawn_pickup(commands, PickupKind::Potion, center + Vec2::new(0.0, -22.0), rng);
             }
             RoomKind::Start | RoomKind::Exit => {}
         }
     }
 
-    // Les trois premières étapes de l'énigme, dans trois salles de combat.
-    for (kind, room_index) in [InteractKind::Lever, InteractKind::Rune, InteractKind::Mechanism]
-        .into_iter()
-        .zip(layout.puzzle_rooms)
-    {
-        commands.spawn((
-            Replicated,
-            Interactable::new(kind),
-            Position(random_point(room, &layout.rooms[room_index], 2, rng)),
-            Hold::default(),
-        ));
+    // Des potions de régénération dans les salles de combat.
+    let fights_for_potions: Vec<&RoomInfo> = layout.rooms.iter().filter(|r| r.kind == RoomKind::Combat).collect();
+    if !fights_for_potions.is_empty() {
+        for _ in 0..potions_in_level(level) {
+            let info = fights_for_potions[(rng.next_u64() % fights_for_potions.len() as u64) as usize];
+            spawn_pickup(commands, PickupKind::Potion, random_point(room, info, 2, rng), rng);
+        }
+    }
+
+    // L'énigme de la porte royale: trois obstacles, un par classe, sont des panneaux dans le mur de l'antichambre; ce qu'il
+    // faut pour les vaincre est dispersé dans le château.
+    let sites = layout.puzzle_sites(room);
+    commands.spawn((Replicated, PuzzleKit::default()));
+    commands.spawn((Replicated, Ward { radius: WARD_RADIUS }, Position(sites.door)));
+    let herse_half = if sites.vertical { Vec2::new(TILE_SIZE / 2.0, TILE_SIZE) } else { Vec2::new(TILE_SIZE, TILE_SIZE / 2.0) };
+    commands.spawn((Replicated, Portcullis { vertical: sites.vertical }, Position(sites.portcullis), Solid(herse_half)));
+    let kinds = [InteractKind::Target, InteractKind::Rune, InteractKind::Mechanism];
+    let nodes = ["puzzle_target", "puzzle_rune", "puzzle_gears"];
+    // L'attribution des panneaux varie d'un château à l'autre.
+    let shift = (rng.next_u64() % 3) as usize;
+    for (i, panel) in sites.panels.iter().enumerate() {
+        let k = (i + shift) % 3;
+        commands.spawn((Replicated, Interactable::new(kinds[k]), Position(*panel), Hold::default()));
+        commands.spawn((Position(*panel), DialogueTrigger { node: nodes[k], radius: 64.0, delay: 0.4, fired: false }));
+    }
+    // Trois ingrédients violets, une pièce orange et un disque de cible vert, chacun dans une salle de combat.
+    let hunting_grounds: Vec<&RoomInfo> = layout.rooms.iter().filter(|r| r.kind == RoomKind::Combat).collect();
+    if !hunting_grounds.is_empty() {
+        let mut order: Vec<usize> = (0..hunting_grounds.len()).collect();
+        for i in (1..order.len()).rev() {
+            order.swap(i, (rng.next_u64() % (i as u64 + 1)) as usize);
+        }
+        let wanted = [
+            (PickupKind::Ingredient, INGREDIENTS_NEEDED as usize),
+            (PickupKind::GearPart, 1),
+            (PickupKind::TargetDisc, 1),
+        ];
+        let mut next = 0;
+        for (kind, count) in wanted {
+            for _ in 0..count {
+                let info = hunting_grounds[order[next % order.len()]];
+                next += 1;
+                spawn_pickup(commands, kind, random_point(room, info, 2, rng), rng);
+            }
+        }
     }
 
     // Portes: la royale devant la sortie, une porte à clé devant le trésor.
@@ -1191,18 +1348,19 @@ fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, f
                 Solid(half),
             ))
             .id();
-        let node = match kind {
+        // La porte royale est entourée d'un enchantement qui tient à distance: son dialogue part au bord de celui-ci.
+        let (node, radius) = match kind {
             DoorKind::Royal => {
                 commands
                     .entity(door)
                     .insert((Interactable::new(InteractKind::Push), Hold::default()));
-                "royal_door"
+                ("royal_door", WARD_RADIUS + 40.0)
             }
-            DoorKind::Locked => "alcove",
+            DoorKind::Locked => ("alcove", 70.0),
         };
         commands.spawn((
             Position(center),
-            DialogueTrigger { node, radius: 70.0, delay: 0.3, fired: false },
+            DialogueTrigger { node, radius, delay: 0.3, fired: false },
         ));
     }
 
@@ -1460,19 +1618,35 @@ fn run_interactions(
     time: Res<Time>,
     players: Query<(&Position, &HeroClass, &Interacting), (With<Player>, Without<Downed>)>,
     mut things: Query<(Entity, &Position, &mut Interactable, &mut Hold), Without<Player>>,
+    mut kit: Query<&mut PuzzleKit>,
+    wards: Query<Entity, With<Ward>>,
 ) {
     let dt = time.delta_secs();
     let puzzle_ready = things
         .iter()
         .filter(|(_, _, i, _)| i.kind != InteractKind::Push)
         .all(|(_, _, i, _)| i.done);
+    // Ce que l'équipe a trouvé; ce qu'une étape consomme est retiré au fur et à mesure.
+    let mut have = kit.single().map(|k| *k).unwrap_or_default();
     for (entity, pos, mut interactable, mut hold) in &mut things {
         if interactable.done {
             continue;
         }
         let kind = interactable.kind;
+        // Une cible déjà garnie n'attend plus qu'une flèche (voir `move_projectiles`).
+        if kind == InteractKind::Target && interactable.mounted {
+            continue;
+        }
         let unlocked = kind != InteractKind::Push || puzzle_ready;
+        // Il faut avoir trouvé de quoi agir: ingrédients, pièce de rechange ou disque.
+        let stocked = match kind {
+            InteractKind::Target => have.target >= 1,
+            InteractKind::Rune => have.ingredients >= INGREDIENTS_NEEDED,
+            InteractKind::Mechanism => have.gear >= 1,
+            InteractKind::Push => true,
+        };
         let active = unlocked
+            && stocked
             && players.iter().any(|(p, class, interacting)| {
                 interacting.0 && *class == kind.class() && p.0.distance(pos.0) <= INTERACT_RANGE + 4.0
             });
@@ -1485,15 +1659,67 @@ fn run_interactions(
         if (interactable.progress - progress).abs() > 0.01 {
             interactable.progress = progress;
         }
-        if hold.0 >= kind.hold_time() {
-            interactable.done = true;
-            interactable.progress = 1.0;
-            info!("{kind:?} done");
-            // La porte royale qui cède secoue plus fort qu'une étape intermédiaire.
-            let strength = if kind == InteractKind::Push { 0.85 } else { 0.5 };
-            commands.server_trigger(ToClients { targets: SendTargets::All, message: ScreenShake(strength) });
-            if kind == InteractKind::Push {
+        if hold.0 < kind.hold_time() {
+            continue;
+        }
+        info!("{kind:?} done");
+        // La porte royale qui cède secoue plus fort qu'une étape intermédiaire.
+        let strength = if kind == InteractKind::Push { 0.85 } else { 0.5 };
+        commands.server_trigger(ToClients { targets: SendTargets::All, message: ScreenShake(strength) });
+        match kind {
+            InteractKind::Target => {
+                // Le disque est fixé: la cible attend maintenant la flèche.
+                have.target -= 1;
+                interactable.mounted = true;
+                interactable.progress = 0.0;
+                hold.0 = 0.0;
+            }
+            InteractKind::Rune => {
+                have.ingredients -= INGREDIENTS_NEEDED;
+                interactable.done = true;
+                interactable.progress = 1.0;
+                // L'enchantement se dissipe.
+                for ward in &wards {
+                    commands.entity(ward).despawn();
+                }
+            }
+            InteractKind::Mechanism => {
+                have.gear -= 1;
+                interactable.done = true;
+                interactable.progress = 1.0;
+            }
+            InteractKind::Push => {
+                interactable.done = true;
+                interactable.progress = 1.0;
                 commands.entity(entity).despawn();
+            }
+        }
+    }
+    if let Ok(mut stock) = kit.single_mut() {
+        if *stock != have {
+            *stock = have;
+        }
+    }
+}
+
+/// L'enchantement de la porte royale repousse tout héros qui s'en approche trop.
+fn run_ward(
+    time: Res<Time>,
+    room: Res<Room>,
+    wards: Query<(&Position, &Ward), Without<Player>>,
+    mut heroes: Query<&mut Position, With<Player>>,
+) {
+    let dt = time.delta_secs();
+    for (center, ward) in &wards {
+        for mut pos in &mut heroes {
+            let away = pos.0 - center.0;
+            if away.length() >= ward.radius {
+                continue;
+            }
+            let direction = away.try_normalize().unwrap_or(Vec2::Y);
+            let moved = room.move_and_collide(pos.0, direction * WARD_PUSH_SPEED * dt, HERO_HALF_SIZE);
+            if moved != pos.0 {
+                pos.0 = moved;
             }
         }
     }
@@ -1501,29 +1727,51 @@ fn run_interactions(
 
 /// Les pièges blessent qui marche dessus; le Rôdeur peut les désamorcer en maintenant la touche d'action.
 fn run_traps(
+    mut commands: Commands,
     time: Res<Time>,
-    mut traps: Query<(&Position, &mut Trap, &mut Hold, &mut TrapCooldown), Without<Player>>,
+    mut traps: Query<(Entity, &Position, &mut Trap, &mut Hold, &mut TrapCooldown, &mut TrapIdle, Has<Disarmed>), Without<Player>>,
     mut players: Query<(&Position, &HeroClass, &Interacting, &mut Health), (With<Player>, Without<Downed>)>,
 ) {
     let dt = time.delta_secs();
-    for (pos, mut trap, mut hold, mut cooldown) in &mut traps {
-        if !trap.armed {
+    for (entity, pos, mut trap, mut hold, mut cooldown, mut idle, disarmed) in &mut traps {
+        // Un piège désarmé reste visible, pointes rentrées, pour de bon.
+        if disarmed {
+            if trap.armed {
+                trap.armed = false;
+            }
             continue;
         }
         cooldown.0 = (cooldown.0 - dt).max(0.0);
+        // Le Rôdeur désarme en maintenant l'action près du piège, qu'il soit réveillé ou endormi.
         let disarming = players.iter().any(|(p, class, interacting, _)| {
             interacting.0 && *class == HeroClass::Ranger && p.0.distance(pos.0) <= INTERACT_RANGE
         });
         if disarming {
             hold.0 += dt;
             if hold.0 >= TRAP_DISARM_TIME {
-                trap.armed = false;
+                commands.entity(entity).insert(Disarmed);
+                if trap.armed {
+                    trap.armed = false;
+                }
                 continue;
             }
         } else {
             hold.0 = (hold.0 - dt).max(0.0);
         }
-        if cooldown.0 > 0.0 {
+        // Réveil à l'approche d'un héros, sommeil quand tout le monde s'est éloigné.
+        let near = players.iter().any(|(p, ..)| p.0.distance(pos.0) <= TRAP_WAKE_RADIUS);
+        if near {
+            idle.0 = 0.0;
+            if !trap.armed {
+                trap.armed = true;
+            }
+        } else {
+            idle.0 += dt;
+            if idle.0 >= TRAP_SLEEP_DELAY && trap.armed {
+                trap.armed = false;
+            }
+        }
+        if !trap.armed || cooldown.0 > 0.0 {
             continue;
         }
         for (p, _, _, mut health) in &mut players {
@@ -1613,7 +1861,8 @@ fn tick_dialogue(
     session.idle += dt;
     if session.idle > DIALOGUE_IDLE_TIMEOUT {
         warn!("dialogue abandoned after a long silence");
-        *session = DialogueSession::default();
+        // Les clients attendent encore cette scène: on la leur fait abandonner aussi.
+        reset_dialogues(&mut commands, &mut session);
         return;
     }
     if !session.votes.is_empty() {
@@ -1657,6 +1906,45 @@ fn dialogue_advance(
         targets: SendTargets::All,
         message: DialogueAdvance,
     });
+}
+
+/// Purge les dialogues: la scène en cours est abandonnée, et celles qui allaient démarrer (un héros est dans leur zone) ne
+/// partiront plus. Renvoie (une scène était en cours, c'était l'introduction qu'on n'avait pas encore vue).
+fn purge_dialogues(
+    session: &mut DialogueSession,
+    intro_done: bool,
+    triggers: &mut Query<(&Position, &mut DialogueTrigger)>,
+    heroes: &[Vec2],
+) -> (bool, bool) {
+    let was_active = session.active.is_some();
+    let skipped_intro = session.active.as_deref() == Some("intro") && !intro_done;
+    *session = DialogueSession::default();
+    for (pos, mut trigger) in triggers.iter_mut() {
+        if !trigger.fired && heroes.iter().any(|h| h.distance(pos.0) <= trigger.radius) {
+            trigger.fired = true;
+        }
+    }
+    (was_active, skipped_intro)
+}
+
+/// Entrée maintenu: on purge la scène en cours et celles qui allaient démarrer. Une introduction purgée n'est plus rejouée.
+fn dialogue_skip(
+    _request: On<FromClient<DialogueSkip>>,
+    mut commands: Commands,
+    mut session: ResMut<DialogueSession>,
+    mut campaign: ResMut<Campaign>,
+    mut triggers: Query<(&Position, &mut DialogueTrigger)>,
+    players: Query<&Position, (With<Player>, Without<DialogueTrigger>)>,
+) {
+    let heroes: Vec<Vec2> = players.iter().map(|p| p.0).collect();
+    let (was_active, skipped_intro) = purge_dialogues(&mut session, campaign.0.intro_done, &mut triggers, &heroes);
+    if skipped_intro {
+        campaign.0.intro_done = true;
+        campaign.write();
+    }
+    if was_active {
+        commands.server_trigger(ToClients { targets: SendTargets::All, message: DialogueAbort });
+    }
 }
 
 fn dialogue_vote(vote: On<FromClient<DialogueVote>>, mut session: ResMut<DialogueSession>) {
@@ -1840,6 +2128,537 @@ fn leash_followers(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hero(world: &mut World, party: u32, at: Vec2, controlled: bool, hp: f32) -> Entity {
+        let mut entity = world.spawn((
+            Player,
+            PartyId(party),
+            HeroClass::Knight,
+            Position(at),
+            Health { current: hp, max: 100.0 },
+            Gold::default(),
+            Keys::default(),
+            Interacting::default(),
+        ));
+        if controlled {
+            entity.insert(Controlled);
+        }
+        entity.id()
+    }
+
+    fn app_with_time() -> App {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default());
+        app
+    }
+
+    fn advance(app: &mut App, seconds: f32) {
+        app.world_mut().resource_mut::<Time>().advance_by(Duration::from_secs_f32(seconds));
+        app.update();
+    }
+
+    /// Une potion rend POTION_HEAL_PER_SECOND des PV maximum par seconde, pendant POTION_DURATION secondes, sans dépasser le maximum.
+    #[test]
+    fn regeneration_heals_over_time_then_stops() {
+        let mut app = app_with_time();
+        app.add_systems(Update, run_regen);
+        let id = hero(app.world_mut(), 0, Vec2::ZERO, true, 10.0);
+        app.world_mut().entity_mut(id).insert((Regen(POTION_DURATION), Regenerating));
+
+        advance(&mut app, 1.0);
+        let hp = app.world().get::<Health>(id).unwrap().current;
+        assert!((hp - (10.0 + 100.0 * POTION_HEAL_PER_SECOND)).abs() < 0.01, "après 1 s: {hp}");
+
+        advance(&mut app, POTION_DURATION);
+        let health = app.world().get::<Health>(id).unwrap();
+        let healed = health.current - 10.0;
+        // L'effet dure POTION_DURATION en tout: pas un PV de plus.
+        assert!((healed - 100.0 * POTION_HEAL_PER_SECOND * POTION_DURATION).abs() < 0.05, "total soigné: {healed}");
+        assert!(app.world().get::<Regen>(id).is_none() && app.world().get::<Regenerating>(id).is_none());
+
+        // Jamais au-delà du maximum.
+        app.world_mut().entity_mut(id).insert((Regen(POTION_DURATION), Regenerating));
+        app.world_mut().get_mut::<Health>(id).unwrap().current = 99.0;
+        advance(&mut app, 3.0);
+        assert_eq!(app.world().get::<Health>(id).unwrap().current, 100.0);
+    }
+
+    #[test]
+    fn a_downed_hero_is_not_healed_and_loses_the_effect() {
+        let mut app = app_with_time();
+        app.add_systems(Update, run_regen);
+        let id = hero(app.world_mut(), 0, Vec2::ZERO, true, 0.0);
+        app.world_mut().entity_mut(id).insert((Regen(POTION_DURATION), Regenerating, Downed));
+        advance(&mut app, 2.0);
+        assert_eq!(app.world().get::<Health>(id).unwrap().current, 0.0);
+        assert!(app.world().get::<Regen>(id).is_none());
+    }
+
+    /// Seul un héros dirigé ramasse la potion; elle régénère toute son équipe et aucune autre.
+    #[test]
+    fn potion_regenerates_the_whole_team_of_whoever_drinks_it() {
+        let mut app = app_with_time();
+        app.add_systems(Update, collect_pickups);
+        let spot = Vec2::new(40.0, 40.0);
+        let leader = hero(app.world_mut(), 0, spot, true, 50.0);
+        let companion = hero(app.world_mut(), 0, Vec2::new(-300.0, 0.0), false, 50.0);
+        let other_team = hero(app.world_mut(), 1, Vec2::new(300.0, 0.0), true, 50.0);
+        let potion = app.world_mut().spawn((Pickup(PickupKind::Potion), Position(spot))).id();
+        app.update();
+        assert!(app.world().get_entity(potion).is_err(), "la potion est bue");
+        assert!(app.world().get::<Regen>(leader).is_some());
+        assert!(app.world().get::<Regen>(companion).is_some(), "toute l'équipe est soignée, même loin");
+        assert!(app.world().get::<Regen>(other_team).is_none(), "une autre équipe n'est pas soignée");
+
+        // Un compagnon (non dirigé) qui passe dessus ne la ramasse pas.
+        let mut app = app_with_time();
+        app.add_systems(Update, collect_pickups);
+        let idle = hero(app.world_mut(), 0, spot, false, 50.0);
+        let potion = app.world_mut().spawn((Pickup(PickupKind::Potion), Position(spot))).id();
+        app.update();
+        assert!(app.world().get_entity(potion).is_ok());
+        assert!(app.world().get::<Regen>(idle).is_none());
+    }
+
+    /// Un château contient beaucoup de monstres d'avance, plusieurs générateurs par salle et des potions.
+    #[test]
+    fn a_new_level_is_populated_with_monsters_generators_and_potions() {
+        for (seed, level) in [(1u64, 1u32), (2, 3), (3, 6), (4, 9)] {
+            let dungeon = Dungeon::generate(seed);
+            let fights = dungeon.layout.rooms.iter().filter(|r| r.kind == RoomKind::Combat).count();
+            let mut world = World::new();
+            let mut queue = bevy::ecs::world::CommandQueue::default();
+            {
+                let mut commands = Commands::new(&mut queue, &world);
+                populate(&mut commands, &dungeon, seed, level, false, &mut Rng(seed | 1));
+            }
+            queue.apply(&mut world);
+            let monsters = world.query::<&Monster>().iter(&world).count() as u32;
+            let generators = world.query::<&Generator>().iter(&world).count();
+            let potions = world.query::<&Pickup>().iter(&world).filter(|p| p.0 == PickupKind::Potion).count() as u32;
+            assert!(monsters >= fights as u32 * monsters_per_room(level), "niveau {level}: {monsters} monstres pour {fights} salles");
+            assert!(generators >= fights, "niveau {level}: {generators} générateurs pour {fights} salles");
+            assert!(potions >= potions_in_level(level), "niveau {level}: {potions} potions");
+        }
+        assert!(monsters_per_room(1) >= 2 && monsters_per_room(99) <= 6);
+        assert!(potions_in_level(9) > potions_in_level(1));
+    }
+
+    fn trap(world: &mut World, at: Vec2) -> Entity {
+        world.spawn((Trap { armed: false }, Position(at), Hold::default(), TrapCooldown::default(), TrapIdle::default())).id()
+    }
+
+    fn move_hero(app: &mut App, hero: Entity, at: Vec2) {
+        app.world_mut().get_mut::<Position>(hero).unwrap().0 = at;
+    }
+
+    fn is_armed(app: &App, trap: Entity) -> bool {
+        app.world().get::<Trap>(trap).unwrap().armed
+    }
+
+    /// Un piège dort tant que personne n'est proche, se réveille à l'approche d'un héros et se rendort après son départ.
+    #[test]
+    fn trap_wakes_when_a_hero_comes_close_and_sleeps_again_when_it_leaves() {
+        let mut app = app_with_time();
+        app.add_systems(Update, run_traps);
+        let t = trap(app.world_mut(), Vec2::ZERO);
+        let hero = hero(app.world_mut(), 0, Vec2::new(300.0, 0.0), true, 100.0);
+
+        advance(&mut app, 0.1);
+        assert!(!is_armed(&app, t), "loin: le piège dort");
+
+        move_hero(&mut app, hero, Vec2::new(TRAP_WAKE_RADIUS - 1.0, 0.0));
+        advance(&mut app, 0.1);
+        assert!(is_armed(&app, t), "à l'approche: pointes sorties");
+        assert_eq!(app.world().get::<Health>(hero).unwrap().current, 100.0, "réveillé mais pas encore marché dessus");
+
+        move_hero(&mut app, hero, Vec2::new(TRAP_WAKE_RADIUS + 20.0, 0.0));
+        advance(&mut app, TRAP_SLEEP_DELAY * 0.5);
+        assert!(is_armed(&app, t), "il ne se rendort pas tout de suite");
+        advance(&mut app, TRAP_SLEEP_DELAY);
+        assert!(!is_armed(&app, t), "personne autour: il se rendort");
+    }
+
+    #[test]
+    fn an_awake_trap_hurts_a_hero_standing_on_it_but_a_sleeping_one_does_not() {
+        let mut app = app_with_time();
+        app.add_systems(Update, run_traps);
+        let t = trap(app.world_mut(), Vec2::ZERO);
+        let hero = hero(app.world_mut(), 0, Vec2::new(TRAP_WAKE_RADIUS - 1.0, 0.0), true, 100.0);
+        advance(&mut app, 0.1);
+        assert!(is_armed(&app, t));
+        // Le héros marche sur le piège réveillé.
+        move_hero(&mut app, hero, Vec2::new(1.0, 0.0));
+        advance(&mut app, 0.1);
+        assert_eq!(app.world().get::<Health>(hero).unwrap().current, 100.0 - TRAP_DAMAGE);
+        // Pas de nouveau coup avant la fin du délai.
+        advance(&mut app, 0.1);
+        assert_eq!(app.world().get::<Health>(hero).unwrap().current, 100.0 - TRAP_DAMAGE);
+        advance(&mut app, TRAP_COOLDOWN);
+        assert_eq!(app.world().get::<Health>(hero).unwrap().current, 100.0 - 2.0 * TRAP_DAMAGE);
+    }
+
+    #[test]
+    fn a_downed_hero_does_not_wake_a_trap() {
+        let mut app = app_with_time();
+        app.add_systems(Update, run_traps);
+        let t = trap(app.world_mut(), Vec2::ZERO);
+        let hero = hero(app.world_mut(), 0, Vec2::new(5.0, 0.0), true, 0.0);
+        app.world_mut().entity_mut(hero).insert(Downed);
+        advance(&mut app, 0.5);
+        assert!(!is_armed(&app, t));
+    }
+
+    /// Le Rôdeur désarme pour de bon: le piège reste visible, pointes rentrées, et ne se réveille plus.
+    #[test]
+    fn a_ranger_can_disarm_a_trap_for_good() {
+        let mut app = app_with_time();
+        app.add_systems(Update, run_traps);
+        let t = trap(app.world_mut(), Vec2::ZERO);
+        let ranger = app
+            .world_mut()
+            .spawn((Player, PartyId(0), HeroClass::Ranger, Position(Vec2::new(10.0, 0.0)), Health { current: 100.0, max: 100.0 }, Interacting(true)))
+            .id();
+        advance(&mut app, TRAP_DISARM_TIME + 0.2);
+        assert!(app.world().get::<Disarmed>(t).is_some(), "désarmé");
+        assert!(!is_armed(&app, t));
+        // Même collé au piège, il ne se réveille plus et ne blesse pas.
+        app.world_mut().get_mut::<Interacting>(ranger).unwrap().0 = false;
+        move_hero(&mut app, ranger, Vec2::ZERO);
+        advance(&mut app, 1.0);
+        assert!(!is_armed(&app, t));
+        assert_eq!(app.world().get::<Health>(ranger).unwrap().current, 100.0);
+        // Il existe toujours: il n'a pas disparu.
+        assert!(app.world().get_entity(t).is_ok());
+    }
+
+    #[test]
+    fn traps_start_asleep_when_a_level_is_generated() {
+        let mut total = 0;
+        for seed in 1u64..40 {
+            let dungeon = Dungeon::generate(seed);
+            let mut world = World::new();
+            let mut queue = bevy::ecs::world::CommandQueue::default();
+            {
+                let mut commands = Commands::new(&mut queue, &world);
+                populate(&mut commands, &dungeon, seed, 2, false, &mut Rng(seed | 1));
+            }
+            queue.apply(&mut world);
+            for trap in world.query::<&Trap>().iter(&world) {
+                assert!(!trap.armed, "seed {seed}: un piège naît endormi");
+                total += 1;
+            }
+        }
+        assert!(total > 0, "des pièges apparaissent bien dans les niveaux");
+    }
+
+    fn populated(seed: u64, level: u32) -> (World, Dungeon) {
+        let dungeon = Dungeon::generate(seed);
+        let mut world = World::new();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            populate(&mut commands, &dungeon, seed, level, false, &mut Rng(seed | 1));
+        }
+        queue.apply(&mut world);
+        (world, dungeon)
+    }
+
+    /// Chaque château a ses trois obstacles (un par classe), la herse, l'enchantement, et les pièces à trouver.
+    #[test]
+    fn every_level_has_the_whole_royal_door_puzzle() {
+        for seed in 1u64..60 {
+            let (mut world, dungeon) = populated(seed, 1 + (seed % 4) as u32);
+            let mut kinds: Vec<_> = world.query::<&Interactable>().iter(&world).map(|i| i.kind).collect();
+            kinds.sort_by_key(|k| format!("{k:?}"));
+            assert_eq!(kinds.len(), 4, "seed {seed}");
+            for expected in [InteractKind::Target, InteractKind::Rune, InteractKind::Mechanism, InteractKind::Push] {
+                assert!(kinds.contains(&expected), "seed {seed}: {expected:?} manque");
+            }
+            assert_eq!(world.query::<&Ward>().iter(&world).count(), 1);
+            assert_eq!(world.query::<&Portcullis>().iter(&world).count(), 1);
+            assert_eq!(world.query::<&PuzzleKit>().iter(&world).count(), 1);
+            let count = |world: &mut World, kind: PickupKind| world.query::<&Pickup>().iter(world).filter(|p| p.0 == kind).count();
+            assert_eq!(count(&mut world, PickupKind::Ingredient), INGREDIENTS_NEEDED as usize, "seed {seed}");
+            assert_eq!(count(&mut world, PickupKind::GearPart), 1);
+            assert_eq!(count(&mut world, PickupKind::TargetDisc), 1);
+            // Les panneaux sont dans le mur (jamais au sol), et les pièces sur le sol.
+            let room = &dungeon.room;
+            let tile = |p: Vec2| {
+                let origin = room.tile_center(0, 0);
+                (((p.x - origin.x) / TILE_SIZE).round() as i32, ((p.y - origin.y) / TILE_SIZE).round() as i32)
+            };
+            for (pos, interactable) in world.query::<(&Position, &Interactable)>().iter(&world) {
+                if interactable.kind != InteractKind::Push {
+                    let (x, y) = tile(pos.0);
+                    assert_eq!(room.tile(x, y), Tile::Wall, "seed {seed}: {:?} n'est pas dans un mur", interactable.kind);
+                }
+            }
+            for (pos, pickup) in world.query::<(&Position, &Pickup)>().iter(&world) {
+                if matches!(pickup.0, PickupKind::Ingredient | PickupKind::GearPart | PickupKind::TargetDisc) {
+                    let (x, y) = tile(pos.0);
+                    assert_eq!(room.tile(x, y), Tile::Floor, "seed {seed}: pièce dans un mur");
+                }
+            }
+        }
+    }
+
+    /// Chaque scène que le serveur peut lancer existe dans le script de dialogue.
+    #[test]
+    fn every_dialogue_node_the_server_triggers_exists_in_the_script() {
+        const YARN: &str = include_str!("../../client/assets/dialogue/castle.yarn");
+        let mut used = std::collections::BTreeSet::new();
+        for seed in 1u64..40 {
+            let (mut world, _) = populated(seed, 1 + (seed % 3) as u32);
+            for trigger in world.query::<&DialogueTrigger>().iter(&world) {
+                used.insert(trigger.node);
+            }
+        }
+        for node in ["royal_door", "alcove", "puzzle_rune", "puzzle_gears", "puzzle_target"] {
+            assert!(used.contains(node), "la scène {node} n'est jamais déclenchée");
+        }
+        for node in used {
+            assert!(YARN.contains(&format!("title: {node}")), "scène {node} déclenchée mais absente du script");
+        }
+    }
+
+    /// Un nouveau niveau (ou un retour au début du niveau) purge la scène en cours, les votes en attente et les anciennes zones.
+    #[test]
+    fn a_new_level_purges_the_dialogue_session_and_the_old_triggers() {
+        let mut app = networked_app();
+        app.insert_resource(Rng(5));
+        app.insert_resource(Campaign(SaveGame::new("test", GameMode::Solo, 77)));
+        let mut session = DialogueSession { active: Some("royal_door".into()), idle: 40.0, vote_timer: 3.0, ..default() };
+        session.votes.insert(Entity::PLACEHOLDER, 1);
+        app.insert_resource(session);
+        let old_trigger = app
+            .world_mut()
+            .spawn((Position(Vec2::ZERO), DialogueTrigger { node: "puzzle_rune", radius: 60.0, delay: 0.3, fired: false }))
+            .id();
+        app.add_systems(
+            Update,
+            move |mut commands: Commands, mut rng: ResMut<Rng>, campaign: Res<Campaign>, mut session: ResMut<DialogueSession>| {
+                generate_level(&mut commands, &mut rng, &campaign, &mut session, [old_trigger]);
+            },
+        );
+        app.update();
+        let session = app.world().resource::<DialogueSession>();
+        assert!(session.active.is_none(), "la scène du niveau précédent est abandonnée");
+        assert!(session.votes.is_empty() && session.idle == 0.0 && session.vote_timer == 0.0);
+        assert!(app.world().get_entity(old_trigger).is_err(), "l'ancienne zone de dialogue a disparu");
+    }
+
+    /// Une application de test qui sait envoyer des événements réseau (secousse d'écran...), sans connexion.
+    fn networked_app() -> App {
+        let mut app = app_with_time();
+        app.add_plugins((StatesPlugin, RepliconPlugins, CastleSharedPlugin));
+        app
+    }
+
+    fn puzzle_app() -> (App, Entity) {
+        let mut app = networked_app();
+        app.add_systems(Update, run_interactions);
+        let kit = app.world_mut().spawn(PuzzleKit::default()).id();
+        (app, kit)
+    }
+
+    fn panel(app: &mut App, kind: InteractKind, at: Vec2) -> Entity {
+        app.world_mut().spawn((Interactable::new(kind), Position(at), Hold::default())).id()
+    }
+
+    fn class_hero(app: &mut App, class: HeroClass, at: Vec2) -> Entity {
+        let id = hero(app.world_mut(), 0, at, true, 100.0);
+        let mut entity = app.world_mut().entity_mut(id);
+        entity.insert(class);
+        entity.get_mut::<Interacting>().unwrap().0 = true;
+        id
+    }
+
+    fn kit_of(app: &App, kit: Entity) -> PuzzleKit {
+        *app.world().get::<PuzzleKit>(kit).unwrap()
+    }
+
+    /// Chaque obstacle demande sa classe ET ce qu'on a trouvé, qui est consommé; la porte attend les trois autres.
+    #[test]
+    fn each_obstacle_needs_its_class_and_what_was_found() {
+        let (mut app, kit) = puzzle_app();
+        let at = Vec2::new(100.0, 100.0);
+        let rune = panel(&mut app, InteractKind::Rune, at);
+        let gears = panel(&mut app, InteractKind::Mechanism, at);
+        let target = panel(&mut app, InteractKind::Target, at);
+        let door = panel(&mut app, InteractKind::Push, at);
+        let progress = |app: &App, e: Entity| app.world().get::<Interactable>(e).unwrap().progress;
+        let done = |app: &App, e: Entity| app.world().get::<Interactable>(e).unwrap().done;
+
+        // Sans rien trouvé, ni l'Ensorceleur ni le Forgebraise ni le Rôdeur n'avancent.
+        let sorcerer = class_hero(&mut app, HeroClass::Sorcerer, at);
+        advance(&mut app, 3.0);
+        assert_eq!(progress(&app, rune), 0.0, "pas d'ingrédients: la rune ne bouge pas");
+
+        // Deux ingrédients sur trois ne suffisent pas.
+        app.world_mut().get_mut::<PuzzleKit>(kit).unwrap().ingredients = INGREDIENTS_NEEDED - 1;
+        advance(&mut app, 3.0);
+        assert!(!done(&app, rune));
+        // Trois: l'Ensorceleur dissipe, les ingrédients sont consommés.
+        app.world_mut().get_mut::<PuzzleKit>(kit).unwrap().ingredients = INGREDIENTS_NEEDED + 1;
+        advance(&mut app, InteractKind::Rune.hold_time() + 0.2);
+        assert!(done(&app, rune));
+        assert_eq!(kit_of(&app, kit).ingredients, 1, "trois ingrédients consommés, un de trop reste");
+
+        // Le mauvais héros ne répare rien, même avec la pièce.
+        app.world_mut().entity_mut(sorcerer).get_mut::<Interacting>().unwrap().0 = false;
+        let knight = class_hero(&mut app, HeroClass::Knight, at);
+        app.world_mut().get_mut::<PuzzleKit>(kit).unwrap().gear = 1;
+        advance(&mut app, 4.0);
+        assert!(!done(&app, gears), "un Chevalier ne répare pas le mécanisme");
+        assert_eq!(kit_of(&app, kit).gear, 1);
+        // La porte est verrouillée tant que la cible et le mécanisme ne sont pas faits.
+        assert!(!done(&app, door), "la porte attend les autres obstacles");
+
+        // Le Forgebraise répare avec la pièce.
+        app.world_mut().entity_mut(knight).get_mut::<Interacting>().unwrap().0 = false;
+        class_hero(&mut app, HeroClass::Forgebraise, at);
+        advance(&mut app, InteractKind::Mechanism.hold_time() + 0.2);
+        assert!(done(&app, gears));
+        assert_eq!(kit_of(&app, kit).gear, 0);
+
+        // Le Rôdeur fixe le disque: la cible est garnie mais pas encore touchée.
+        app.world_mut().get_mut::<PuzzleKit>(kit).unwrap().target = 1;
+        class_hero(&mut app, HeroClass::Ranger, at);
+        advance(&mut app, InteractKind::Target.hold_time() + 0.2);
+        let t = *app.world().get::<Interactable>(target).unwrap();
+        assert!(t.mounted && !t.done, "disque fixé, flèche attendue");
+        assert_eq!(kit_of(&app, kit).target, 0);
+        assert!(!done(&app, door), "la cible n'est pas encore touchée");
+
+        // Une fois la cible touchée (par une flèche), le Chevalier peut pousser la porte.
+        app.world_mut().get_mut::<Interactable>(target).unwrap().done = true;
+        let knight_again = class_hero(&mut app, HeroClass::Knight, at);
+        let _ = knight_again;
+        advance(&mut app, InteractKind::Push.hold_time() + 0.2);
+        assert!(app.world().get_entity(door).is_err(), "la porte cède et disparaît");
+    }
+
+    /// Dissiper la rune lève l'enchantement.
+    #[test]
+    fn dispelling_the_rune_removes_the_ward() {
+        let (mut app, kit) = puzzle_app();
+        let at = Vec2::new(10.0, 10.0);
+        panel(&mut app, InteractKind::Rune, at);
+        let ward = app.world_mut().spawn((Ward { radius: WARD_RADIUS }, Position(Vec2::ZERO))).id();
+        class_hero(&mut app, HeroClass::Sorcerer, at);
+        app.world_mut().get_mut::<PuzzleKit>(kit).unwrap().ingredients = INGREDIENTS_NEEDED;
+        advance(&mut app, 0.5);
+        assert!(app.world().get_entity(ward).is_ok(), "pas encore");
+        advance(&mut app, InteractKind::Rune.hold_time());
+        assert!(app.world().get_entity(ward).is_err(), "l'enchantement est dissipé");
+    }
+
+    /// Ramasser une pièce la met dans la réserve commune de l'équipe.
+    #[test]
+    fn found_pieces_go_into_the_shared_kit() {
+        let mut app = app_with_time();
+        app.add_systems(Update, collect_pickups);
+        let kit = app.world_mut().spawn(PuzzleKit::default()).id();
+        let spot = Vec2::new(5.0, 5.0);
+        hero(app.world_mut(), 0, spot, true, 100.0);
+        for kind in [PickupKind::Ingredient, PickupKind::Ingredient, PickupKind::GearPart, PickupKind::TargetDisc] {
+            app.world_mut().spawn((Pickup(kind), Position(spot)));
+        }
+        for _ in 0..6 {
+            app.update();
+        }
+        assert_eq!(kit_of(&app, kit), PuzzleKit { ingredients: 2, gear: 1, target: 1 });
+    }
+
+    /// Une flèche du Rôdeur sur la cible garnie lève la herse; rien d'autre ne le fait.
+    #[test]
+    fn a_rangers_arrow_on_the_mounted_target_raises_the_portcullis() {
+        let dungeon = Dungeon::generate(7);
+        let sites = dungeon.layout.puzzle_sites(&dungeon.room);
+        let spot = sites.panels[0];
+        let make = |class: HeroClass, mounted: bool| {
+            let mut app = networked_app();
+            app.insert_resource(dungeon.room.clone());
+            app.add_systems(Update, move_projectiles);
+            let target = app
+                .world_mut()
+                .spawn((Interactable { mounted, ..Interactable::new(InteractKind::Target) }, Position(spot)))
+                .id();
+            let herse = app.world_mut().spawn((Portcullis { vertical: true }, Position(sites.portcullis))).id();
+            // La flèche part du sol devant le panneau, vers le haut (le panneau est dans le mur du haut).
+            let arrow = app
+                .world_mut()
+                .spawn((
+                    Projectile { class, dir: Vec2::Y },
+                    Position(spot - Vec2::new(0.0, 24.0)),
+                    Velocity(Vec2::Y * 260.0),
+                    Damage(8.0),
+                    Lifetime(1.0),
+                ))
+                .id();
+            for _ in 0..12 {
+                advance(&mut app, 1.0 / 64.0);
+            }
+            (app, target, herse, arrow)
+        };
+        let (app, target, herse, arrow) = make(HeroClass::Ranger, true);
+        assert!(app.world().get::<Interactable>(target).unwrap().done, "cible touchée");
+        assert!(app.world().get_entity(herse).is_err(), "herse levée");
+        assert!(app.world().get_entity(arrow).is_err());
+        // Une cible sans disque, ou un autre tireur, ne fait rien.
+        let (app, target, herse, _) = make(HeroClass::Ranger, false);
+        assert!(!app.world().get::<Interactable>(target).unwrap().done);
+        assert!(app.world().get_entity(herse).is_ok());
+        let (app, target, herse, _) = make(HeroClass::Sorcerer, true);
+        assert!(!app.world().get::<Interactable>(target).unwrap().done, "un sort n'est pas une flèche");
+        assert!(app.world().get_entity(herse).is_ok());
+    }
+
+    /// L'enchantement repousse un héros qui s'approche trop de la porte, et ignore celui qui est loin.
+    #[test]
+    fn the_ward_pushes_heroes_away_from_the_door() {
+        let dungeon = Dungeon::generate(7);
+        let sites = dungeon.layout.puzzle_sites(&dungeon.room);
+        let outward = (sites.portcullis - sites.door).normalize();
+        let mut app = app_with_time();
+        app.insert_resource(dungeon.room.clone());
+        app.add_systems(Update, run_ward);
+        app.world_mut().spawn((Ward { radius: WARD_RADIUS }, Position(sites.door)));
+        let near = hero(app.world_mut(), 0, sites.door + outward * 30.0, true, 100.0);
+        let far = hero(app.world_mut(), 1, sites.door + outward * (WARD_RADIUS + 40.0), true, 100.0);
+        let far_before = app.world().get::<Position>(far).unwrap().0;
+        let before = app.world().get::<Position>(near).unwrap().0.distance(sites.door);
+        for _ in 0..30 {
+            advance(&mut app, 1.0 / 30.0);
+        }
+        let after = app.world().get::<Position>(near).unwrap().0.distance(sites.door);
+        assert!(after > before + 10.0, "repoussé de {before} à {after}");
+        assert_eq!(app.world().get::<Position>(far).unwrap().0, far_before, "loin de l'enchantement: rien ne bouge");
+    }
+
+    /// Maintenir Entrée purge la scène en cours et celles qui allaient démarrer, pas celles qui sont loin.
+    #[test]
+    fn purging_dialogues_cancels_the_current_scene_and_the_ones_about_to_start() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        let here = Vec2::new(10.0, 0.0);
+        let near = world.spawn((Position(here), DialogueTrigger { node: "royal_door", radius: 60.0, delay: 0.3, fired: false })).id();
+        let far = world.spawn((Position(Vec2::new(900.0, 0.0)), DialogueTrigger { node: "puzzle_rune", radius: 60.0, delay: 0.3, fired: false })).id();
+        let done = world.spawn((Position(here), DialogueTrigger { node: "intro", radius: 60.0, delay: 0.0, fired: true })).id();
+        let mut session = DialogueSession { active: Some("intro".into()), ..default() };
+        let (was_active, skipped_intro) = world
+            .run_system_once(move |mut triggers: Query<(&Position, &mut DialogueTrigger)>| {
+                let result = purge_dialogues(&mut session, false, &mut triggers, &[here]);
+                assert!(session.active.is_none(), "la scène en cours est abandonnée");
+                result
+            })
+            .unwrap();
+        assert!(was_active && skipped_intro, "l'introduction purgée est signalée");
+        assert!(world.get::<DialogueTrigger>(near).unwrap().fired, "la scène sur le point de partir est purgée");
+        assert!(!world.get::<DialogueTrigger>(far).unwrap().fired, "une scène lointaine reste disponible");
+        assert!(world.get::<DialogueTrigger>(done).unwrap().fired);
+    }
 
     /// Un compagnon seul, avec les vraies collisions, doit atteindre chaque salle du château.
     #[test]

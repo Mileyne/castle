@@ -1,0 +1,25 @@
+(
+    models: {
+        "monster:Bat": (
+            size: 0.5,
+            params: {},
+            materials: {},
+        ),
+        "monster:Goblin": (
+            size: 0.73,
+            params: {
+                "dims.arm_r": 0.046,
+                "dims.fore": 0.195,
+                "dims.head_r": 0.225,
+                "dims.hip_x": 0.083,
+                "dims.leg_r": 0.077,
+                "dims.shin": 0.281,
+                "dims.shoulder_x": 0.155,
+                "dims.thigh": 0.322,
+                "dims.torso_rx": 0.127,
+                "dims.upper": 0.205,
+            },
+            materials: {},
+        ),
+    },
+)

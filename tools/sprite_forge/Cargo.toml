@@ -7,3 +7,5 @@ description = "Génère les planches de sprites des héros en rendant un squelet
 [dependencies]
 glam = "0.32"
 png = "0.17"
+serde = { version = "1", features = ["derive"] }
+ron = "0.12"

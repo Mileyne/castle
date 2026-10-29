@@ -20,12 +20,81 @@ const LION_RED: u32 = 0x8a1c28;
 const BRASS: u32 = 0xb08a3a;
 
 pub(crate) fn dims(class: Class) -> Dims {
-    match class {
+    let dims = match class {
         Class::Knight => Dims { thigh: 0.46, shin: 0.46, torso: 0.52, hip_x: 0.13, shoulder_x: 0.29, upper: 0.3, fore: 0.3, head_r: 0.2, head_rise: 0.07, leg_r: 0.1, arm_r: 0.075, torso_rx: 0.27, torso_rz: 0.18 },
         Class::Sorcerer => Dims { thigh: 0.46, shin: 0.46, torso: 0.5, hip_x: 0.12, shoulder_x: 0.25, upper: 0.29, fore: 0.29, head_r: 0.2, head_rise: 0.07, leg_r: 0.085, arm_r: 0.065, torso_rx: 0.23, torso_rz: 0.16 },
         Class::Ranger => Dims { thigh: 0.47, shin: 0.47, torso: 0.52, hip_x: 0.12, shoulder_x: 0.27, upper: 0.3, fore: 0.3, head_r: 0.195, head_rise: 0.07, leg_r: 0.09, arm_r: 0.07, torso_rx: 0.25, torso_rz: 0.17 },
         Class::Forgebraise => Dims { thigh: 0.42, shin: 0.42, torso: 0.5, hip_x: 0.14, shoulder_x: 0.31, upper: 0.28, fore: 0.28, head_r: 0.205, head_rise: 0.06, leg_r: 0.105, arm_r: 0.085, torso_rx: 0.31, torso_rz: 0.21 },
+    };
+    dims.tweak(&crate::tuning::hero_key(class))
+}
+
+impl FaceSpec {
+    /// Réglages numériques du visage, avec leurs noms.
+    fn fields(&self) -> Vec<(&'static str, f32)> {
+        vec![
+            ("eye_size", self.eye_size),
+            ("eye_open", self.eye_open),
+            ("eye_spacing", self.eye_spacing),
+            ("brow_thick", self.brow_thick),
+            ("brow_tilt", self.brow_tilt),
+            ("brow_arch", self.brow_arch),
+            ("nose_len", self.nose_len),
+            ("nose_width", self.nose_width),
+            ("smile", self.smile),
+            ("mouth_width", self.mouth_width),
+            ("width", self.width),
+            ("jaw", self.jaw),
+            ("ears", self.ears),
+            ("beard_len", self.beard_len),
+            ("lines", f32::from(self.lines)),
+            ("glasses", f32::from(self.glasses)),
+        ]
     }
+
+    /// Applique les réglages faits dans l'éditeur.
+    fn tweak(mut self, model: &str) -> Self {
+        use crate::tuning::param;
+        let p = |name: &str, value: f32| param(model, &format!("face.{name}"), value);
+        self.eye_size = p("eye_size", self.eye_size);
+        self.eye_open = p("eye_open", self.eye_open);
+        self.eye_spacing = p("eye_spacing", self.eye_spacing);
+        self.brow_thick = p("brow_thick", self.brow_thick);
+        self.brow_tilt = p("brow_tilt", self.brow_tilt);
+        self.brow_arch = p("brow_arch", self.brow_arch);
+        self.nose_len = p("nose_len", self.nose_len);
+        self.nose_width = p("nose_width", self.nose_width);
+        self.smile = p("smile", self.smile);
+        self.mouth_width = p("mouth_width", self.mouth_width);
+        self.width = p("width", self.width);
+        self.jaw = p("jaw", self.jaw);
+        self.ears = p("ears", self.ears);
+        self.beard_len = p("beard_len", self.beard_len);
+        self.lines = p("lines", f32::from(self.lines)) > 0.5;
+        self.glasses = p("glasses", f32::from(self.glasses)) > 0.5;
+        self
+    }
+}
+
+fn spec(class: Class) -> FaceSpec {
+    base_spec(class).tweak(&crate::tuning::hero_key(class))
+}
+
+/// Le héros porte son couvre-chef (réglage `gear.hat`, activé par défaut).
+fn hat_on(class: Class) -> bool {
+    crate::tuning::param(&crate::tuning::hero_key(class), "gear.hat", 1.0) > 0.5
+}
+
+/// Équipement qu'on peut retirer à un héros, avec sa valeur d'origine (1 = porté).
+pub(crate) fn gear_fields(class: Class) -> Vec<(&'static str, f32)> {
+    match class {
+        Class::Knight | Class::Sorcerer | Class::Ranger | Class::Forgebraise => vec![("hat", 1.0)],
+    }
+}
+
+/// Réglages de visage disponibles pour un héros, avec leur valeur d'origine.
+pub(crate) fn face_fields(class: Class) -> Vec<(&'static str, f32)> {
+    base_spec(class).fields()
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -70,7 +139,7 @@ struct FaceSpec {
     glasses: bool,
 }
 
-fn spec(class: Class) -> FaceSpec {
+fn base_spec(class: Class) -> FaceSpec {
     match class {
         // Chevalier: cheveux châtains foncés mi-longs en bataille, visage étroit, nez long et droit, barbe brune
         // pleine reliée à la moustache, yeux verdâtres plissés par un grand sourire.
@@ -182,11 +251,8 @@ fn face(h: Vec3, r: f32, s: &FaceSpec) -> Vec<Part> {
                 p.push(shiny(cone(at(sg * 0.95, 0.4, 0.0), at(sg * 1.02, -0.75, 0.15), 0.28 * r, 0.1 * r, hair), 0.3));
                 p.push(shiny(cone(at(sg * 0.6, 0.3, -0.7), at(sg * 0.7, -0.9, -0.55), 0.3 * r, 0.1 * r, hair), 0.3));
             }
-            // Frange en mèches qui tombent sur le front, de gauche à droite.
-            for k in 0..8 {
-                let t = k as f32 / 7.0;
-                p.push(shiny(cone(at(-0.8 + t * 1.5, 1.0, 0.2), at(-0.55 + t * 1.4, 0.58 - 0.12 * (1.0 - t), 0.97), 0.2 * r, 0.03 * r, hair), 0.3));
-            }
+            // Mèche de côté: une seule masse lisse qui couvre le haut du front, sans mèches séparées.
+            p.push(shiny(ellipsoid(at(0.12, 0.72, 0.52), Vec3::new(0.98, 0.3, 0.6) * r, hair), 0.3));
         }
         Hair::Curly => {
             p.push(shiny(ellipsoid(at(0.0, 0.2, -0.28), Vec3::new(1.06, 0.95, 1.05) * r, hair), 0.3));
@@ -261,6 +327,21 @@ fn knight(d: &Dims, j: &Joints) -> Vec<Part> {
     let h = j.head;
     let r = d.head_r;
     p.extend(face(h, r, &spec(Class::Knight)));
+    // Bassinet d'acier à calotte pointue, bandeau, nasal, et camail de mailles qui encadre le visage; crête rouge au lion.
+    if hat_on(Class::Knight) {
+        p.push(shiny(ellipsoid(h + Vec3::new(0.0, 0.92 * r, -0.04 * r), Vec3::new(1.12, 0.7, 1.14) * r, STEEL_M), 0.8));
+        p.push(shiny(cone(h + Vec3::new(0.0, 1.2 * r, -0.04 * r), h + Vec3::new(0.0, 1.85 * r, -0.08 * r), 0.7 * r, 0.06 * r, STEEL_M), 0.8));
+        p.push(shiny(cone(h + Vec3::Y * 0.3 * r, h + Vec3::Y * 0.46 * r, 1.12 * r, 1.12 * r, 0x8a8e98), 0.8));
+        p.push(shiny(block(h + Vec3::new(0.0, -0.05, 1.0 * r), Vec3::new(0.06, 0.42, 0.04) * r, Mat3::IDENTITY, 0x8a8e98), 0.8));
+        p.push(block(h + Vec3::new(0.0, 1.62 * r, -0.04 * r), Vec3::new(0.05, 0.18, 0.7) * r, Mat3::IDENTITY, LION_RED));
+        for sg in [-1.0f32, 1.0] {
+            p.push(shiny(ellipsoid(h + Vec3::new(sg * 1.02 * r, -0.4 * r, -0.05 * r), Vec3::new(0.2, 0.75, 0.8) * r, MAIL), 0.3));
+            for k in 0..3 {
+                p.push(shiny(ball(h + Vec3::new(sg * 1.1 * r, 0.12 * r - 0.3 * r * k as f32, 0.22 * r), 0.035 * r, 0xb0b4bc), 0.9));
+            }
+        }
+        p.push(shiny(ellipsoid(h + Vec3::new(0.0, -0.35 * r, -0.62 * r), Vec3::new(1.0, 0.85, 0.5) * r, MAIL), 0.3));
+    }
     // Épée longue dans la main droite, grand écu en amande à lion rouge au bras gauche.
     let rot = held(j, 0, 0.1);
     let hand = j.hand[0];
@@ -327,19 +408,21 @@ fn sorcerer(d: &Dims, j: &Joints) -> Vec<Part> {
     let r = d.head_r;
     p.extend(face(h, r, &spec(Class::Sorcerer)));
     // Chapeau violet usé à pointe retombante, bande de cuir, broche solaire dorée, plume.
-    let brim = h + Vec3::Y * 0.55 * r;
-    let hat = 0x4a2a6a;
-    p.push(shiny(cone(brim, brim + Vec3::Y * 0.12 * r, 1.75 * r, 1.3 * r, hat), 0.1));
-    p.push(cone(brim + Vec3::Y * 0.1 * r, brim + Vec3::Y * 0.5 * r, 1.0 * r, 0.92 * r, LEATHER_MD));
-    p.push(shiny(cone(brim + Vec3::Y * 0.12 * r, brim + Vec3::new(0.3 * r, 1.6 * r, 0.0), 0.92 * r, 0.44 * r, hat), 0.1));
-    p.push(shiny(cone(brim + Vec3::new(0.3 * r, 1.6 * r, 0.0), brim + Vec3::new(1.1 * r, 2.3 * r, -0.2 * r), 0.44 * r, 0.15 * r, hat), 0.1));
-    p.push(shiny(cone(brim + Vec3::new(1.1 * r, 2.3 * r, -0.2 * r), brim + Vec3::new(1.7 * r, 1.9 * r, -0.5 * r), 0.15 * r, 0.03 * r, hat), 0.1));
-    p.push(shiny(ball(brim + Vec3::new(0.0, 0.35 * r, 0.98 * r), 0.2 * r, gold), 0.9));
-    for k in 0..8 {
-        let a = k as f32 * TAU / 8.0;
-        p.push(shiny(cone(brim + Vec3::new(0.0, 0.35 * r, 1.02 * r), brim + Vec3::new(a.cos() * 0.36 * r, 0.35 * r + a.sin() * 0.36 * r, 1.02 * r), 0.05 * r, 0.01 * r, gold), 0.8));
+    if hat_on(Class::Sorcerer) {
+        let brim = h + Vec3::Y * 0.55 * r;
+        let hat = 0x4a2a6a;
+        p.push(shiny(cone(brim, brim + Vec3::Y * 0.12 * r, 1.75 * r, 1.3 * r, hat), 0.1));
+        p.push(cone(brim + Vec3::Y * 0.1 * r, brim + Vec3::Y * 0.5 * r, 1.0 * r, 0.92 * r, LEATHER_MD));
+        p.push(shiny(cone(brim + Vec3::Y * 0.12 * r, brim + Vec3::new(0.3 * r, 1.6 * r, 0.0), 0.92 * r, 0.44 * r, hat), 0.1));
+        p.push(shiny(cone(brim + Vec3::new(0.3 * r, 1.6 * r, 0.0), brim + Vec3::new(1.1 * r, 2.3 * r, -0.2 * r), 0.44 * r, 0.15 * r, hat), 0.1));
+        p.push(shiny(cone(brim + Vec3::new(1.1 * r, 2.3 * r, -0.2 * r), brim + Vec3::new(1.7 * r, 1.9 * r, -0.5 * r), 0.15 * r, 0.03 * r, hat), 0.1));
+        p.push(shiny(ball(brim + Vec3::new(0.0, 0.35 * r, 0.98 * r), 0.2 * r, gold), 0.9));
+        for k in 0..8 {
+            let a = k as f32 * TAU / 8.0;
+            p.push(shiny(cone(brim + Vec3::new(0.0, 0.35 * r, 1.02 * r), brim + Vec3::new(a.cos() * 0.36 * r, 0.35 * r + a.sin() * 0.36 * r, 1.02 * r), 0.05 * r, 0.01 * r, gold), 0.8));
+        }
+        p.push(cone(brim + Vec3::new(0.85 * r, 0.4 * r, 0.6 * r), brim + Vec3::new(1.6 * r, 1.1 * r, 0.1 * r), 0.1 * r, 0.01 * r, 0x2a2a3a));
     }
-    p.push(cone(brim + Vec3::new(0.85 * r, 0.4 * r, 0.6 * r), brim + Vec3::new(1.6 * r, 1.1 * r, 0.1 * r), 0.1 * r, 0.01 * r, 0x2a2a3a));
     // Bâton torsadé sculpté, couronné d'un anneau qui retient un orbe violet; breloques.
     let rot = held(j, 0, 0.12);
     let hand = j.hand[0];
@@ -414,6 +497,18 @@ fn ranger(d: &Dims, j: &Joints) -> Vec<Part> {
     let h = j.head;
     let r = d.head_r;
     p.extend(face(h, r, &spec(Class::Ranger)));
+    // Chapeau de feutre vert à calotte arrondie et bord souple relevé sur le côté, bandeau de cuir, longue plume crème.
+    if hat_on(Class::Ranger) {
+        let brim = h + Vec3::Y * 0.5 * r;
+        p.push(shiny(cone(brim, brim + Vec3::Y * 0.1 * r, 1.55 * r, 1.25 * r, cloak), 0.1));
+        p.push(shiny(ellipsoid(brim + Vec3::new(0.0, 0.55 * r, -0.05 * r), Vec3::new(1.02, 0.72, 1.05) * r, cloak), 0.1));
+        p.push(cone(brim + Vec3::Y * 0.08 * r, brim + Vec3::Y * 0.4 * r, 1.04 * r, 1.0 * r, LEATHER_MD));
+        p.push(shiny(ellipsoid(brim + Vec3::new(1.1 * r, 0.25 * r, 0.25 * r), Vec3::new(0.55, 0.12, 0.7) * r, cloak), 0.1));
+        let quill = brim + Vec3::new(0.95 * r, 0.3 * r, 0.1 * r);
+        p.push(shiny(cone(quill, quill + Vec3::new(0.7 * r, 1.5 * r, -0.5 * r), 0.2 * r, 0.03 * r, 0xe8e0c8), 0.4));
+        p.push(limb(quill, quill + Vec3::new(0.55 * r, 1.2 * r, -0.4 * r), 0.015 * r, 0xb0a888));
+        p.push(shiny(ball(brim + Vec3::new(0.95 * r, 0.3 * r, 0.12 * r), 0.1 * r, BRASS), 0.8));
+    }
     // Carquois dans le dos, plumes crème et flèches.
     let (qa, qb) = (c + Vec3::new(0.12, 0.0, -0.27), c + Vec3::new(0.2, 0.7, -0.3));
     p.push(shiny(cone(qa, qb, 0.065, 0.085, 0x6a4020), 0.3));
@@ -480,15 +575,17 @@ fn forgebraise(d: &Dims, j: &Joints) -> Vec<Part> {
     let h = j.head;
     let r = d.head_r;
     p.extend(face(h, r, &spec(Class::Forgebraise)));
-    // Calotte qui s'arrête au front: les yeux restent dégagés.
-    p.push(shiny(ellipsoid(h + Vec3::new(0.0, 0.95 * r, -0.03 * r), Vec3::new(1.1, 0.62, 1.1) * r, 0x6a6e78), 0.7));
-    p.push(shiny(cone(h + Vec3::Y * 0.3 * r, h + Vec3::Y * 0.44 * r, 1.1 * r, 1.1 * r, 0x8a8e98), 0.8));
-    p.push(shiny(block(h + Vec3::new(0.0, -0.05, 1.0 * r), Vec3::new(0.06, 0.4, 0.04) * r, Mat3::IDENTITY, 0x8a8e98), 0.8));
-    p.push(shiny(block(h + Vec3::new(0.0, 1.5 * r, 0.0), Vec3::new(0.05, 0.05, 1.0) * r, Mat3::IDENTITY, 0x8a8e98), 0.8));
-    for sg in [-1.0f32, 1.0] {
-        p.push(shiny(ellipsoid(h + Vec3::new(sg * 1.0 * r, -0.2 * r, 0.1 * r), Vec3::new(0.08, 0.5, 0.45) * r, 0x7a7e88), 0.7));
-        for k in 0..3 {
-            p.push(shiny(ball(h + Vec3::new(sg * 1.06 * r, 0.1 * r - 0.28 * r * k as f32, 0.3 * r), 0.035 * r, 0xb0b4bc), 0.9));
+    if hat_on(Class::Forgebraise) {
+        // Calotte qui s'arrête au front: les yeux restent dégagés.
+        p.push(shiny(ellipsoid(h + Vec3::new(0.0, 0.95 * r, -0.03 * r), Vec3::new(1.1, 0.62, 1.1) * r, 0x6a6e78), 0.7));
+        p.push(shiny(cone(h + Vec3::Y * 0.3 * r, h + Vec3::Y * 0.44 * r, 1.1 * r, 1.1 * r, 0x8a8e98), 0.8));
+        p.push(shiny(block(h + Vec3::new(0.0, -0.05, 1.0 * r), Vec3::new(0.06, 0.4, 0.04) * r, Mat3::IDENTITY, 0x8a8e98), 0.8));
+        p.push(shiny(block(h + Vec3::new(0.0, 1.5 * r, 0.0), Vec3::new(0.05, 0.05, 1.0) * r, Mat3::IDENTITY, 0x8a8e98), 0.8));
+        for sg in [-1.0f32, 1.0] {
+            p.push(shiny(ellipsoid(h + Vec3::new(sg * 1.0 * r, -0.2 * r, 0.1 * r), Vec3::new(0.08, 0.5, 0.45) * r, 0x7a7e88), 0.7));
+            for k in 0..3 {
+                p.push(shiny(ball(h + Vec3::new(sg * 1.06 * r, 0.1 * r - 0.28 * r * k as f32, 0.3 * r), 0.035 * r, 0xb0b4bc), 0.9));
+            }
         }
     }
     // Énorme masse de forge à tête de fer (marque d'enclume), manche de bois.

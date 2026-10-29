@@ -1,9 +1,9 @@
 //! Caméra qui suit le héros du joueur, à une échelle entière pour garder des pixels nets.
 
 use bevy::{camera::ScalingMode, prelude::*, window::PrimaryWindow};
-use castle_shared::{Layout, Room, ScreenShake};
+use castle_shared::{Layout, PartyId, Player, Room, ScreenShake};
 
-use crate::LocalPlayer;
+use crate::{LocalParty, LocalPlayer};
 
 /// Hauteur visée de la vue, en pixels d'art. L'échelle entière choisie donne au moins cette hauteur.
 const TARGET_VIEW_HEIGHT: f32 = 200.0;
@@ -12,6 +12,30 @@ const FOLLOW_SPEED: f32 = 8.0;
 /// Zoom supplémentaire dans un passage étroit entre deux salles, et vitesse à laquelle on y entre et on en sort.
 const CORRIDOR_ZOOM: f32 = 1.4;
 const ZOOM_SPEED: f32 = 4.0;
+/// Quand les quatre héros de l'équipe sont groupés, on se rapproche jusqu'à les cadrer, sans dépasser ce zoom en plus.
+const TEAM_ZOOM_MAX: f32 = 2.2;
+/// Marge ajoutée autour du groupe (en unités du monde), et taille minimale du cadre pour ne pas zoomer à l'extrême quand ils
+/// sont empilés.
+const TEAM_MARGIN: f32 = 34.0;
+const TEAM_MIN_FRAME: Vec2 = Vec2::new(90.0, 56.0);
+
+/// Cadrage de l'équipe: le zoom supplémentaire qui fait tenir tous ses héros dans la vue (entre 1 et `TEAM_ZOOM_MAX`; 1
+/// s'ils sont trop dispersés pour que ce soit possible) et le point à regarder (le centre du groupe). `base_view` est la
+/// taille de la vue sans zoom supplémentaire, en unités du monde.
+pub fn team_framing(positions: &[Vec2], base_view: Vec2) -> (f32, Vec2) {
+    if positions.is_empty() {
+        return (1.0, Vec2::ZERO);
+    }
+    let (mut low, mut high) = (positions[0], positions[0]);
+    for p in positions {
+        low = low.min(*p);
+        high = high.max(*p);
+    }
+    let center = (low + high) / 2.0;
+    let frame = (high - low + Vec2::splat(2.0 * TEAM_MARGIN)).max(TEAM_MIN_FRAME);
+    let fit = (base_view.x / frame.x).min(base_view.y / frame.y);
+    (fit.clamp(1.0, TEAM_ZOOM_MAX), center)
+}
 
 /// Tremblement d'écran: la « traumatisme » monte avec chaque secousse demandée par le serveur puis retombe;
 /// l'amplitude du tremblement grandit avec son carré, donc les petites secousses restent très légères.
@@ -61,7 +85,10 @@ fn follow_hero(
     room: Option<Res<Room>>,
     layout: Option<Res<Layout>>,
     mut corridor_zoom: Local<Option<f32>>,
+    mut team_zoom: Local<Option<f32>>,
     mut base: Local<Option<Vec2>>,
+    party: Option<Res<LocalParty>>,
+    heroes: Query<(&Transform, &PartyId), (With<Player>, Without<Camera2d>)>,
     mut shake: ResMut<Shake>,
     window: Single<&Window, With<PrimaryWindow>>,
     hero: Option<Single<&Transform, With<LocalPlayer>>>,
@@ -82,9 +109,22 @@ fn follow_hero(
     let target = if in_corridor { CORRIDOR_ZOOM } else { 1.0 };
     let boost = corridor_zoom.get_or_insert(1.0);
     *boost += (target - *boost) * (1.0 - (-ZOOM_SPEED * time.delta_secs()).exp());
+    let corridor_boost = *boost;
 
-    // Échelle entière: un pixel d'art occupe `zoom` pixels d'écran.
-    let zoom = (window.height() / TARGET_VIEW_HEIGHT).floor().max(1.0) * *boost;
+    // Zoom d'équipe: quand les quatre héros sont groupés, on se rapproche pour les cadrer tous.
+    let base_zoom = (window.height() / TARGET_VIEW_HEIGHT).floor().max(1.0);
+    let base_view = Vec2::new(window.width(), window.height()) / base_zoom;
+    let team: Vec<Vec2> = match &party {
+        Some(party) => heroes.iter().filter(|(_, id)| id.0 == party.0).map(|(t, _)| t.translation.truncate()).collect(),
+        None => Vec::new(),
+    };
+    let (team_target, team_center) = if team.len() >= 2 { team_framing(&team, base_view) } else { (1.0, Vec2::ZERO) };
+    let team_boost = team_zoom.get_or_insert(1.0);
+    *team_boost += (team_target - *team_boost) * (1.0 - (-ZOOM_SPEED * time.delta_secs()).exp());
+    let team_boost = *team_boost;
+
+    // Échelle: un pixel d'art occupe `zoom` pixels d'écran (entier au repos, plus fin pendant les zooms d'ambiance).
+    let zoom = base_zoom * corridor_boost.max(team_boost);
     if let Projection::Orthographic(ortho) = &mut *projection {
         let scale = 1.0 / zoom;
         if ortho.scale != scale {
@@ -98,7 +138,10 @@ fn follow_hero(
     // Demi-vue en unités du monde; la caméra ne montre jamais au-delà de la salle.
     let half_view = Vec2::new(window.width(), window.height()) / (2.0 * zoom);
     let limit = ((room.size().as_vec2() * castle_shared::TILE_SIZE) / 2.0 - half_view).max(Vec2::ZERO);
-    let target = hero.translation.truncate().clamp(-limit, limit);
+    // Plus l'équipe est cadrée de près, plus on regarde le centre du groupe (le héros dirigé en fait toujours partie).
+    let grouped = ((team_boost - 1.0) / (TEAM_ZOOM_MAX - 1.0)).clamp(0.0, 1.0);
+    let focus = hero.translation.truncate().lerp(team_center, grouped);
+    let target = focus.clamp(-limit, limit);
 
     // La position « propre » de la caméra est mémorisée à part: la secousse s'y ajoute sans la déformer.
     let t = 1.0 - (-FOLLOW_SPEED * time.delta_secs()).exp();
@@ -113,4 +156,57 @@ fn follow_hero(
     let offset = Vec2::new((at * 61.0).sin() + 0.5 * (at * 97.0).sin(), (at * 53.0).cos() + 0.5 * (at * 89.0).cos()) * intensity;
     transform.translation.x = next.x + offset.x;
     transform.translation.y = next.y + offset.y;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Une vue typique: 340 x 200 unités du monde.
+    const VIEW: Vec2 = Vec2::new(340.0, 200.0);
+
+    fn square(center: Vec2, half: f32) -> Vec<Vec2> {
+        [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)].iter().map(|(x, y)| center + Vec2::new(x * half, y * half)).collect()
+    }
+
+    #[test]
+    fn a_tight_team_is_framed_closely_around_its_center() {
+        let team = square(Vec2::new(500.0, -200.0), 20.0);
+        let (boost, center) = team_framing(&team, VIEW);
+        assert!(boost > 1.4, "un petit groupe doit être bien plus zoomé: {boost}");
+        assert!(boost <= TEAM_ZOOM_MAX);
+        assert_eq!(center, Vec2::new(500.0, -200.0));
+    }
+
+    #[test]
+    fn a_spread_out_team_gets_no_extra_zoom() {
+        // Plus large que la vue: impossible de les cadrer.
+        let team = [Vec2::new(0.0, 0.0), Vec2::new(400.0, 0.0), Vec2::new(0.0, 10.0), Vec2::new(10.0, 10.0)];
+        assert_eq!(team_framing(&team, VIEW).0, 1.0);
+    }
+
+    #[test]
+    fn closer_teams_zoom_more_and_stacked_heroes_do_not_zoom_without_limit() {
+        let zoom = |half: f32| team_framing(&square(Vec2::ZERO, half), VIEW).0;
+        assert!(zoom(10.0) >= zoom(40.0) && zoom(40.0) >= zoom(90.0) && zoom(90.0) >= zoom(160.0));
+        assert!(zoom(40.0) > zoom(90.0), "le zoom grandit quand le groupe se resserre");
+        // Tous au même point: le cadre minimal borne le zoom.
+        let stacked = team_framing(&[Vec2::ZERO; 4], VIEW).0;
+        assert!(stacked <= TEAM_ZOOM_MAX && stacked >= 1.0);
+        // Un héros seul ou personne: rien de particulier.
+        assert_eq!(team_framing(&[], VIEW).0, 1.0);
+    }
+
+    #[test]
+    fn the_whole_team_fits_inside_the_zoomed_view() {
+        for half in [10.0f32, 25.0, 50.0, 70.0, 100.0] {
+            let team = square(Vec2::new(30.0, -40.0), half);
+            let (boost, center) = team_framing(&team, VIEW);
+            let view = VIEW / boost;
+            for p in &team {
+                let offset = (*p - center).abs();
+                assert!(offset.x <= view.x / 2.0 + 1e-3 && offset.y <= view.y / 2.0 + 1e-3, "demi-côté {half}: héros hors de la vue");
+            }
+        }
+    }
 }

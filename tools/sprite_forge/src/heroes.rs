@@ -48,13 +48,53 @@ pub(crate) struct Dims {
 }
 
 impl Dims {
+    /// Noms et valeurs de toutes les proportions réglables.
+    pub(crate) fn fields(&self) -> [(&'static str, f32); 13] {
+        [
+            ("thigh", self.thigh),
+            ("shin", self.shin),
+            ("torso", self.torso),
+            ("hip_x", self.hip_x),
+            ("shoulder_x", self.shoulder_x),
+            ("upper", self.upper),
+            ("fore", self.fore),
+            ("head_r", self.head_r),
+            ("head_rise", self.head_rise),
+            ("leg_r", self.leg_r),
+            ("arm_r", self.arm_r),
+            ("torso_rx", self.torso_rx),
+            ("torso_rz", self.torso_rz),
+        ]
+    }
+
+    /// Applique les proportions réglées dans l'éditeur au modèle `model`.
+    pub(crate) fn tweak(mut self, model: &str) -> Self {
+        use crate::tuning::param;
+        let p = |name: &str, value: f32| param(model, &format!("dims.{name}"), value);
+        self.thigh = p("thigh", self.thigh);
+        self.shin = p("shin", self.shin);
+        self.torso = p("torso", self.torso);
+        self.hip_x = p("hip_x", self.hip_x);
+        self.shoulder_x = p("shoulder_x", self.shoulder_x);
+        self.upper = p("upper", self.upper);
+        self.fore = p("fore", self.fore);
+        self.head_r = p("head_r", self.head_r);
+        self.head_rise = p("head_rise", self.head_rise);
+        self.leg_r = p("leg_r", self.leg_r);
+        self.arm_r = p("arm_r", self.arm_r);
+        self.torso_rx = p("torso_rx", self.torso_rx);
+        self.torso_rz = p("torso_rz", self.torso_rz);
+        self
+    }
+
     fn of(class: Class) -> Self {
-        match class {
+        let dims = match class {
             Class::Knight => Dims { thigh: 0.45, shin: 0.45, torso: 0.5, hip_x: 0.12, shoulder_x: 0.3, upper: 0.29, fore: 0.29, head_r: 0.245, head_rise: 0.12, leg_r: 0.092, arm_r: 0.07, torso_rx: 0.26, torso_rz: 0.17 },
             Class::Sorcerer => Dims { thigh: 0.44, shin: 0.44, torso: 0.46, hip_x: 0.1, shoulder_x: 0.23, upper: 0.27, fore: 0.27, head_r: 0.265, head_rise: 0.12, leg_r: 0.072, arm_r: 0.055, torso_rx: 0.19, torso_rz: 0.13 },
             Class::Ranger => Dims { thigh: 0.46, shin: 0.46, torso: 0.5, hip_x: 0.115, shoulder_x: 0.27, upper: 0.29, fore: 0.29, head_r: 0.245, head_rise: 0.12, leg_r: 0.082, arm_r: 0.062, torso_rx: 0.23, torso_rz: 0.15 },
             Class::Forgebraise => Dims { thigh: 0.3, shin: 0.3, torso: 0.44, hip_x: 0.15, shoulder_x: 0.36, upper: 0.25, fore: 0.25, head_r: 0.29, head_rise: 0.1, leg_r: 0.115, arm_r: 0.09, torso_rx: 0.35, torso_rz: 0.24 },
-        }
+        };
+        dims.tweak(&crate::tuning::hero_key(class))
     }
 }
 
@@ -838,10 +878,21 @@ fn forgebraise(d: &Dims, j: &Joints) -> Vec<Part> {
 }
 
 pub fn build(class: Class, pose: Pose, theme: Theme) -> Vec<Part> {
-    match theme {
+    let mut parts = match theme {
         Theme::Manga => build_manga(class, pose),
         Theme::Gore => crate::heroes_gore::build(class, pose),
         Theme::Medieval => crate::heroes_medieval::build(class, pose),
+    };
+    crate::tuning::apply(&crate::tuning::hero_key(class), &mut parts);
+    parts
+}
+
+/// Proportions d'un héros dans ce thème, avec les réglages en vigueur.
+pub(crate) fn dims_of(class: Class, theme: Theme) -> Dims {
+    match theme {
+        Theme::Manga => Dims::of(class),
+        Theme::Gore => crate::heroes_gore::dims(class),
+        Theme::Medieval => crate::heroes_medieval::dims(class),
     }
 }
 
@@ -857,11 +908,8 @@ fn build_manga(class: Class, pose: Pose) -> Vec<Part> {
 }
 
 /// Hauteur du centre de la tête d'un héros au repos, selon le thème (sert à cadrer les vignettes).
+#[allow(dead_code)]
 pub fn head_height(class: Class, theme: Theme) -> f32 {
-    let dims = match theme {
-        Theme::Manga => Dims::of(class),
-        Theme::Gore => crate::heroes_gore::dims(class),
-        Theme::Medieval => crate::heroes_medieval::dims(class),
-    };
+    let dims = dims_of(class, theme);
     joints(&dims, Pose::Idle(0.0), None).head.y
 }

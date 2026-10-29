@@ -135,7 +135,18 @@ pub fn build(prop: Prop, t: f32) -> Vec<Part> {
             parts.push(glow(ball(c + Vec3::new(0.0, 0.0, 0.24), 0.11, 0xc01020)));
             parts.push(ellipsoid(c + Vec3::new(0.0, 0.0, 0.32), Vec3::new(0.025, 0.1, 0.02), DARK));
         }
-        Prop::Key => {}
+        Prop::Key | Prop::Potion => {}
+        // Les éléments de l'énigme gardent le même dessin dans tous les styles: leurs couleurs disent à qui ils s'adressent.
+        Prop::WallRune
+        | Prop::WallGearsJammed
+        | Prop::WallGearsFixed
+        | Prop::WallTargetEmpty
+        | Prop::WallTargetMounted
+        | Prop::WallTargetHit
+        | Prop::Portcullis
+        | Prop::Ingredient
+        | Prop::GearPart
+        | Prop::TargetDisc => {}
     }
     let _ = Mat3::IDENTITY;
     parts

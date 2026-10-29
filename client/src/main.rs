@@ -12,7 +12,7 @@ use bevy_replicon_renet::{
 };
 use castle_shared::*;
 
-use art::{Art, HERO_ANCHOR, PROP_ANCHOR, Prop, SPRITE_SIZE, WalkCycle, direction_index, fx, hero_index, monster_index, object, object_index, projectile};
+use art::{Art, HERO_ANCHOR, PROP_ANCHOR, Prop, SPRITE_SIZE, WALL_ANCHOR, WalkCycle, direction_index, fx, hero_index, monster_index, object, object_index, projectile};
 
 mod art;
 mod camera;
@@ -22,6 +22,7 @@ mod host;
 mod i18n;
 mod lighting;
 mod pause;
+mod puzzle;
 mod level_intro;
 mod quest;
 mod title;
@@ -32,8 +33,14 @@ const SMOOTHING: f32 = 20.0;
 
 fn main() {
     // Assets du dépôt si on lance depuis une compilation du dépôt, sinon à côté du programme.
+    // Un dossier `assets` à côté du programme (version livrée) passe avant celui du dépôt.
+    let beside_exe = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.join("assets")));
     let dev_assets = concat!(env!("CARGO_MANIFEST_DIR"), "/assets");
-    let assets_path = if std::path::Path::new(dev_assets).exists() { dev_assets } else { "assets" };
+    let assets_path = match beside_exe {
+        Some(dir) if dir.exists() => dir.to_string_lossy().into_owned(),
+        _ if std::path::Path::new(dev_assets).exists() => dev_assets.to_string(),
+        _ => "assets".to_string(),
+    };
     App::new()
         .add_plugins((
             // `nearest` garde les pixels nets.
@@ -65,6 +72,7 @@ fn main() {
             gore::GorePlugin,
             dialogue::DialoguePlugin,
         ))
+        .add_plugins(puzzle::PuzzlePlugin)
         .insert_resource(ClearColor(Color::BLACK))
         // Fenêtre au premier plan: rendu continu. En arrière-plan: le jeu se met presque au repos.
         .insert_resource(bevy::winit::WinitSettings::game())
@@ -81,7 +89,6 @@ fn main() {
                 smooth_positions,
                 draw_health_bars,
                 draw_effects,
-                update_secrets,
                 update_props,
                 fade_attack_fx,
                 animate_projectiles,
@@ -231,6 +238,7 @@ fn dress_new_entities(
     doors: Query<(Entity, &Position, &Door), Added<Door>>,
     traps: Query<(Entity, &Position), Added<Trap>>,
     portals: Query<(Entity, &Position), Added<Portal>>,
+    portcullises: Query<(Entity, &Position, &Portcullis), Added<Portcullis>>,
 ) {
     // Un objet animé: sprite de la ligne `row` de la planche, ancré au sol.
     let prop = |row: usize| {
@@ -275,6 +283,10 @@ fn dress_new_entities(
             PickupKind::Coin => object::COIN,
             PickupKind::Food => object::FOOD,
             PickupKind::Key => object::KEY,
+            PickupKind::Potion => object::POTION,
+            PickupKind::Ingredient => object::INGREDIENT,
+            PickupKind::GearPart => object::GEAR_PART,
+            PickupKind::TargetDisc => object::TARGET_DISC,
         };
         commands.entity(entity).insert((
             prop(index),
@@ -282,17 +294,35 @@ fn dress_new_entities(
         ));
     }
     for (entity, pos, interactable) in &interactables {
-        // La porte royale est dessinée par `doors`.
-        let index = match interactable.kind {
-            InteractKind::Lever => object::LEVER,
-            InteractKind::Rune => object::RUNE,
-            InteractKind::Mechanism => object::MECHANISM,
+        // La porte royale est dessinée par `doors`. Les panneaux sont dans le mur: vus de face, centrés sur leur tuile
+        // (leur état est ensuite suivi par `update_props`).
+        let row = match interactable.kind {
+            InteractKind::Target => object::WALL_TARGET_EMPTY,
+            InteractKind::Rune => object::WALL_RUNE,
+            InteractKind::Mechanism => object::WALL_GEARS_JAMMED,
             InteractKind::Push => continue,
         };
         commands.entity(entity).insert((
-            prop(index),
+            art.objects.sprite_sized(object_index(row, 0), Vec2::splat(SPRITE_SIZE)),
+            Prop(row),
+            WALL_ANCHOR,
             Transform::from_translation(pos.0.extend(0.4)),
         ));
+    }
+    // La herse: deux moitiés côte à côte, comme la porte.
+    for (entity, pos, herse) in &portcullises {
+        let axis = if herse.vertical { Vec2::Y } else { Vec2::X };
+        commands
+            .entity(entity)
+            .insert((Transform::from_translation(pos.0.extend(0.75)), Visibility::default()))
+            .with_children(|parent| {
+                for side in [-1.0, 1.0] {
+                    parent.spawn((
+                        prop(object::PORTCULLIS),
+                        Transform::from_translation((axis * side * TILE_SIZE / 2.0).extend(0.0)),
+                    ));
+                }
+            });
     }
     for (entity, pos) in &portals {
         commands.entity(entity).insert((
@@ -345,43 +375,28 @@ fn dress_new_entities(
 }
 
 /// Un héros à terre devient translucide.
-fn fade_downed(mut players: Query<(&mut Sprite, Has<Downed>), With<Player>>) {
-    for (mut sprite, downed) in &mut players {
-        let color = Color::WHITE.with_alpha(if downed { 0.35 } else { 1.0 });
+/// Un héros à terre est translucide; sous potion de régénération il pulse en vert.
+fn fade_downed(time: Res<Time>, mut players: Query<(&mut Sprite, Has<Downed>, Has<Regenerating>), With<Player>>) {
+    let pulse = 0.5 + 0.5 * (time.elapsed_secs() * 6.0).sin();
+    for (mut sprite, downed, regenerating) in &mut players {
+        let color = if downed {
+            Color::WHITE.with_alpha(0.35)
+        } else if regenerating {
+            Color::srgb(0.65 + 0.2 * pulse, 1.0, 0.7 + 0.2 * pulse)
+        } else {
+            Color::WHITE
+        };
         if sprite.color != color {
             sprite.color = color;
         }
     }
 }
 
-/// Leviers et pièges ne se voient qu'à proximité d'un héros qui détecte les secrets
-/// (Ensorceleur ou Rôdeur, de n'importe quel joueur).
-fn update_secrets(
-    detectors: Query<(&Position, &HeroClass), With<Player>>,
-    mut secrets: Query<(&Position, &mut Visibility, Option<&Interactable>), Or<(With<Trap>, With<Interactable>)>>,
-) {
-    let detectors: Vec<Vec2> = detectors
-        .iter()
-        .filter(|(_, class)| class.detects_secrets())
-        .map(|(p, _)| p.0)
-        .collect();
-    for (pos, mut visibility, interactable) in &mut secrets {
-        if interactable.is_some_and(|i| !i.kind.is_secret()) {
-            continue;
-        }
-        let seen = interactable.is_some_and(|i| i.done)
-            || detectors.iter().any(|d| d.distance(pos.0) <= DETECT_RADIUS);
-        let target = if seen { Visibility::Inherited } else { Visibility::Hidden };
-        if *visibility != target {
-            *visibility = target;
-        }
-    }
-}
-
-/// Apparence des objets selon leur état: piège désarmé, étape terminée.
+/// Apparence des objets selon leur état: piège réveillé ou non, panneaux d'énigme (support vide ou cible garnie, mécanisme
+/// grippé ou réparé), rune éteinte une fois l'enchantement dissipé.
 fn update_props(
     mut traps: Query<(&Trap, &mut Prop), Without<Interactable>>,
-    mut interactables: Query<(&Interactable, &mut Sprite), Without<Trap>>,
+    mut interactables: Query<(&Interactable, &mut Sprite, &mut Prop), Without<Trap>>,
 ) {
     for (trap, mut prop) in &mut traps {
         let row = if trap.armed { object::TRAP_ARMED } else { object::TRAP_OFF };
@@ -389,8 +404,21 @@ fn update_props(
             prop.0 = row;
         }
     }
-    for (interactable, mut sprite) in &mut interactables {
-        let color = Color::WHITE.with_alpha(if interactable.done { 0.35 } else { 1.0 });
+    for (interactable, mut sprite, mut prop) in &mut interactables {
+        let row = match interactable.kind {
+            InteractKind::Target if interactable.done => object::WALL_TARGET_HIT,
+            InteractKind::Target if interactable.mounted => object::WALL_TARGET_MOUNTED,
+            InteractKind::Target => object::WALL_TARGET_EMPTY,
+            InteractKind::Rune => object::WALL_RUNE,
+            InteractKind::Mechanism if interactable.done => object::WALL_GEARS_FIXED,
+            InteractKind::Mechanism => object::WALL_GEARS_JAMMED,
+            InteractKind::Push => continue,
+        };
+        if prop.0 != row {
+            prop.0 = row;
+        }
+        // La rune s'éteint quand l'enchantement est dissipé; les autres panneaux restent vifs, leur dessin change.
+        let color = Color::WHITE.with_alpha(if interactable.kind == InteractKind::Rune && interactable.done { 0.35 } else { 1.0 });
         if sprite.color != color {
             sprite.color = color;
         }
@@ -420,15 +448,33 @@ fn draw_effects(
     zones: Query<(&Position, &Zone)>,
     shielded: Query<&Transform, With<Shielded>>,
     actions: Query<(&Position, &Interactable)>,
+    wards: Query<(&Position, &Ward)>,
+    time: Res<Time>,
 ) {
-    // Avancement d'une action en cours (levier, rune, mécanisme, porte).
+    // Avancement d'une action en cours (cible, rune, mécanisme, porte), dans la couleur de la classe qui agit. Les
+    // panneaux sont dans le mur: la jauge est dessinée sur le sol, devant eux.
     for (pos, interactable) in &actions {
         if interactable.done || interactable.progress <= 0.0 {
             continue;
         }
-        let origin = pos.0 + Vec2::new(-8.0, 12.0);
+        let below = if interactable.kind == InteractKind::Push { 12.0 } else { -12.0 };
+        let origin = pos.0 + Vec2::new(-8.0, below);
         gizmos.line_2d(origin, origin + Vec2::X * 16.0, Color::from(css::DARK_SLATE_GRAY));
-        gizmos.line_2d(origin, origin + Vec2::X * 16.0 * interactable.progress, Color::from(css::GOLD));
+        gizmos.line_2d(origin, origin + Vec2::X * 16.0 * interactable.progress, class_color(interactable.kind.class()));
+    }
+    // L'enchantement de la porte royale: cercles violets qui palpitent, et des runes qui tournent sur le bord.
+    let t = time.elapsed_secs();
+    for (pos, ward) in &wards {
+        let violet = Color::from(css::MEDIUM_ORCHID);
+        let breathe = 0.5 + 0.5 * (t * 2.5).sin();
+        for (k, scale) in [1.0f32, 0.9, 0.78].into_iter().enumerate() {
+            gizmos.circle_2d(Isometry2d::from_translation(pos.0), ward.radius * scale, violet.with_alpha(0.25 + 0.3 * breathe - 0.07 * k as f32));
+        }
+        for k in 0..16 {
+            let angle = k as f32 * std::f32::consts::TAU / 16.0 + t * 0.4;
+            let (dir, outer) = (Vec2::from_angle(angle), ward.radius);
+            gizmos.line_2d(pos.0 + dir * (outer - 5.0), pos.0 + dir * (outer + 1.0), violet.with_alpha(0.6));
+        }
     }
     for (pos, zone) in &zones {
         let color = class_color(zone.class);

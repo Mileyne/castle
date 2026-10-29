@@ -31,8 +31,6 @@ pub const GENERATOR_HALF_SIZE: f32 = 8.0;
 /// Rayon d'un projectile, en pixels.
 pub const PROJECTILE_RADIUS: f32 = 3.0;
 
-/// Distance à laquelle un héros qui détecte les secrets révèle leviers et pièges.
-pub const DETECT_RADIUS: f32 = 90.0;
 /// Distance maximale pour agir sur un objet (touche d'action).
 pub const INTERACT_RANGE: f32 = 18.0;
 
@@ -60,11 +58,6 @@ impl HeroClass {
         HeroClass::Ranger,
         HeroClass::Forgebraise,
     ];
-
-    /// Passif de l'Ensorceleur et du Rôdeur: voir les secrets et les pièges magiques.
-    pub fn detects_secrets(self) -> bool {
-        matches!(self, Self::Sorcerer | Self::Ranger)
-    }
 }
 
 /// Statistiques de base d'une classe.
@@ -86,10 +79,10 @@ pub struct ClassStats {
 impl HeroClass {
     pub fn stats(self) -> ClassStats {
         match self {
-            Self::Knight => ClassStats { name_key: "class-knight", max_hp: 150, speed: 70.0, special_key: "special-knight", max_mana: 60.0, mana_regen: 3.0, special_cost: 30.0, special_cooldown: 12.0, attack: Attack::Melee { range: 22.0, damage: 12.0, cooldown: 0.45 } },
-            Self::Sorcerer => ClassStats { name_key: "class-sorcerer", max_hp: 80, speed: 80.0, special_key: "special-sorcerer", max_mana: 100.0, mana_regen: 6.0, special_cost: 40.0, special_cooldown: 8.0, attack: Attack::Shot { speed: 180.0, damage: 10.0, cooldown: 0.5, lifetime: 1.2 } },
-            Self::Ranger => ClassStats { name_key: "class-ranger", max_hp: 100, speed: 95.0, special_key: "special-ranger", max_mana: 70.0, mana_regen: 4.0, special_cost: 35.0, special_cooldown: 10.0, attack: Attack::Shot { speed: 260.0, damage: 8.0, cooldown: 0.35, lifetime: 1.0 } },
-            Self::Forgebraise => ClassStats { name_key: "class-forgebraise", max_hp: 110, speed: 75.0, special_key: "special-forgebraise", max_mana: 80.0, mana_regen: 4.0, special_cost: 35.0, special_cooldown: 14.0, attack: Attack::Melee { range: 20.0, damage: 16.0, cooldown: 0.7 } },
+            Self::Knight => ClassStats { name_key: "class-knight", max_hp: 260, speed: 70.0, special_key: "special-knight", max_mana: 60.0, mana_regen: 3.0, special_cost: 30.0, special_cooldown: 12.0, attack: Attack::Melee { range: 22.0, damage: 12.0, cooldown: 0.45 } },
+            Self::Sorcerer => ClassStats { name_key: "class-sorcerer", max_hp: 150, speed: 80.0, special_key: "special-sorcerer", max_mana: 100.0, mana_regen: 6.0, special_cost: 40.0, special_cooldown: 8.0, attack: Attack::Shot { speed: 180.0, damage: 10.0, cooldown: 0.5, lifetime: 1.2 } },
+            Self::Ranger => ClassStats { name_key: "class-ranger", max_hp: 180, speed: 95.0, special_key: "special-ranger", max_mana: 70.0, mana_regen: 4.0, special_cost: 35.0, special_cooldown: 10.0, attack: Attack::Shot { speed: 260.0, damage: 8.0, cooldown: 0.35, lifetime: 1.0 } },
+            Self::Forgebraise => ClassStats { name_key: "class-forgebraise", max_hp: 200, speed: 75.0, special_key: "special-forgebraise", max_mana: 80.0, mana_regen: 4.0, special_cost: 35.0, special_cooldown: 14.0, attack: Attack::Melee { range: 20.0, damage: 16.0, cooldown: 0.7 } },
         }
     }
 }
@@ -308,6 +301,12 @@ impl Health {
 pub enum MonsterKind {
     Skeleton,
     Bat,
+    /// Petit, vif et fragile.
+    Goblin,
+    /// Massif, lent, frappe fort.
+    Orc,
+    /// Décharné, rapide et mordant.
+    Ghoul,
 }
 
 pub struct MonsterStats {
@@ -325,7 +324,34 @@ impl MonsterKind {
         match self {
             Self::Skeleton => MonsterStats { max_hp: 30.0, speed: 40.0, damage: 8.0, cooldown: 0.8, half_size: 5.0, sight: 110.0 },
             Self::Bat => MonsterStats { max_hp: 12.0, speed: 75.0, damage: 4.0, cooldown: 0.6, half_size: 3.5, sight: 150.0 },
+            Self::Goblin => MonsterStats { max_hp: 18.0, speed: 62.0, damage: 5.0, cooldown: 0.5, half_size: 4.0, sight: 130.0 },
+            Self::Orc => MonsterStats { max_hp: 70.0, speed: 33.0, damage: 14.0, cooldown: 1.1, half_size: 7.0, sight: 100.0 },
+            Self::Ghoul => MonsterStats { max_hp: 40.0, speed: 52.0, damage: 9.0, cooldown: 0.7, half_size: 5.0, sight: 140.0 },
         }
+    }
+
+    /// Les monstres qu'un générateur peut produire à ce niveau, avec leur poids relatif: le gobelin arrive d'emblée,
+    /// la goule au niveau 2 et l'orque au niveau 3, pour que la difficulté monte avec le château.
+    pub fn spawn_table(level: u32) -> &'static [(MonsterKind, f32)] {
+        match level {
+            0 | 1 => &[(Self::Skeleton, 0.40), (Self::Bat, 0.25), (Self::Goblin, 0.35)],
+            2 => &[(Self::Skeleton, 0.30), (Self::Bat, 0.20), (Self::Goblin, 0.25), (Self::Ghoul, 0.25)],
+            _ => &[(Self::Skeleton, 0.22), (Self::Bat, 0.15), (Self::Goblin, 0.20), (Self::Ghoul, 0.20), (Self::Orc, 0.23)],
+        }
+    }
+
+    /// Le monstre tiré par `roll` (entre 0 et 1) dans la table du niveau.
+    pub fn pick(level: u32, roll: f32) -> MonsterKind {
+        let table = Self::spawn_table(level);
+        let total: f32 = table.iter().map(|(_, weight)| weight).sum();
+        let mut left = roll.clamp(0.0, 1.0) * total;
+        for (kind, weight) in table {
+            if left < *weight {
+                return *kind;
+            }
+            left -= weight;
+        }
+        table[table.len() - 1].0
     }
 }
 
@@ -342,7 +368,19 @@ pub enum PickupKind {
     Coin,
     Food,
     Key,
+    /// Ingrédient du sort qui dissipe l'enchantement de la porte royale (violet, pour l'Ensorceleur).
+    Ingredient,
+    /// Pièce de rechange du mécanisme grippé (orange, pour le Forgebraise).
+    GearPart,
+    /// Disque de la cible de la herse (vert, pour le Rôdeur).
+    TargetDisc,
+    /// Potion de régénération: soigne peu à peu toute l'équipe de celui qui la boit.
+    Potion,
 }
+
+/// Sur un héros qui boit une potion de régénération: le client le teinte de vert tant que l'effet dure.
+#[derive(Component, Serialize, Deserialize)]
+pub struct Regenerating;
 
 /// Objet ramassable au sol.
 #[derive(Component, Clone, Copy, Serialize, Deserialize)]
@@ -456,14 +494,15 @@ pub struct Zone {
 #[derive(Component, Serialize, Deserialize)]
 pub struct Turret;
 
-/// Étapes de l'énigme de la porte royale: chacune demande une classe précise.
+/// Obstacles de la porte royale: chacun demande une classe précise, et la couleur de son panneau est celle de cette
+/// classe (violet pour l'Ensorceleur, orange pour le Forgebraise, vert pour le Rôdeur, acier pour le Chevalier).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InteractKind {
-    /// Levier caché, actionné par le Rôdeur.
-    Lever,
-    /// Rune à dissiper, par l'Ensorceleur.
+    /// Cible de la herse, dans le mur: le Rôdeur y fixe le disque trouvé, puis la touche d'une flèche.
+    Target,
+    /// Rune de l'enchantement, dans le mur: l'Ensorceleur y verse les ingrédients trouvés pour le dissiper.
     Rune,
-    /// Mécanisme à réparer, par le Forgebraise.
+    /// Mécanisme grippé, dans le mur: le Forgebraise y monte la pièce de rechange trouvée.
     Mechanism,
     /// La porte elle-même, que le Chevalier pousse une fois le reste fait.
     Push,
@@ -472,26 +511,21 @@ pub enum InteractKind {
 impl InteractKind {
     pub fn class(self) -> HeroClass {
         match self {
-            Self::Lever => HeroClass::Ranger,
+            Self::Target => HeroClass::Ranger,
             Self::Rune => HeroClass::Sorcerer,
             Self::Mechanism => HeroClass::Forgebraise,
             Self::Push => HeroClass::Knight,
         }
     }
 
-    /// Temps pendant lequel il faut maintenir la touche d'action, en secondes.
+    /// Temps pendant lequel il faut maintenir la touche d'action, en secondes. La cible ne demande que de fixer le disque.
     pub fn hold_time(self) -> f32 {
         match self {
-            Self::Lever => 0.8,
+            Self::Target => 0.8,
             Self::Rune => 1.5,
             Self::Mechanism => 2.5,
-            Self::Push => 2.0,
+            Self::Push => 3.0,
         }
-    }
-
-    /// Les secrets ne se voient qu'à proximité d'un héros qui les détecte.
-    pub fn is_secret(self) -> bool {
-        matches!(self, Self::Lever)
     }
 }
 
@@ -502,12 +536,37 @@ pub struct Interactable {
     /// Avancement de l'action en cours, de 0 à 1.
     pub progress: f32,
     pub done: bool,
+    /// Cible seulement: le disque est fixé, il ne reste qu'à le toucher d'une flèche.
+    pub mounted: bool,
 }
 
 impl Interactable {
     pub fn new(kind: InteractKind) -> Self {
-        Self { kind, progress: 0.0, done: false }
+        Self { kind, progress: 0.0, done: false, mounted: false }
     }
+}
+
+/// Ce que l'équipe a trouvé pour l'énigme de la porte royale (une seule réserve, partagée par tous les joueurs).
+#[derive(Component, Clone, Copy, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PuzzleKit {
+    pub ingredients: u8,
+    pub gear: u8,
+    pub target: u8,
+}
+
+/// Nombre d'ingrédients nécessaires pour dissiper l'enchantement.
+pub const INGREDIENTS_NEEDED: u8 = 3;
+
+/// Enchantement qui repousse tout héros à moins de `radius` du centre de la porte royale.
+#[derive(Component, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct Ward {
+    pub radius: f32,
+}
+
+/// Herse qui barre le couloir devant la porte royale, jusqu'à ce que la cible soit touchée.
+#[derive(Component, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct Portcullis {
+    pub vertical: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -587,6 +646,14 @@ pub struct DialogueFinished;
 #[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct ScreenShake(pub f32);
 
+/// Un joueur a maintenu Entrée: le serveur purge le dialogue en cours et ceux sur le point de démarrer.
+#[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct DialogueSkip;
+
+/// Le serveur a purgé les dialogues: chacun abandonne la scène qu'il affichait.
+#[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct DialogueAbort;
+
 /// Le joueur ouvre ou ferme le menu de pause. Le serveur ne s'arrête que pour une partie solo.
 #[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct SetPause(pub bool);
@@ -614,6 +681,7 @@ pub struct CastleSharedPlugin;
 impl Plugin for CastleSharedPlugin {
     fn build(&self, app: &mut App) {
         app.replicate::<Expedition>()
+            .replicate::<Regenerating>()
             .replicate::<Player>()
             .replicate::<PartyId>()
             .replicate::<HeroClass>()
@@ -622,6 +690,9 @@ impl Plugin for CastleSharedPlugin {
             .replicate::<Interactable>()
             .replicate::<Door>()
             .replicate::<Portal>()
+            .replicate::<PuzzleKit>()
+            .replicate::<Ward>()
+            .replicate::<Portcullis>()
             .replicate::<Trap>()
             .replicate::<Mana>()
             .replicate::<Shielded>()
@@ -645,6 +716,8 @@ impl Plugin for CastleSharedPlugin {
             .add_server_event::<DialogueBegin>(Channel::Ordered)
             .add_server_event::<DialogueAdvance>(Channel::Ordered)
             .add_server_event::<DialogueSelect>(Channel::Ordered)
+            .add_server_event::<DialogueAbort>(Channel::Ordered)
+            .add_client_event::<DialogueSkip>(Channel::Ordered)
             .add_client_event::<DialogueRequestAdvance>(Channel::Ordered)
             .add_client_event::<DialogueVote>(Channel::Ordered)
             .add_client_event::<DialogueFinished>(Channel::Ordered)
@@ -751,5 +824,63 @@ mod quest_tests {
         assert_eq!(QuestKind::for_level(3), (QuestKind::Rescue, 2));
         assert_eq!(QuestKind::for_level(4), (QuestKind::Hunt, 8));
         assert!(QuestKind::for_level(100).1 > 0);
+    }
+}
+
+#[cfg(test)]
+mod monster_tests {
+    use super::*;
+
+    #[test]
+    fn spawn_tables_are_complete_and_grow_with_the_level() {
+        let kinds = |level| MonsterKind::spawn_table(level).iter().map(|(k, _)| *k).collect::<Vec<_>>();
+        for level in 1..8 {
+            let total: f32 = MonsterKind::spawn_table(level).iter().map(|(_, w)| w).sum();
+            assert!((total - 1.0).abs() < 1e-5, "niveau {level}: poids {total}");
+        }
+        assert!(kinds(1).contains(&MonsterKind::Goblin));
+        assert!(!kinds(1).contains(&MonsterKind::Ghoul) && !kinds(1).contains(&MonsterKind::Orc));
+        assert!(kinds(2).contains(&MonsterKind::Ghoul) && !kinds(2).contains(&MonsterKind::Orc));
+        assert!(kinds(3).contains(&MonsterKind::Orc));
+    }
+
+    #[test]
+    fn pick_covers_the_whole_table_and_never_panics() {
+        for level in [0, 1, 2, 3, 10] {
+            let mut seen = std::collections::HashSet::new();
+            for step in 0..=1000 {
+                seen.insert(format!("{:?}", MonsterKind::pick(level, step as f32 / 1000.0)));
+            }
+            assert_eq!(seen.len(), MonsterKind::spawn_table(level).len(), "niveau {level}");
+        }
+        assert_eq!(MonsterKind::pick(3, 0.0), MonsterKind::Skeleton);
+        assert_eq!(MonsterKind::pick(3, 1.0), MonsterKind::Orc);
+        // Une valeur hors bornes reste dans la table.
+        assert_eq!(MonsterKind::pick(1, 5.0), MonsterKind::Goblin);
+    }
+
+    #[test]
+    fn heavier_monsters_hit_harder_and_move_slower() {
+        let (goblin, orc) = (MonsterKind::Goblin.stats(), MonsterKind::Orc.stats());
+        assert!(orc.max_hp > goblin.max_hp && orc.damage > goblin.damage && orc.speed < goblin.speed);
+        assert!(orc.half_size > goblin.half_size);
+    }
+}
+
+#[cfg(test)]
+mod hero_tests {
+    use super::*;
+
+    #[test]
+    fn heroes_can_take_several_hits_from_every_monster() {
+        // Même le plus faible des héros encaisse plusieurs coups du plus dur des monstres.
+        let strongest = [MonsterKind::Skeleton, MonsterKind::Bat, MonsterKind::Goblin, MonsterKind::Orc, MonsterKind::Ghoul]
+            .into_iter()
+            .map(|m| m.stats().damage)
+            .fold(0.0, f32::max);
+        for class in HeroClass::ALL {
+            let hits = class.stats().max_hp as f32 / strongest;
+            assert!(hits >= 5.0, "{class:?} ne survit qu'à {hits:.1} coups");
+        }
     }
 }

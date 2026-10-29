@@ -4,9 +4,10 @@
 //! seule la graine circule sur le réseau.
 
 use bevy::prelude::*;
+
 use serde::{Deserialize, Serialize};
 
-use crate::{DoorKind, Room, Tile};
+use crate::{DoorKind, Room, TILE_SIZE, Tile};
 
 /// Grille de cellules, une salle par cellule, et taille d'une cellule en tuiles.
 pub const GRID: UVec2 = UVec2::new(4, 3);
@@ -116,8 +117,99 @@ pub struct Layout {
     pub start: usize,
     pub exit: usize,
     pub treasure: Option<usize>,
-    /// Salles où se trouvent le levier, la rune et le mécanisme de la porte royale.
-    pub puzzle_rooms: [usize; 3],
+}
+
+/// Rayon de l'enchantement qui interdit d'approcher la porte royale, en pixels.
+pub const WARD_RADIUS: f32 = 72.0;
+
+/// Emplacements de l'énigme de la porte royale, en coordonnées du monde.
+#[derive(Clone, Debug)]
+pub struct PuzzleSites {
+    /// Centre de la porte royale (deux tuiles).
+    pub door: Vec2,
+    /// Centre de la herse, une tuile devant la porte, côté couloir.
+    pub portcullis: Vec2,
+    /// La porte et la herse s'étendent en hauteur (couloir horizontal) quand c'est vrai.
+    pub vertical: bool,
+    /// Trois tuiles de mur (faces tournées vers une salle) où poser les panneaux; le sol est libre juste devant.
+    pub panels: [Vec2; 3],
+}
+
+impl Layout {
+    /// Le couloir de la porte royale: la salle `a` est la salle de sortie, `b` l'antichambre.
+    pub fn royal_connection(&self) -> &Connection {
+        self.connections
+            .iter()
+            .find(|c| c.door == Some(DoorKind::Royal))
+            .expect("le château a toujours une porte royale")
+    }
+
+    /// Où poser la herse, l'enchantement et les trois panneaux de la porte royale. Les panneaux sont des tuiles de mur
+    /// tournées vers l'antichambre (ou, à défaut de place, vers ses voisines), hors de portée de l'enchantement.
+    pub fn puzzle_sites(&self, room: &Room) -> PuzzleSites {
+        let conn = self.royal_connection();
+        let (a, b) = (conn.a, conn.b);
+        let second = if conn.door_vertical { conn.door_min + UVec2::Y } else { conn.door_min + UVec2::X };
+        let door = (room.tile_center(conn.door_min.x, conn.door_min.y) + room.tile_center(second.x, second.y)) / 2.0;
+        // Le couloir part de la salle de sortie: « vers l'extérieur » s'éloigne de son centre.
+        let exit_center = self.rooms[a].center();
+        let outward = if conn.door_vertical {
+            Vec2::new(if conn.door_min.x > exit_center.x { 1.0 } else { -1.0 }, 0.0)
+        } else {
+            Vec2::new(0.0, if conn.door_min.y > exit_center.y { 1.0 } else { -1.0 })
+        };
+        let portcullis = door + outward * TILE_SIZE;
+
+        // Salles où chercher des murs: l'antichambre d'abord, puis ses voisines de proche en proche.
+        let mut order = vec![b];
+        let mut next = 0;
+        while next < order.len() && order.len() < 5 {
+            let current = order[next];
+            next += 1;
+            for c in &self.connections {
+                let other = if c.a == current { c.b } else if c.b == current { c.a } else { continue };
+                if other != a && !order.contains(&other) {
+                    order.push(other);
+                }
+            }
+        }
+        let scramble = |x: u32, y: u32| (x.wrapping_mul(73856093) ^ y.wrapping_mul(19349663) ^ conn.door_min.x.wrapping_mul(83492791)) >> 3;
+        let mut panels: Vec<(UVec2, Vec2)> = Vec::new();
+        for min_gap in [4u32, 3, 2, 1] {
+            panels.clear();
+            for &index in &order {
+                let info = &self.rooms[index];
+                let y = info.max.y + 1;
+                let mut candidates: Vec<UVec2> = (info.min.x..=info.max.x)
+                    .map(|x| UVec2::new(x, y))
+                    .filter(|t| {
+                        let (x, y) = (t.x as i32, t.y as i32);
+                        room.tile(x, y) == Tile::Wall
+                            && [-1, 0, 1].iter().all(|dx| room.tile(x + dx, y - 1) == Tile::Floor)
+                            && room.tile_center(t.x, t.y).distance(door) >= WARD_RADIUS + 32.0
+                    })
+                    .collect();
+                candidates.sort_by_key(|t| scramble(t.x, t.y));
+                for t in candidates {
+                    if panels.iter().all(|(p, _)| p.y != t.y || p.x.abs_diff(t.x) >= min_gap) {
+                        panels.push((t, room.tile_center(t.x, t.y)));
+                        if panels.len() == 3 {
+                            break;
+                        }
+                    }
+                }
+                if panels.len() == 3 {
+                    break;
+                }
+            }
+            if panels.len() == 3 {
+                break;
+            }
+        }
+        let positions: Vec<Vec2> = panels.iter().map(|(_, p)| *p).collect();
+        let panels: [Vec2; 3] = positions.try_into().expect("trois panneaux trouvent toujours une place");
+        PuzzleSites { door, portcullis, vertical: conn.door_vertical, panels }
+    }
 }
 
 pub struct Dungeon {
@@ -293,17 +385,9 @@ impl Dungeon {
             }
         }
 
-        // Levier, rune et mécanisme dans trois salles de combat différentes.
-        let mut combat: Vec<usize> = (0..cell_count)
-            .filter(|&i| rooms[i].kind == RoomKind::Combat)
-            .collect();
-        rng.shuffle(&mut combat);
-        let pick = |n: usize| combat[n % combat.len()];
-        let puzzle_rooms = [pick(0), pick(1), pick(2)];
-
         Self {
             room,
-            layout: Layout { rooms, connections, start, exit, treasure, puzzle_rooms },
+            layout: Layout { rooms, connections, start, exit, treasure },
         }
     }
 }
@@ -356,6 +440,49 @@ fn carve_corridor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sur beaucoup de châteaux: trois panneaux distincts sur des faces de mur, hors de l'enchantement, et une herse qui
+    /// tient dans le couloir devant la porte royale.
+    #[test]
+    fn puzzle_sites_fit_every_castle() {
+        for seed in 0..500u64 {
+            let dungeon = Dungeon::generate(seed);
+            let (room, layout) = (&dungeon.room, &dungeon.layout);
+            let sites = layout.puzzle_sites(room);
+            let half = TILE_SIZE / 2.0;
+            for (i, panel) in sites.panels.iter().enumerate() {
+                let tile = |p: Vec2| (((p.x - room.tile_center(0, 0).x) / TILE_SIZE).round() as i32, ((p.y - room.tile_center(0, 0).y) / TILE_SIZE).round() as i32);
+                let (x, y) = tile(*panel);
+                assert_eq!(room.tile(x, y), Tile::Wall, "seed {seed}: le panneau {i} n'est pas dans un mur");
+                assert_eq!(room.tile(x, y - 1), Tile::Floor, "seed {seed}: rien de libre devant le panneau {i}");
+                assert!(panel.distance(sites.door) >= WARD_RADIUS + 16.0, "seed {seed}: panneau {i} sous l'enchantement");
+                for other in &sites.panels[i + 1..] {
+                    assert!(panel.distance(*other) >= TILE_SIZE, "seed {seed}: deux panneaux au même endroit");
+                }
+            }
+            // La herse couvre deux tuiles de couloir libres, une tuile devant la porte.
+            let along = if sites.vertical { Vec2::Y } else { Vec2::X };
+            for side in [-1.0f32, 1.0] {
+                let p = sites.portcullis + along * side * half;
+                let (x, y) = (((p.x - room.tile_center(0, 0).x) / TILE_SIZE + 0.0).round() as i32, ((p.y - room.tile_center(0, 0).y) / TILE_SIZE).round() as i32);
+                assert_eq!(room.tile(x, y), Tile::Floor, "seed {seed}: la herse sort du couloir en {x},{y}");
+            }
+            assert!(sites.portcullis.distance(sites.door) > 0.0);
+        }
+    }
+
+    #[test]
+    fn puzzle_panels_are_spread_out_in_the_antechamber() {
+        // En général les trois panneaux sont à plusieurs tuiles les uns des autres (on relâche l'écart si la place manque).
+        let spread = (0..200u64)
+            .filter(|&seed| {
+                let dungeon = Dungeon::generate(seed);
+                let sites = dungeon.layout.puzzle_sites(&dungeon.room);
+                sites.panels.iter().enumerate().all(|(i, a)| sites.panels[i + 1..].iter().all(|b| a.distance(*b) >= 3.0 * TILE_SIZE))
+            })
+            .count();
+        assert!(spread >= 180, "seulement {spread} châteaux sur 200 ont des panneaux bien écartés");
+    }
 
     fn reachable(dungeon: &Dungeon) -> Vec<bool> {
         let room = &dungeon.room;

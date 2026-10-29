@@ -19,7 +19,7 @@ hud-gold = Gold
 hud-keys = Keys
 
 # Dialogue: interface
-dialogue-continue = Enter: continue
+dialogue-continue = Enter: continue (hold: skip everything)
 dialogue-vote = 1-4: vote
 dialogue-waiting = Waiting for the other players
 
@@ -40,11 +40,21 @@ dlg-intro_06 = Welcome, little heroes.
 dlg-intro_07 = Did you hear that too?
 
 # Dialogue: the royal door
-dlg-royal_door_01 = The royal door. It won't yield to force alone.
-dlg-royal_door_02 = There's a secret mechanism somewhere. A hidden lever, surely. I'll find it.
-dlg-royal_door_03 = I sense a sealing rune in the upper hall. I can dispel it.
-dlg-royal_door_04 = And the lower mechanism is rusted. Nothing a hammer can't fix!
-dlg-royal_door_05 = Then each does their part. I'll push the door once everything is ready.
+dlg-royal_door_01 = The royal door. I can't get near it: an enchantment pushes me back.
+dlg-royal_door_02 = A violet ward. I can dispel it, but I need three ingredients. They must be lying around the castle.
+dlg-royal_door_03 = And that orange mechanism is completely jammed! I need a spare part.
+dlg-royal_door_04 = That portcullis is mine: an arrow has to hit a target. We still have to find the target disc.
+dlg-royal_door_05 = Good. Everyone has a colour: violet for the Sorcerer, orange for the Forgebraise, green for the Ranger.
+dlg-royal_door_06 = As for the door itself, it is steel. It will take strength and courage. That one is mine.
+dlg-puzzle_rune_01 = A circle of violet runes. Three empty sockets: I need three ingredients.
+dlg-puzzle_rune_02 = Violet crystals, most likely. Let's find them, and I'll dispel the ward right here.
+dlg-puzzle_rune_03 = Bring back three. We'll cover you.
+dlg-puzzle_gears_01 = A jammed mechanism! A bent bar is wedged in the orange gears.
+dlg-puzzle_gears_02 = With the spare part, orange as well, I can get it running again. It's lying around somewhere.
+dlg-puzzle_gears_03 = I'll point it out if I see it. Don't take it out on the rust.
+dlg-puzzle_target_01 = An empty bracket, all green. The target disc is missing.
+dlg-puzzle_target_02 = Once the disc is fixed, an arrow has to hit it: that's what raises the portcullis.
+dlg-puzzle_target_03 = An arrow, mind you. Not a spell. Be precise.
 
 # Dialogue: the locked alcove
 dlg-alcove_01 = A locked alcove. I could blow it open.
@@ -90,3 +100,7 @@ pause-resume = Resume
 pause-quit = Give up and return to menu
 pause-warning = Progress in the current level is lost
 pause-host-warning = Other players will be disconnected
+puzzle-ingredients = Ingredients
+puzzle-gear = Part
+puzzle-target = Target
+dialogue-skipping = Keep holding Enter to skip everything...
