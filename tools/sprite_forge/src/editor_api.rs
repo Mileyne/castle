@@ -51,6 +51,7 @@ fn monster_label(monster: Monster) -> &'static str {
         Monster::Goblin => "Gobelin",
         Monster::Orc => "Orque",
         Monster::Ghoul => "Goule",
+        Monster::Wolf => "Loup",
     }
 }
 
@@ -69,7 +70,7 @@ fn prop_label(prop: Prop) -> &'static str {
         Prop::DoorLocked => "Porte à clé",
         Prop::DoorRoyal => "Porte royale",
         Prop::DoorRoyalEmblem => "Emblème de la porte royale",
-        Prop::Portal => "Portail",
+        Prop::Stairs => "Escalier de sortie",
         Prop::Potion => "Potion de régénération",
         Prop::WallRune => "Panneau de rune (violet, Ensorceleur)",
         Prop::WallGearsJammed => "Mécanisme grippé (orange, Forgebraise)",
@@ -78,6 +79,13 @@ fn prop_label(prop: Prop) -> &'static str {
         Prop::WallTargetMounted => "Cible garnie (vert, Rôdeur)",
         Prop::WallTargetHit => "Cible touchée (vert, Rôdeur)",
         Prop::Portcullis => "Herse (une moitié)",
+        Prop::GateClosed => "Barrière du sentier (fermée)",
+        Prop::GateOpen => "Barrière du sentier (ouverte)",
+        Prop::BridgeBroken => "Pont brisé",
+        Prop::BridgeRepaired => "Pont réparé",
+        Prop::DrawbridgeRaised => "Pont-levis levé",
+        Prop::DrawbridgeLowered => "Pont-levis baissé",
+        Prop::CaptiveCage => "Prisonnier en cage",
         Prop::Ingredient => "Ingrédient (violet)",
         Prop::GearPart => "Pièce de rechange (orange)",
         Prop::TargetDisc => "Disque de cible (vert)",
@@ -166,7 +174,7 @@ pub fn model_params(key: &str, theme: Theme) -> Vec<(String, f32)> {
             Model::Monster(Monster::Ghoul) => {
                 params.extend(crate::monsters_more::ghoul_dims().fields().map(|(n, v)| (format!("dims.{n}"), v)));
             }
-            Model::Monster(Monster::Bat) | Model::Prop(_) => {}
+            Model::Monster(Monster::Bat | Monster::Wolf) | Model::Prop(_) => {}
         }
         params
     })

@@ -266,3 +266,76 @@ pub(crate) fn ghoul(pose: Pose) -> Vec<Part> {
     }
     p
 }
+
+/// Le loup: un quadrupède gris, maigre et décharné, aux côtes saillantes, aux pattes fines et aux yeux jaunes, qui regarde
+/// vers +Z. À la marche, les pattes en diagonale (avant gauche avec arrière droite) s'élancent ensemble; au repos, il
+/// respire et la queue balance. `gore`: la gueule est ensanglantée et les yeux rougeoient.
+pub(crate) fn wolf(pose: Pose, gore: bool) -> Vec<Part> {
+    let (phase, walking) = match pose {
+        Pose::Walk(p) => (p, true),
+        Pose::Idle(p) => (p, false),
+        Pose::Attack(p) => (p, true),
+    };
+    let fur = 0x6b6f78;
+    let fur_d = 0x474a52;
+    let rib = 0x2e3036;
+    let belly = 0x8a8c94;
+    let breath = if walking { 0.0 } else { 0.01 * (phase * TAU).sin() };
+    let bob = if walking { 0.018 * (phase * TAU * 2.0).sin().abs() } else { breath };
+    let mut p = Vec::new();
+    // Corps étroit: poitrail, flancs creux, croupe osseuse.
+    p.push(shiny(ellipsoid(Vec3::new(0.0, 0.47 + bob, 0.0), Vec3::new(0.115, 0.12, 0.4), fur), 0.15));
+    p.push(shiny(ellipsoid(Vec3::new(0.0, 0.5 + bob, 0.24), Vec3::new(0.135, 0.155, 0.17), fur), 0.15));
+    p.push(shiny(ellipsoid(Vec3::new(0.0, 0.48 + bob, -0.25), Vec3::new(0.115, 0.12, 0.15), fur), 0.15));
+    p.push(ellipsoid(Vec3::new(0.0, 0.375 + bob, 0.02), Vec3::new(0.065, 0.05, 0.3), belly));
+    // Crête de l'échine, côtes saillantes de chaque côté, os des hanches.
+    p.push(ellipsoid(Vec3::new(0.0, 0.595 + bob, 0.02), Vec3::new(0.04, 0.03, 0.36), fur_d));
+    for k in 0..6 {
+        let z = 0.18 - k as f32 * 0.075;
+        for sg in [-1.0f32, 1.0] {
+            p.push(limb(Vec3::new(sg * 0.108, 0.55 + bob, z), Vec3::new(sg * 0.1, 0.4 + bob, z - 0.02), 0.008, rib));
+        }
+    }
+    for sg in [-1.0f32, 1.0] {
+        p.push(ball(Vec3::new(sg * 0.085, 0.555 + bob, -0.26), 0.026, fur_d));
+        p.push(ball(Vec3::new(sg * 0.09, 0.6 + bob, 0.2), 0.024, fur_d));
+    }
+    // Cou fin et tête étroite au long museau.
+    p.push(shiny(ellipsoid(Vec3::new(0.0, 0.6 + bob, 0.4), Vec3::new(0.075, 0.1, 0.15), fur), 0.15));
+    let head = Vec3::new(0.0, 0.62 + bob, 0.56);
+    p.push(shiny(ellipsoid(head, Vec3::new(0.09, 0.085, 0.115), fur), 0.15));
+    p.push(shiny(cone(head + Vec3::new(0.0, -0.015, 0.07), head + Vec3::new(0.0, -0.035, 0.3), 0.06, 0.024, belly), 0.15));
+    p.push(ball(head + Vec3::new(0.0, -0.03, 0.31), 0.024, 0x14101a));
+    // Mâchoire et crocs.
+    p.push(ellipsoid(head + Vec3::new(0.0, -0.07, 0.15), Vec3::new(0.045, 0.022, 0.11), if gore { 0x8a1018 } else { fur_d }));
+    for sg in [-1.0f32, 1.0] {
+        p.push(shiny(cone(head + Vec3::new(sg * 0.03, -0.05, 0.22), head + Vec3::new(sg * 0.03, -0.11, 0.22), 0.011, 0.002, 0xf0ecdc), 0.5));
+        // Grandes oreilles dressées, intérieur rose.
+        p.push(shiny(cone(head + Vec3::new(sg * 0.055, 0.06, -0.02), head + Vec3::new(sg * 0.085, 0.24, -0.05), 0.045, 0.007, fur_d), 0.15));
+        p.push(cone(head + Vec3::new(sg * 0.055, 0.07, 0.0), head + Vec3::new(sg * 0.075, 0.2, -0.03), 0.024, 0.005, 0xc07a80));
+        // Yeux enfoncés.
+        p.push(glow(ball(head + Vec3::new(sg * 0.055, 0.03, 0.085), 0.017, if gore { 0xff3020 } else { 0xf0d040 })));
+    }
+    if gore {
+        p.push(ellipsoid(head + Vec3::new(0.0, -0.06, 0.24), Vec3::new(0.04, 0.025, 0.05), 0xa01820));
+    }
+    // Pattes fines et hautes: (x, z du haut de la patte, avant ou arrière, phase). Les diagonales vont ensemble.
+    for (x, z, front, offset) in [(-0.075f32, 0.24f32, true, 0.0f32), (0.075, 0.24, true, 0.5), (-0.075, -0.25, false, 0.5), (0.075, -0.25, false, 0.0)] {
+        let swing = if walking { ((phase + offset) * TAU).sin() } else { 0.0 };
+        let lift = if walking { ((phase + offset) * TAU).cos().max(0.0) * 0.08 } else { 0.0 };
+        let top = Vec3::new(x, 0.42 + bob, z);
+        let paw = Vec3::new(x, 0.03 + lift, z + swing * 0.18);
+        let knee = Vec3::new(x, 0.24 + lift * 0.5, z + swing * 0.09 + if front { 0.04 } else { -0.09 });
+        p.push(shiny(limb(top, knee, 0.034, fur), 0.1));
+        p.push(shiny(limb(knee, paw, 0.022, fur_d), 0.1));
+        p.push(ellipsoid(paw + Vec3::new(0.0, 0.0, 0.03), Vec3::new(0.03, 0.022, 0.05), fur_d));
+    }
+    // Queue mince et pendante, qui balance.
+    let sway = if walking { 0.06 * (phase * TAU).sin() } else { 0.05 * (phase * TAU).sin() };
+    let root = Vec3::new(0.0, 0.52 + bob, -0.4);
+    let mid = Vec3::new(sway * 0.5, 0.48 + bob, -0.56);
+    let tip = Vec3::new(sway, 0.36 + bob, -0.7);
+    p.push(shiny(limb(root, mid, 0.03, fur), 0.1));
+    p.push(shiny(limb(mid, tip, 0.024, fur_d), 0.1));
+    p
+}

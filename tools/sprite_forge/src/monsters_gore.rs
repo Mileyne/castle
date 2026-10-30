@@ -17,6 +17,7 @@ pub fn build(monster: Monster, pose: Pose) -> Vec<Part> {
     match monster {
         Monster::Skeleton => gutted_skeleton(pose),
         Monster::Bat => fleshbat(pose),
+        Monster::Wolf => scaled(crate::monsters_more::wolf(pose, true), 1.7),
         // Les trois autres ne changent pas de style: leur allure est déjà brutale.
         Monster::Goblin | Monster::Orc | Monster::Ghoul => crate::monsters::build_manga(monster, pose),
     }

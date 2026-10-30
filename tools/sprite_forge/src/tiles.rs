@@ -23,25 +23,28 @@ pub const TOP_START: usize = FLOOR_COLUMNS;
 pub const FACE_START: usize = TOP_START + TOP_PATTERNS * MACRO * MACRO;
 pub const DECOR_START: usize = FACE_START + FACE_PATTERNS * MACRO;
 pub const COLUMNS: usize = DECOR_START + DECOR_FACES;
-pub const REGIONS: usize = 6;
+pub const REGIONS: usize = 9;
 
 /// Demi-côté d'une tuile, en mètres du modèle.
 const H: f32 = 0.6;
 
-struct Style {
-    slab: [u32; 3],
-    mortar: u32,
-    wall: [u32; 3],
-    accent: u32,
-    glow: u32,
+pub(crate) struct Style {
+    pub(crate) slab: [u32; 3],
+    pub(crate) mortar: u32,
+    pub(crate) wall: [u32; 3],
+    pub(crate) accent: u32,
+    pub(crate) glow: u32,
 }
 
 fn style(region: usize, gore: bool) -> Style {
     if gore {
         return style_gore(region);
     }
-    // Ambiance de donjon: les pierres du mode manga sont assombries d'un cran.
+    // Ambiance de donjon: les pierres du mode manga sont assombries d'un cran (pas les décors extérieurs).
     let base = style_manga(region);
+    if region >= 6 {
+        return base;
+    }
     Style {
         slab: base.slab.map(|c| darker(c, 0.82)),
         wall: base.wall.map(|c| darker(c, 0.85)),
@@ -56,19 +59,25 @@ fn style_manga(region: usize) -> Style {
         2 => Style { slab: [0xb07844, 0xa06a38, 0xc08850], mortar: 0x24140a, wall: [0x4a2e1c, 0x3c2416, 0x573824], accent: 0xc02840, glow: 0xffd060 },
         3 => Style { slab: [0x5a5464, 0x665f72, 0x4e4858], mortar: 0x100c10, wall: [0x3a2a2c, 0x2c1e20, 0x4a3636], accent: 0xff6a20, glow: 0xff8a30 },
         4 => Style { slab: [0x5a60b0, 0x6a70c4, 0x4e549c], mortar: 0x14163a, wall: [0x1c2056, 0x262a6a, 0x161a44], accent: 0xf6c93a, glow: 0x80b0ff },
-        _ => Style { slab: [0xe8e0d0, 0xd8c8a8, 0xc8b890], mortar: 0x7a6a40, wall: [0x5a1830, 0x4a1226, 0x6c2640], accent: 0xf6c93a, glow: 0xff5070 },
+        5 => Style { slab: [0xe8e0d0, 0xd8c8a8, 0xc8b890], mortar: 0x7a6a40, wall: [0x5a1830, 0x4a1226, 0x6c2640], accent: 0xf6c93a, glow: 0xff5070 },
+        // Forêt: herbe et sous-bois; murs de grands arbres.
+        6 => Style { slab: [0x5a8a3c, 0x4e7c34, 0x6a9a44], mortar: 0x2a3a1a, wall: [0x2a5a2a, 0x1e4a24, 0x34681e], accent: 0xf0d040, glow: 0xc8f080 },
+        // Marais: vase verdâtre; murs d'eau noire.
+        7 => Style { slab: [0x566a3c, 0x4a5e34, 0x627444], mortar: 0x1c241a, wall: [0x1e3a36, 0x28483f, 0x162e2c], accent: 0x8ad0b0, glow: 0x80ffc0 },
+        // Abords du château: terre battue; murs de rochers.
+        _ => Style { slab: [0x9a8a68, 0x8c7e5e, 0xa89874], mortar: 0x2a2218, wall: [0x6a665c, 0x5a564e, 0x78746a], accent: 0xb0a890, glow: 0xffd890 },
     }
 }
 
 /// Mélange deux couleurs: `t` = 0 donne `a`, 1 donne `b`.
-fn lerp_color(a: u32, b: u32, t: f32) -> u32 {
+pub(crate) fn lerp_color(a: u32, b: u32, t: f32) -> u32 {
     let (x, y) = (rgb(a), rgb(b));
     let ch = |i: usize| ((x[i] + (y[i] - x[i]) * t).clamp(0.0, 1.0) * 255.0 + 0.5) as u32;
     (ch(0) << 16) | (ch(1) << 8) | ch(2)
 }
 
 /// Assombrit une couleur: `f` = 1 ne change rien, 0 donne du noir.
-fn darker(c: u32, f: f32) -> u32 {
+pub(crate) fn darker(c: u32, f: f32) -> u32 {
     lerp_color(c, 0x000000, 1.0 - f)
 }
 
@@ -213,6 +222,10 @@ pub fn roof_macro(region: usize, variant: usize, seed: u64, theme: Theme) -> Vec
 fn stone_macro(region: usize, variant: usize, seed: u64, theme: Theme, roof: bool) -> Vec<Part> {
     let gore = theme == Theme::Gore;
     let st = style(region, gore);
+    // Forêt et marais: herbe, vase, canopée et eau; les abords gardent le dallage (terre battue, rochers).
+    if region == 6 || region == 7 {
+        return if roof { crate::outdoor::top(region, variant, seed, &st) } else { crate::outdoor::ground(region, variant, seed, &st, gore) };
+    }
     let palette = if roof { st.wall } else { st.slab };
     let mut rng = Rng(seed);
     let side = MACRO as f32 * 1.2;
@@ -296,6 +309,9 @@ fn stone_macro(region: usize, variant: usize, seed: u64, theme: Theme, roof: boo
 pub fn wall_face_macro(region: usize, variant: usize, seed: u64, theme: Theme) -> Vec<Part> {
     let gore = theme == Theme::Gore;
     let st = style(region, gore);
+    if region == 6 || region == 7 {
+        return crate::outdoor::face(region, variant, seed, &st);
+    }
     let mut rng = Rng(seed);
     let width = MACRO as f32 * 1.2;
     let half = width / 2.0;
@@ -332,6 +348,9 @@ pub fn wall_face_macro(region: usize, variant: usize, seed: u64, theme: Theme) -
 pub fn wall_face_decor(region: usize, variant: usize, seed: u64, theme: Theme) -> Vec<Part> {
     let gore = theme == Theme::Gore;
     let st = style(region, gore);
+    if region == 6 || region == 7 {
+        return crate::outdoor::decor(region, seed, &st);
+    }
     let mut rng = Rng(seed);
     let mut p = vec![block(Vec3::new(0.0, 0.0, -0.1), Vec3::new(H + 0.02, H + 0.02, 0.05), Mat3::IDENTITY, st.mortar)];
     let decorated = variant == 1;
@@ -447,6 +466,9 @@ fn style_gore(region: usize) -> Style {
         2 => Style { slab: [0x5a3e2a, 0x4e3422, 0x664832], mortar: 0x120a06, wall: [0x2e1c12, 0x241610, 0x3a2418], accent: 0x8a1c1c, glow: 0xd8a040 },
         3 => Style { slab: [0x34303a, 0x3c3844, 0x2a2630], mortar: 0x0a080a, wall: [0x2a1c1c, 0x201414, 0x362424], accent: 0xff4010, glow: 0xff6a20 },
         4 => Style { slab: [0x3a3c58, 0x444664, 0x303250], mortar: 0x0a0a1a, wall: [0x16182e, 0x1e203c, 0x101224], accent: 0x8aa0d8, glow: 0x6a90ff },
-        _ => Style { slab: [0x6a5a52, 0x5a4a44, 0x7a6860], mortar: 0x180c0c, wall: [0x3a1018, 0x2e0c14, 0x481420], accent: 0xb89030, glow: 0xff3040 },
+        5 => Style { slab: [0x6a5a52, 0x5a4a44, 0x7a6860], mortar: 0x180c0c, wall: [0x3a1018, 0x2e0c14, 0x481420], accent: 0xb89030, glow: 0xff3040 },
+        6 => Style { slab: [0x3c4a2a, 0x344024, 0x465632], mortar: 0x10160a, wall: [0x1a2a18, 0x142214, 0x223416], accent: 0x8a1c1c, glow: 0xa8c040 },
+        7 => Style { slab: [0x3a4a2e, 0x303e28, 0x445636], mortar: 0x0c120c, wall: [0x14262a, 0x1a3234, 0x0e1c1e], accent: 0x6a8a3a, glow: 0x70e0a0 },
+        _ => Style { slab: [0x6a5e48, 0x5c5240, 0x76684e], mortar: 0x140e08, wall: [0x3e3a34, 0x32302a, 0x4a463e], accent: 0x8a1c1c, glow: 0xd8a040 },
     }
 }

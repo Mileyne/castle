@@ -22,10 +22,11 @@ pub enum Monster {
     Goblin,
     Orc,
     Ghoul,
+    Wolf,
 }
 
 /// Ordre des lignes dans la planche (le client utilise les mêmes indices).
-pub const MONSTERS: [Monster; 5] = [Monster::Skeleton, Monster::Bat, Monster::Goblin, Monster::Orc, Monster::Ghoul];
+pub const MONSTERS: [Monster; 6] = [Monster::Skeleton, Monster::Bat, Monster::Goblin, Monster::Orc, Monster::Ghoul, Monster::Wolf];
 
 pub(crate) fn skeleton_dims() -> Dims {
     let dims = Dims {
@@ -210,7 +211,9 @@ pub(crate) fn build_manga(monster: Monster, pose: Pose) -> Vec<Part> {
         Monster::Skeleton => skeleton(pose),
         Monster::Bat => bat(pose),
         Monster::Goblin => crate::monsters_more::goblin(pose),
-        Monster::Orc => crate::monsters_more::orc(pose),
+        Monster::Orc => scaled(crate::monsters_more::orc(pose), 1.2),
         Monster::Ghoul => crate::monsters_more::ghoul(pose),
+        // Les grosses bêtes sont agrandies: le loup remplit mieux sa case, l'orque reste dans la sienne.
+        Monster::Wolf => scaled(crate::monsters_more::wolf(pose, false), 1.7),
     }
 }

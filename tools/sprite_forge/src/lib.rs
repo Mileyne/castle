@@ -15,6 +15,7 @@ mod monsters;
 mod photo;
 mod monsters_gore;
 mod monsters_more;
+mod outdoor;
 pub mod overrides;
 mod props;
 mod props_gore;
@@ -35,6 +36,9 @@ use render::{Camera, render};
 const CELL: usize = 96;
 /// Côté d'une tuile du décor, en pixels.
 const TILE_CELL: usize = 48;
+/// Case d'une sortie de niveau, et nombre d'images de son animation.
+const EXIT_CELL: usize = 192;
+const EXIT_FRAMES: usize = 10;
 /// Les cycles sont rendus pour une lecture à 25 images par seconde: repos d'une seconde, marche dont le cycle dure
 /// 16 images (25 images/s à 1,6 cycle/s), attaque de 0,4 s.
 const IDLE_FRAMES: usize = 25;
@@ -193,13 +197,13 @@ fn render_decor(theme: Theme, region: usize, col: usize) -> Vec<[f32; 4]> {
     render(&tiles::wall_face_decor(region, 1, seed, theme), &cam, SUPERSAMPLE)
 }
 
-/// Cadrage d'un objet: posé au sol et vu de trois quarts, les plus grands (portail, rune) un peu plus petits pour tenir
+/// Cadrage d'un objet: posé au sol et vu de trois quarts, les plus grands (escalier, rune) un peu plus petits pour tenir
 /// dans la case; les panneaux de mur sont vus de face et centrés dans leur case.
 fn prop_camera(prop: props::Prop) -> Camera {
     if prop.is_wall_mounted() {
         return Camera { yaw: 0.0, elevation: 0.0, scale: SCALE, size: CELL, feet_y: CELL as f32 / 2.0, outline: true, shadow: false };
     }
-    let scale = if matches!(prop, props::Prop::Portal | props::Prop::Rune) { 31.0 } else { SCALE };
+    let scale = if matches!(prop, props::Prop::Stairs | props::Prop::Rune) { 31.0 } else { SCALE };
     Camera { yaw: 0.0, elevation: ELEVATION, scale, size: CELL, feet_y: FEET_Y, outline: true, shadow: true }
 }
 
@@ -244,6 +248,15 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
         render(&props::build(prop, t, theme), &cam, SUPERSAMPLE)
     });
     write_png(&out_dir.join("objects.png"), props::FRAMES * CELL, props::PROPS.len() * CELL, &object_sheet);
+
+    // Sorties de niveau: dessinées en grand (cases de 192 px, éléments agrandis), avec un cycle de vacillement plus court.
+    let exit_cell = EXIT_CELL;
+    let exit_camera = Camera { yaw: 0.0, elevation: ELEVATION, scale: SCALE, size: exit_cell, feet_y: FEET_Y * 2.0, outline: true, shadow: true };
+    let exit_sheet = sheet_of_cells(props::EXITS.len(), EXIT_FRAMES, exit_cell, |row, col| {
+        let t = col as f32 / EXIT_FRAMES as f32;
+        render(&props::build_exit(props::EXITS[row], t, theme), &exit_camera, SUPERSAMPLE)
+    });
+    write_png(&out_dir.join("exits.png"), EXIT_FRAMES * exit_cell, props::EXITS.len() * exit_cell, &exit_sheet);
 
     // Tuiles: le sol et les faces de mur sont rendus en grands motifs (4x4 tuiles, 4x1 tuiles) puis découpés,
     // pour que les dalles et les blocs traversent les bordures de tuiles. Une ligne par région.
@@ -305,14 +318,6 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
     };
     let tile_sheet = build_sheet(0);
     write_png(&out_dir.join("tiles.png"), tiles::COLUMNS * TILE_CELL, tiles::REGIONS * TILE_CELL, &tile_sheet);
-    // Trois niveaux de flou croissants, pour des transitions progressives d'une zone à l'autre.
-    let mut blur_sheets = Vec::new();
-    for (level, radius) in [(1, 1usize), (2, 2), (3, 4)] {
-        let sheet = build_sheet(radius);
-        write_png(&out_dir.join(format!("tiles_blur{level}.png")), tiles::COLUMNS * TILE_CELL, tiles::REGIONS * TILE_CELL, &sheet);
-        blur_sheets.push(sheet);
-    }
-
     // Projectiles (orientés vers la droite) et effets de coups, dans le style du thème.
     let projectile_sheet = sheet_of_cells(1, effects::PROJECTILES, effects::PROJECTILE_CELL, |_, col| effects::projectile(theme, col));
     write_png(&out_dir.join("projectiles.png"), effects::PROJECTILES * effects::PROJECTILE_CELL, effects::PROJECTILE_CELL, &projectile_sheet);
@@ -375,7 +380,7 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
                 out[dst..dst + TILE_CELL * 4].copy_from_slice(&sheet[src..src + TILE_CELL * 4]);
             }
         };
-        for (name, sheet) in [("tiles_region", &tile_sheet), ("tiles_blur3_region", &blur_sheets[2])] {
+        for (name, sheet) in [("tiles_region", &tile_sheet)] {
     for region in 0..tiles::REGIONS {
                 let (cols, rows) = (12, 6);
                 let out_w = cols * TILE_CELL;

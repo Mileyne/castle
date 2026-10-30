@@ -129,13 +129,15 @@ pub fn build(prop: Prop, t: f32) -> Vec<Part> {
                 }
             }
         }
-        Prop::Portal => {
-            let c = Vec3::new(0.0, 1.15, 0.0);
-            parts.push(shiny(ball(c + Vec3::new(0.0, 0.0, 0.1), 0.22, 0xf0e8d8), 0.6));
-            parts.push(glow(ball(c + Vec3::new(0.0, 0.0, 0.24), 0.11, 0xc01020)));
-            parts.push(ellipsoid(c + Vec3::new(0.0, 0.0, 0.32), Vec3::new(0.025, 0.1, 0.02), DARK));
+        // Un œil injecté de sang veille au sommet de l'arche.
+        Prop::Stairs => {
+            let c = Vec3::new(0.0, 1.62, -0.2);
+            parts.push(shiny(ball(c + Vec3::new(0.0, 0.0, 0.1), 0.17, 0xf0e8d8), 0.6));
+            parts.push(glow(ball(c + Vec3::new(0.0, 0.0, 0.24), 0.085, 0xc01020)));
+            parts.push(ellipsoid(c + Vec3::new(0.0, 0.0, 0.3), Vec3::new(0.02, 0.08, 0.015), DARK));
         }
         Prop::Key | Prop::Potion => {}
+        Prop::GateClosed | Prop::GateOpen | Prop::BridgeBroken | Prop::BridgeRepaired | Prop::DrawbridgeRaised | Prop::DrawbridgeLowered | Prop::CaptiveCage => {}
         // Les éléments de l'énigme gardent le même dessin dans tous les styles: leurs couleurs disent à qui ils s'adressent.
         Prop::WallRune
         | Prop::WallGearsJammed

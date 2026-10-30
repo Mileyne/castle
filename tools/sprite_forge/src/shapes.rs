@@ -113,3 +113,12 @@ impl Rng {
         (self.next() * 2.0 - 1.0) * a
     }
 }
+
+/// Agrandit un modèle autour de l'origine (les pieds): positions et tailles de toutes les parties sont multipliées.
+pub(crate) fn scaled(mut parts: Vec<Part>, k: f32) -> Vec<Part> {
+    for part in &mut parts {
+        part.center *= k;
+        part.scale *= k;
+    }
+    parts
+}
