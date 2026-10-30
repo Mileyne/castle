@@ -112,7 +112,10 @@ fn follow_hero(
     let corridor_boost = *boost;
 
     // Zoom d'équipe: quand les quatre héros sont groupés, on se rapproche pour les cadrer tous.
-    let base_zoom = (window.height() / TARGET_VIEW_HEIGHT).floor().max(1.0);
+    // L'échelle entière se compte en pixels physiques: sur un écran Retina (téléphone surtout), compter en points
+    // logiques montrerait deux à trois fois trop de terrain, en sprites minuscules.
+    let scale_factor = window.scale_factor();
+    let base_zoom = (window.physical_height() as f32 / TARGET_VIEW_HEIGHT).floor().max(1.0) / scale_factor;
     let base_view = Vec2::new(window.width(), window.height()) / base_zoom;
     let team: Vec<Vec2> = match &party {
         Some(party) => heroes.iter().filter(|(_, id)| id.0 == party.0).map(|(t, _)| t.translation.truncate()).collect(),

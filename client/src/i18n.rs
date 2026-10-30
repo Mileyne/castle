@@ -88,7 +88,13 @@ fn refresh_texts(localization: Option<Res<Localization>>, mut texts: Query<(&Tr,
     };
     for (tr, mut text) in &mut texts {
         // Une clé absente reste visible à l'écran: plus simple à repérer qu'un texte vide.
-        let translated = localization.content(tr.key).unwrap_or_else(|| tr.key.to_string());
+        // Sur écran tactile, une clé `<clé>-touch` remplace l'aide écrite pour le clavier, quand elle existe.
+        let touch = crate::touch::enabled()
+            .then(|| localization.content(format!("{}-touch", tr.key).as_str()))
+            .flatten();
+        let translated = touch
+            .or_else(|| localization.content(tr.key))
+            .unwrap_or_else(|| tr.key.to_string());
         let full = format!("{}{translated}", tr.prefix);
         if text.0 != full {
             text.0 = full;

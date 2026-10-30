@@ -32,6 +32,14 @@ pub struct HostAddress(pub String);
 #[derive(Event)]
 pub struct ReturnToTitle(pub Option<&'static str>);
 
+/// Ce que l'écran titre attend, pour les commandes tactiles (`touch.rs`): un pavé pour l'adresse, un bouton Effacer
+/// pour la liste des parties.
+#[derive(Resource, Default, PartialEq)]
+pub struct MenuMode {
+    pub address: bool,
+    pub saves: bool,
+}
+
 /// Secondes accordées à une connexion avant d'y renoncer.
 const CONNECT_TIMEOUT: f32 = 8.0;
 
@@ -41,12 +49,13 @@ impl Plugin for TitlePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(TitleActive(true))
             .init_resource::<Menu>()
+            .init_resource::<MenuMode>()
             .add_systems(Startup, spawn_title)
             .add_observer(return_to_title)
             .add_systems(
                 Update,
                 (
-                    (menu_input, rebuild_menu).chain().run_if(|t: Res<TitleActive>| t.0),
+                    (menu_input, rebuild_menu, publish_mode).chain().run_if(|t: Res<TitleActive>| t.0),
                     watch_connection,
                     show_host_address,
                 ),
@@ -128,6 +137,12 @@ impl Menu {
         self.screen = screen;
         self.cursor = 0;
         self.input.clear();
+        // Sans clavier (écran tactile), une nouvelle partie reçoit d'office un nom libre: il suffit de valider.
+        if let Screen::NewName(_) = screen {
+            if crate::touch::enabled() {
+                self.input = free_name();
+            }
+        }
         self.confirm_delete = false;
         self.dirty = true;
         if let Screen::Saves(mode) = screen {
@@ -308,6 +323,19 @@ fn rebuild_menu(
             line(ui, error, 10.0, css::TOMATO.into());
         }
     });
+}
+
+/// Premier nom « Castle N » qu'aucune partie n'utilise.
+fn free_name() -> String {
+    (1..).map(|n| format!("Castle {n}")).find(|name| save::load(name).is_none()).unwrap_or_default()
+}
+
+fn publish_mode(menu: Res<Menu>, mut mode: ResMut<MenuMode>) {
+    let wanted = MenuMode {
+        address: menu.screen == Screen::JoinAddress,
+        saves: matches!(menu.screen, Screen::Saves(_)),
+    };
+    mode.set_if_neq(wanted);
 }
 
 /// Lit une adresse saisie: `192.168.1.20` ou `192.168.1.20:5000`.

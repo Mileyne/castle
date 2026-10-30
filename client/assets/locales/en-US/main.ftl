@@ -104,3 +104,21 @@ puzzle-ingredients = Ingredients
 puzzle-gear = Part
 puzzle-target = Target
 dialogue-skipping = Keep holding Enter to skip everything...
+
+# Touch screen: buttons, and help texts that replace the keyboard ones (key `<key>-touch`)
+touch-attack = Attack
+touch-special = Power
+touch-use = Act
+touch-ok = OK
+touch-back = Back
+touch-delete = Delete
+touch-pause = Pause
+touch-language = Language
+hint-controls-touch = Joystick: move  Buttons: attack, power, act  1-4: heroes
+dialogue-continue-touch = OK: continue (hold: skip all)
+dialogue-vote-touch = 1-4: vote
+dialogue-skipping-touch = Keep holding OK to skip everything...
+menu-hint-touch = Arrows: choose - OK: confirm
+menu-saves-hint-touch = OK: play - Delete: delete - Back
+menu-confirm-delete-touch = Tap Delete again to delete this game
+menu-input-hint-touch = OK: confirm - Back

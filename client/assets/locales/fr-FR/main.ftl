@@ -104,3 +104,21 @@ puzzle-ingredients = Ingrédients
 puzzle-gear = Pièce
 puzzle-target = Cible
 dialogue-skipping = Maintenez Entrée pour tout passer...
+
+# Écran tactile: boutons, et aides qui remplacent celles écrites pour le clavier (clé `<clé>-touch`)
+touch-attack = Frapper
+touch-special = Pouvoir
+touch-use = Agir
+touch-ok = OK
+touch-back = Retour
+touch-delete = Effacer
+touch-pause = Pause
+touch-language = Langue
+hint-controls-touch = Joystick : bouger  Boutons : frapper, pouvoir, agir  1-4 : héros
+dialogue-continue-touch = OK : continuer (maintenir : tout passer)
+dialogue-vote-touch = 1-4 : voter
+dialogue-skipping-touch = Maintenez OK pour tout passer...
+menu-hint-touch = Flèches : choisir - OK : valider
+menu-saves-hint-touch = OK : jouer - Effacer : effacer - Retour
+menu-confirm-delete-touch = Touchez encore Effacer pour supprimer cette partie
+menu-input-hint-touch = OK : valider - Retour

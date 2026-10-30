@@ -90,6 +90,11 @@ pub struct DialogueState {
 }
 
 impl DialogueState {
+    /// Une réplique est à l'écran (et attend Entrée, ou un vote).
+    pub fn showing(&self) -> bool {
+        self.line.is_some()
+    }
+
     /// Un vote est en cours: les touches 1 à 4 servent à voter, pas à changer de classe.
     pub fn is_voting(&self) -> bool {
         !self.options.is_empty()

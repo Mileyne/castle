@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 castle_shared = { path = "../shared" }
+castle_server = { path = "../server" }
 bevy = { workspace = true, default-features = true }
 bevy_replicon.workspace = true
 bevy_replicon_renet.workspace = true

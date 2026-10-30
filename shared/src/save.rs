@@ -106,7 +106,10 @@ pub fn save_dir() -> PathBuf {
         return dir.into();
     }
     let home = || PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-    if cfg!(target_os = "macos") {
+    if cfg!(target_os = "ios") {
+        // HOME est le conteneur de l'app; Documents est sauvegardé par iCloud et visible dans l'app Fichiers.
+        home().join("Documents/saves")
+    } else if cfg!(target_os = "macos") {
         home().join("Library/Application Support/Castle/saves")
     } else if cfg!(windows) {
         PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default()).join("Castle/saves")

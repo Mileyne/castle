@@ -21,6 +21,7 @@ Jeu multijoueur en ligne inspiré de *Gauntlet*, ambiance RPG pixelisée à l'an
 | Localisation | **Fluent** via `bevy_fluent` 0.15 | Fichiers `.ftl` par langue dans `client/assets/locales/<langue>/`; FR et EN au départ |
 | Dialogues | **Yarn Spinner** via `bevy_yarnspinner` 0.9 | Scripts `.yarn` dans `client/assets/dialogues/`, tables de chaînes traduisibles par langue |
 | Niveaux | Génération procédurale par salles assemblées (à confirmer) | Alternative: niveaux écrits à la main (Tiled) |
+| iOS | Même client Rust, projet Xcode dans `ios/` | Serveur sur un fil du client (pas de second processus sur iOS), commandes tactiles qui simulent les touches (`client/src/touch.rs`); voir `ios/README.md` |
 
 ### Règles de localisation (à respecter dès le premier jour)
 
