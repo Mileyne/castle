@@ -1,4 +1,4 @@
-//! Génère `heroes.png`: 4 classes x 8 directions x (4 images de repos + 8 images de marche), en 96x96.
+//! Génère `heroes.png`: 4 classes x 8 directions x (25 images de repos + 16 de marche + 10 d'attaque), en 96x96.
 //!
 //! Usage: cargo run --release -p sprite_forge -- <dossier de sortie> [dossier d'aperçu]
 //!
@@ -35,13 +35,16 @@ use render::{Camera, render};
 const CELL: usize = 96;
 /// Côté d'une tuile du décor, en pixels.
 const TILE_CELL: usize = 48;
-const IDLE_FRAMES: usize = 4;
-const WALK_FRAMES: usize = 8;
-/// Images d'attaque en plus des images de repos et de marche (les héros seulement).
-const ATTACK_FRAMES: usize = 6;
-/// Images par direction: ennemis (repos + marche) et héros (en plus, l'attaque).
-const FRAMES: usize = IDLE_FRAMES + WALK_FRAMES;
-const HERO_FRAMES: usize = FRAMES + ATTACK_FRAMES;
+/// Les cycles sont rendus pour une lecture à 25 images par seconde: repos d'une seconde, marche dont le cycle dure
+/// 16 images (25 images/s à 1,6 cycle/s), attaque de 0,4 s.
+const IDLE_FRAMES: usize = 25;
+const WALK_FRAMES: usize = 16;
+/// Images d'attaque en plus des images de repos et de marche.
+const ATTACK_FRAMES: usize = 10;
+/// Images de repos et de marche, puis images par direction pour les ennemis comme pour les héros (en plus, l'attaque).
+const MOVE_FRAMES: usize = IDLE_FRAMES + WALK_FRAMES;
+const FRAMES: usize = MOVE_FRAMES + ATTACK_FRAMES;
+const HERO_FRAMES: usize = FRAMES;
 /// Pixels par mètre du modèle, et inclinaison de la vue.
 const SCALE: f32 = 40.0;
 const ELEVATION: f32 = 0.42;
@@ -62,11 +65,11 @@ fn camera(direction: usize) -> Camera {
 fn frame_pose(frame: usize) -> Pose {
     if frame < IDLE_FRAMES {
         Pose::Idle(frame as f32 / IDLE_FRAMES as f32)
-    } else if frame < FRAMES {
+    } else if frame < MOVE_FRAMES {
         Pose::Walk((frame - IDLE_FRAMES) as f32 / WALK_FRAMES as f32)
     } else {
-        // Les images d'attaque prennent le milieu de six tranches du mouvement.
-        Pose::Attack((frame - FRAMES) as f32 / ATTACK_FRAMES as f32 + 0.5 / ATTACK_FRAMES as f32)
+        // Les images d'attaque prennent le milieu de tranches égales du mouvement.
+        Pose::Attack((frame - MOVE_FRAMES) as f32 / ATTACK_FRAMES as f32 + 0.5 / ATTACK_FRAMES as f32)
     }
 }
 
@@ -233,7 +236,7 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
     );
     write_png(&out_dir.join("monsters.png"), FRAMES * CELL, monsters::MONSTERS.len() * DIRECTIONS * CELL, &monster_sheet);
 
-    // Objets: une ligne par objet, quatre images d'animation, vus de face comme les héros.
+    // Objets: une ligne par objet, vingt images d'animation, vus de face comme les héros.
     let object_sheet = sheet_of_cells(props::PROPS.len(), props::FRAMES, CELL, |row, col| {
         let t = col as f32 / props::FRAMES as f32;
         let prop = props::PROPS[row];
@@ -406,14 +409,14 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
             }
         }
         zoomed("monsters_x2.png", 8 * CELL, CELL, &picks, 2);
-        // Séquence d'attaque (6 images) de chaque classe, vue de face (sud) puis de profil droit (est).
+        // Séquence d'attaque de chaque classe, vue de face (sud) puis de profil droit (est).
         for (i, &class) in CLASSES.iter().enumerate() {
             let zoom = 2;
             let (cw, ch) = (ATTACK_FRAMES * CELL * zoom, 2 * CELL * zoom);
             let mut strip = vec![0u8; cw * ch * 4];
             for (row, direction) in [6usize, 0].into_iter().enumerate() {
                 for k in 0..ATTACK_FRAMES {
-                    let image = to_rgba8(&render(&build(class, frame_pose(FRAMES + k), theme), &camera(direction), SUPERSAMPLE));
+                    let image = to_rgba8(&render(&build(class, frame_pose(MOVE_FRAMES + k), theme), &camera(direction), SUPERSAMPLE));
                     for y in 0..CELL * zoom {
                         for x in 0..CELL * zoom {
                             let src = ((y / zoom) * CELL + x / zoom) * 4;

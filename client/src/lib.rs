@@ -14,7 +14,7 @@ use bevy_replicon_renet::{
 };
 use castle_shared::*;
 
-use art::{Art, HERO_ANCHOR, PROP_ANCHOR, Prop, SPRITE_SIZE, WALL_ANCHOR, WalkCycle, direction_index, fx, hero_index, monster_index, object, object_index, projectile};
+use art::{Art, HERO_ANCHOR, PROP_ANCHOR, Prop, SPRITE_SIZE, WALL_ANCHOR, WalkCycle, direction_index, hero_index, monster_index, object, object_index, projectile};
 
 mod art;
 mod camera;
@@ -36,6 +36,19 @@ mod ui;
 
 /// Vitesse de rattrapage visuel vers la position du serveur.
 const SMOOTHING: f32 = 20.0;
+/// Hauteur des bras d'un héros au-dessus de sa position au sol, en unités du monde: les projectiles en partent.
+const ARM_HEIGHT: f32 = 6.0;
+/// Tant qu'un tir vers le haut de l'écran est à moins de cette distance de son départ, il passe derrière le héros (de
+/// dos, on ne le voit pas sortir de son corps).
+const BODY_CLEAR: f32 = 16.0;
+
+/// Décalage vertical d'affichage, en unités du monde (la position réelle, au sol, ne change pas).
+#[derive(Component)]
+pub struct Lift(f32);
+
+/// Point de départ d'un projectile.
+#[derive(Component)]
+struct Launch(Vec2);
 
 /// Lance le jeu (ne revient qu'à la fermeture).
 pub fn run() {
@@ -93,18 +106,17 @@ pub fn run() {
         .add_systems(Startup, connect_from_command_line)
         .add_systems(Update, begin_connection.run_if(resource_exists::<host::ConnectAt>))
         .add_observer(mark_local_player)
-        .add_observer(spawn_attack_fx)
         .add_systems(
             Update,
             (
                 send_input.run_if(in_state(ClientState::Connected)).run_if(level_intro::player_can_act),
                 raise_active_hero.after(smooth_positions),
+                layer_projectiles.after(smooth_positions),
                 (dress_new_entities, fade_downed).chain(),
                 smooth_positions,
                 draw_health_bars,
                 draw_effects,
                 update_props,
-                fade_attack_fx,
                 animate_projectiles,
                 (projectile_trails, fade_particles).chain(),
             ),
@@ -410,9 +422,11 @@ fn dress_new_entities(
         };
         commands.entity(entity).insert((
             art.projectiles.sprite_sized(index, Vec2::splat(22.0)),
+            Lift(ARM_HEIGHT),
+            Launch(pos.0),
             // Dessiné vers la droite: on le tourne dans le sens du tir.
             Transform {
-                translation: pos.0.extend(1.1),
+                translation: (pos.0 + Vec2::new(0.0, ARM_HEIGHT)).extend(1.1),
                 rotation: Quat::from_rotation_z(shot.dir.to_angle()),
                 ..default()
             },
@@ -541,51 +555,25 @@ fn draw_effects(
     }
 }
 
-/// Effet visuel bref d'un coup au corps à corps.
-#[derive(Component)]
-struct AttackFxLife(Timer);
-
-fn spawn_attack_fx(fx_event: On<AttackFx>, mut commands: Commands, art: Res<Art>) {
-    let Attack::Melee { range, .. } = fx_event.class.stats().attack else {
-        return;
-    };
-    // Le croissant d'épée est centré sur le héros; l'onde de marteau éclate au bout de sa portée.
-    let (index, reach) = match fx_event.class {
-        HeroClass::Forgebraise => (fx::SMASH, range - 2.7),
-        _ => (fx::SLASH, 14.0),
-    };
-    commands.spawn((
-        art.fx.sprite_sized(index, Vec2::splat(32.0)),
-        Transform {
-            translation: (fx_event.pos + fx_event.dir * reach).extend(1.2),
-            rotation: Quat::from_rotation_z(fx_event.dir.to_angle()),
-            ..default()
-        },
-        AttackFxLife(Timer::from_seconds(0.16, TimerMode::Once)),
-    ));
-}
-
-fn fade_attack_fx(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut fx: Query<(Entity, &mut AttackFxLife, &mut Sprite)>,
-) {
-    for (entity, mut life, mut sprite) in &mut fx {
-        // L'effet s'estompe au fil de sa courte durée.
-        sprite.color = Color::WHITE.with_alpha(1.0 - life.0.fraction());
-        if life.0.tick(time.delta()).is_finished() {
-            commands.entity(entity).despawn();
-        }
+/// Lisse le déplacement entre deux mises à jour du serveur.
+pub fn smooth_positions(time: Res<Time>, mut players: Query<(&Position, &mut Transform, Option<&Lift>)>) {
+    let t = 1.0 - (-SMOOTHING * time.delta_secs()).exp();
+    for (pos, mut transform, lift) in &mut players {
+        let z = transform.translation.z;
+        let target = (pos.0 + Vec2::new(0.0, lift.map_or(0.0, |l| l.0))).extend(z);
+        transform.translation = transform.translation.lerp(target, t);
     }
 }
 
-/// Lisse le déplacement entre deux mises à jour du serveur.
-pub fn smooth_positions(time: Res<Time>, mut players: Query<(&Position, &mut Transform)>) {
-    let t = 1.0 - (-SMOOTHING * time.delta_secs()).exp();
-    for (pos, mut transform) in &mut players {
-        let z = transform.translation.z;
-        let target = pos.0.extend(z);
-        transform.translation = transform.translation.lerp(target, t);
+/// Un tir vers le haut de l'écran part de dos: il reste derrière le héros jusqu'à s'en être éloigné, au lieu de sortir de
+/// son dos. Les autres tirs sont dessinés devant.
+fn layer_projectiles(mut shots: Query<(&mut Transform, &Position, &Launch, &Projectile)>) {
+    for (mut transform, pos, launch, shot) in &mut shots {
+        let behind = shot.dir.y > 0.3 && pos.0.distance(launch.0) < BODY_CLEAR;
+        let z = if behind { 0.99 } else { 1.1 };
+        if transform.translation.z != z {
+            transform.translation.z = z;
+        }
     }
 }
 
@@ -643,7 +631,7 @@ fn projectile_trails(
             Transform::from_xyz(
                 transform.translation.x - shot.dir.x * 4.0 + wobble,
                 transform.translation.y - shot.dir.y * 4.0 + wobble,
-                1.05,
+                transform.translation.z - 0.05,
             ),
             Particle(Timer::from_seconds(0.28, TimerMode::Once)),
         ));

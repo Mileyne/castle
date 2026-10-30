@@ -854,7 +854,7 @@ fn monster_ai(
     doors: Query<(&Position, &Solid), (Without<Monster>, Without<Player>)>,
     generators: Query<(&Position, &Hurtbox), (With<Generator>, Without<Monster>, Without<Player>)>,
     mut monsters: Query<
-        (Entity, &mut Position, &mut Cooldown, &Monster),
+        (Entity, &mut Position, &mut Cooldown, &Monster, &mut Strikes),
         (Without<Player>, Without<Solid>, Without<Generator>),
     >,
     mut players: Query<
@@ -873,9 +873,9 @@ fn monster_ai(
         .collect();
     let bodies: Vec<(Entity, Vec2, f32)> = monsters
         .iter()
-        .map(|(e, p, _, m)| (e, p.0, m.0.stats().half_size))
+        .map(|(e, p, _, m, _)| (e, p.0, m.0.stats().half_size))
         .collect();
-    for (entity, mut pos, mut cooldown, monster) in &mut monsters {
+    for (entity, mut pos, mut cooldown, monster, mut strikes) in &mut monsters {
         let stats = monster.0.stats();
         cooldown.0 = (cooldown.0 - dt).max(0.0);
         // Un monstre n'engage un héros que dans sa propre salle: depuis un couloir ou une autre salle, rien.
@@ -894,6 +894,8 @@ fn monster_ai(
                 let factor = if shielded { BULWARK_DAMAGE_FACTOR } else { 1.0 };
                 health.current -= stats.damage * factor * ease;
                 cooldown.0 = stats.cooldown;
+                // Le client joue le geste d'attaque à chaque coup.
+                strikes.0 = strikes.0.wrapping_add(1);
             }
         } else {
             let dir = (target_pos - pos.0).normalize_or_zero();
@@ -2028,6 +2030,7 @@ fn spawn_monster(commands: &mut Commands, kind: MonsterKind, pos: Vec2) {
         Position(pos),
         Hurtbox(stats.half_size),
         Cooldown::default(),
+        Strikes::default(),
     ));
 }
 

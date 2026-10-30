@@ -12,23 +12,28 @@ use bevy::{
 use castle_shared::*;
 
 /// Planche des héros (rendue par `tools/sprite_forge`): une ligne par classe et par direction (8),
-/// 12 images par ligne: 4 de repos (respiration) puis 8 de marche.
-pub const HERO_IDLE_FRAMES: usize = 4;
-pub const HERO_WALK_FRAMES: usize = 8;
-pub const HERO_ATTACK_FRAMES: usize = 6;
-/// Images par ligne pour les héros (repos, marche, attaque) et pour les ennemis (repos, marche).
+/// 51 images par ligne, lues à 25 images par seconde: 25 de repos (respiration, cycle d'une seconde), 16 de marche puis
+/// 10 d'attaque (0,4 s).
+pub const HERO_IDLE_FRAMES: usize = 25;
+pub const HERO_WALK_FRAMES: usize = 16;
+pub const HERO_ATTACK_FRAMES: usize = 10;
+/// Images par ligne, pour les héros comme pour les ennemis (repos, marche, attaque).
 const HERO_FRAMES: usize = HERO_IDLE_FRAMES + HERO_WALK_FRAMES + HERO_ATTACK_FRAMES;
-const MONSTER_FRAMES: usize = HERO_IDLE_FRAMES + HERO_WALK_FRAMES;
+const MONSTER_FRAMES: usize = HERO_FRAMES;
+/// Cadence de toutes les animations lues à l'horloge: repos, battement d'ailes, objets (images par seconde).
+const ANIMATION_FPS: f32 = 25.0;
 /// Une ligne par monstre et par direction (cinq monstres, huit directions).
 const MONSTER_ROWS: u32 = 5 * 8;
 /// Durée du geste d'une attaque, en secondes (la frappe tombe vers 60 % du geste).
-const ATTACK_DURATION: f32 = 0.38;
+const ATTACK_DURATION: f32 = 0.4;
+/// Durée du geste d'attaque d'un ennemi: plus court, il enchaîne les coups.
+const MONSTER_ATTACK_DURATION: f32 = 0.4;
 const HERO_CELL: u32 = 96;
 /// Taille d'affichage d'un héros, d'un ennemi ou d'un objet, en unités du monde (la case fait 96 px d'art).
 pub const SPRITE_SIZE: f32 = 32.0;
 /// Les ennemis et les objets partagent le découpage de la planche des héros pour les ennemis (8 directions,
-/// 12 images), et 4 images d'animation par objet.
-const PROP_FRAMES: usize = 4;
+/// 51 images), et 20 images d'animation par objet.
+const PROP_FRAMES: usize = 20;
 /// Colonnes d'une ligne de la planche des tuiles: 4 sols, 2 dessus de mur, 2 faces de mur (une ligne par région).
 const TILE_COLUMNS: usize = 90;
 /// Découpage d'une ligne de la planche des tuiles (identique à `tools/sprite_forge`): 3 motifs de sol de 4x4 tuiles,
@@ -167,12 +172,6 @@ pub mod projectile {
     pub const ORB_B: usize = 1;
     pub const ARROW: usize = 2;
     pub const BOLT: usize = 3;
-}
-
-/// Cases de la planche d'effets de coups.
-pub mod fx {
-    pub const SLASH: usize = 0;
-    pub const SMASH: usize = 1;
 }
 
 /// Classe -> numéro de classe dans la planche des héros.
@@ -599,7 +598,7 @@ fn animate_heroes(
         } else if cycle.moving_for > 0.0 {
             HERO_IDLE_FRAMES + (cycle.phase * HERO_WALK_FRAMES as f32) as usize % HERO_WALK_FRAMES
         } else {
-            (time.elapsed_secs() * 3.0) as usize % HERO_IDLE_FRAMES
+            (time.elapsed_secs() * ANIMATION_FPS) as usize % HERO_IDLE_FRAMES
         };
         let index = hero_index(*class, direction_index(facing.0), frame);
         if let Some(atlas) = sprite.texture_atlas.as_mut() {
@@ -614,10 +613,10 @@ fn animate_heroes(
 /// marche au rythme de la distance parcourue et la chauve-souris bat des ailes en permanence.
 fn animate_monsters(
     time: Res<Time>,
-    mut monsters: Query<(&mut Sprite, &Position, &Transform, &Monster, &mut WalkCycle)>,
+    mut monsters: Query<(&mut Sprite, &Position, &Transform, &Monster, &Strikes, &mut WalkCycle)>,
 ) {
     let dt = time.delta_secs();
-    for (mut sprite, pos, transform, monster, mut cycle) in &mut monsters {
+    for (mut sprite, pos, transform, monster, strikes, mut cycle) in &mut monsters {
         let delta = pos.0 - transform.translation.truncate();
         let here = transform.translation.truncate();
         let moved = cycle.last.map_or(0.0, |last| last.distance(here));
@@ -631,10 +630,21 @@ fn animate_monsters(
         } else {
             cycle.moving_for = (cycle.moving_for - dt).max(0.0);
         }
+        // Chaque coup porté (le compteur du serveur change) lance le geste d'attaque.
+        if cycle.last_strikes.is_some_and(|last| last != strikes.0) {
+            cycle.attack_elapsed = Some(0.0);
+        }
+        cycle.last_strikes = Some(strikes.0);
+        let attack_progress = cycle.attack_elapsed.map(|elapsed| elapsed / MONSTER_ATTACK_DURATION).filter(|p| *p < 1.0);
+        cycle.attack_elapsed = attack_progress.map(|p| p * MONSTER_ATTACK_DURATION + dt);
         let frame = match monster.0 {
-            MonsterKind::Bat => HERO_IDLE_FRAMES + (time.elapsed_secs() * 12.0) as usize % HERO_WALK_FRAMES,
+            _ if attack_progress.is_some() => {
+                let progress = attack_progress.unwrap_or(0.0);
+                HERO_IDLE_FRAMES + HERO_WALK_FRAMES + ((progress * HERO_ATTACK_FRAMES as f32) as usize).min(HERO_ATTACK_FRAMES - 1)
+            }
+            MonsterKind::Bat => HERO_IDLE_FRAMES + (time.elapsed_secs() * ANIMATION_FPS) as usize % HERO_WALK_FRAMES,
             _ if cycle.moving_for > 0.0 => HERO_IDLE_FRAMES + (cycle.phase * HERO_WALK_FRAMES as f32) as usize % HERO_WALK_FRAMES,
-            _ => (time.elapsed_secs() * 3.0) as usize % HERO_IDLE_FRAMES,
+            _ => (time.elapsed_secs() * ANIMATION_FPS) as usize % HERO_IDLE_FRAMES,
         };
         let index = monster_index(monster.0, cycle.direction, frame);
         if let Some(atlas) = sprite.texture_atlas.as_mut() {
@@ -645,9 +655,9 @@ fn animate_monsters(
     }
 }
 
-/// Animation des objets: quatre images (impulsion de lumière, pièce qui tourne, engrenages...).
+/// Animation des objets: vingt images (impulsion de lumière, pièce qui tourne, engrenages...).
 fn animate_props(time: Res<Time>, mut props: Query<(&mut Sprite, &Prop)>) {
-    let frame = (time.elapsed_secs() * 5.0) as usize % PROP_FRAMES;
+    let frame = (time.elapsed_secs() * ANIMATION_FPS) as usize % PROP_FRAMES;
     for (mut sprite, prop) in &mut props {
         let index = object_index(prop.0, frame);
         if let Some(atlas) = sprite.texture_atlas.as_mut() {

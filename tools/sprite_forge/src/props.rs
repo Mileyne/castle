@@ -1,4 +1,4 @@
-//! Les objets du château, rendus comme les personnages. Chacun a quatre images (impulsion lumineuse,
+//! Les objets du château, rendus comme les personnages. Chacun a vingt images (impulsion lumineuse,
 //! rotation, balancement) pour que le décor vive un peu. Dimensions en mètres du modèle.
 
 use std::f32::consts::{FRAC_PI_2, TAU};
@@ -8,7 +8,8 @@ use glam::{Mat3, Vec3};
 use crate::render::Part;
 use crate::shapes::*;
 
-pub const FRAMES: usize = 4;
+/// 20 images pour un cycle de 0,8 s, lu à 25 images par seconde.
+pub const FRAMES: usize = 20;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Prop {
@@ -468,7 +469,7 @@ fn mechanism(t: f32) -> Vec<Part> {
         glow(block(Vec3::new(0.3, 0.3, 0.46), Vec3::new(0.16, 0.1, 0.01), Mat3::IDENTITY, 0xff8a2a)),
         shiny(limb(Vec3::new(-0.5, 0.42, 0.0), Vec3::new(-0.5, 1.3, -0.1), 0.055, 0x7f8aa6), 0.6),
     ];
-    // Dents de l'engrenage: elles tournent d'un pas en quatre images.
+    // Dents de l'engrenage: elles tournent d'un pas sur le cycle.
     for k in 0..10 {
         let a = k as f32 * TAU / 10.0 + t * TAU / 10.0 * 0.9;
         p.push(shiny(block(g + Vec3::new(a.cos() * 0.44, a.sin() * 0.44, 0.0), Vec3::new(0.065, 0.065, 0.055), Mat3::from_rotation_z(a), 0xb08838), 0.8));

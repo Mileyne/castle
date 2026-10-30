@@ -159,12 +159,50 @@ pub(crate) fn bat(pose: Pose) -> Vec<Part> {
 }
 
 pub fn build(monster: Monster, pose: Pose, theme: Theme) -> Vec<Part> {
+    // Les ennemis n'ont pas de geste d'arme: pour l'attaque, ils prennent une posture de marche (les bras et les jambes
+    // s'élancent) puis tout le corps recule, bondit et se penche en avant (`lunge`).
+    let base = match pose {
+        Pose::Attack(t) => Pose::Walk(0.1 + 0.5 * t),
+        other => other,
+    };
     let mut parts = match theme {
-        Theme::Manga | Theme::Medieval => build_manga(monster, pose),
-        Theme::Gore => crate::monsters_gore::build(monster, pose),
+        Theme::Manga | Theme::Medieval => build_manga(monster, base),
+        Theme::Gore => crate::monsters_gore::build(monster, base),
     };
     crate::tuning::apply(&crate::tuning::monster_key(monster), &mut parts);
+    if let Pose::Attack(t) = pose {
+        lunge(&mut parts, monster, t);
+    }
     parts
+}
+
+/// Mouvement d'attaque d'un ennemi, progression `t` de 0 à 1: il se ramasse et recule (préparation), bondit en avant en
+/// se penchant (frappe, vers le tiers du mouvement) puis revient à sa place. Le modèle regarde vers +Z, les pieds en
+/// (0, 0, 0): on le fait pivoter autour des pieds et on le déplace.
+fn lunge(parts: &mut [Part], monster: Monster, t: f32) {
+    let smooth = |x: f32| x * x * (3.0 - 2.0 * x);
+    // 0 → 1 pendant la préparation, 1 → 0 pendant la frappe puis le retour.
+    let windup = if t < 0.3 { smooth(t / 0.3) } else { 0.0 };
+    let strike = if t < 0.3 {
+        0.0
+    } else if t < 0.5 {
+        smooth((t - 0.3) / 0.2)
+    } else {
+        1.0 - smooth((t - 0.5) / 0.5)
+    };
+    // La chauve-souris pique du haut vers l'avant; les autres bondissent.
+    let (back, forward, lean_back, lean_forward, hop) = match monster {
+        Monster::Bat => (0.1, 0.55, 0.15, 0.55, 0.0),
+        Monster::Orc => (0.06, 0.28, 0.12, 0.38, 0.02),
+        _ => (0.08, 0.38, 0.18, 0.5, 0.06),
+    };
+    let angle = lean_forward * strike - lean_back * windup;
+    let shift = Vec3::new(0.0, hop * strike + 0.04 * windup, forward * strike - back * windup);
+    let rotation = Mat3::from_rotation_x(angle);
+    for part in parts {
+        part.center = rotation * part.center + shift;
+        part.rot = rotation * part.rot;
+    }
 }
 
 pub(crate) fn build_manga(monster: Monster, pose: Pose) -> Vec<Part> {
