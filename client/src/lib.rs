@@ -14,7 +14,7 @@ use bevy_replicon_renet::{
 };
 use castle_shared::*;
 
-use art::{Art, HERO_ANCHOR, PROP_ANCHOR, Prop, SPRITE_SIZE, WALL_ANCHOR, WalkCycle, direction_index, hero_index, monster_index, object, object_index, projectile};
+use art::{Art, HERO_ANCHOR, PROP_ANCHOR, Prop, SPRITE_SIZE, WALL_ANCHOR, WalkCycle, direction_index, hero_index, monster_index, monster_scale, object, object_index, projectile};
 
 mod art;
 mod camera;
@@ -32,6 +32,7 @@ mod music;
 mod quest;
 mod title;
 mod touch;
+mod weather;
 mod ui;
 
 /// Vitesse de rattrapage visuel vers la position du serveur.
@@ -89,7 +90,7 @@ pub fn run() {
             gore::GorePlugin,
             dialogue::DialoguePlugin,
         ))
-        .add_plugins((puzzle::PuzzlePlugin, touch::TouchPlugin, music::MusicPlugin))
+        .add_plugins((puzzle::PuzzlePlugin, touch::TouchPlugin, music::MusicPlugin, weather::WeatherPlugin))
         .add_plugins({
             #[cfg(target_os = "ios")]
             {
@@ -112,6 +113,7 @@ pub fn run() {
                 send_input.run_if(in_state(ClientState::Connected)).run_if(level_intro::player_can_act),
                 raise_active_hero.after(smooth_positions),
                 layer_projectiles.after(smooth_positions),
+                update_exit,
                 (dress_new_entities, fade_downed).chain(),
                 smooth_positions,
                 draw_health_bars,
@@ -295,7 +297,7 @@ fn dress_new_entities(
     interactables: Query<(Entity, &Position, &Interactable), Added<Interactable>>,
     doors: Query<(Entity, &Position, &Door), Added<Door>>,
     traps: Query<(Entity, &Position), Added<Trap>>,
-    portals: Query<(Entity, &Position), Added<Portal>>,
+    exits: Query<(Entity, &Position, &LevelExit), Added<LevelExit>>,
     portcullises: Query<(Entity, &Position, &Portcullis), Added<Portcullis>>,
 ) {
     // Un objet animé: sprite de la ligne `row` de la planche, ancré au sol.
@@ -318,7 +320,7 @@ fn dress_new_entities(
     }
     for (entity, pos, monster) in &monsters {
         commands.entity(entity).insert((
-            art.monsters.sprite_sized(monster_index(monster.0, direction_index(Vec2::NEG_Y), 0), Vec2::splat(SPRITE_SIZE)),
+            art.monsters.sprite_sized(monster_index(monster.0, direction_index(Vec2::NEG_Y), 0), Vec2::splat(SPRITE_SIZE * monster_scale(monster.0))),
             PROP_ANCHOR,
             WalkCycle::default(),
             Transform::from_translation(pos.0.extend(0.9)),
@@ -382,9 +384,10 @@ fn dress_new_entities(
                 }
             });
     }
-    for (entity, pos) in &portals {
+    for (entity, pos, exit) in &exits {
         commands.entity(entity).insert((
-            prop(object::PORTAL),
+            art.exits.sprite_sized(art::exit_index(art::exit_row(exit.kind, exit.open), 0), Vec2::splat(art::EXIT_SIZE)),
+            PROP_ANCHOR,
             Transform::from_translation(pos.0.extend(0.3)),
         ));
     }
@@ -431,6 +434,25 @@ fn dress_new_entities(
                 ..default()
             },
         ));
+    }
+}
+
+/// La sortie change de dessin quand elle s'ouvre (pont réparé, barrière ouverte...) et vacille (torches, bannières); l'escalier,
+/// qui reste le même, est grisé tant qu'il est fermé.
+fn update_exit(time: Res<Time>, mut exits: Query<(&LevelExit, &mut Sprite)>) {
+    let frame = (time.elapsed_secs() * 12.0) as usize % art::EXIT_FRAMES;
+    for (exit, mut sprite) in &mut exits {
+        let index = art::exit_index(art::exit_row(exit.kind, exit.open), frame);
+        if let Some(atlas) = sprite.texture_atlas.as_mut() {
+            if atlas.index != index {
+                atlas.index = index;
+            }
+        }
+        let dim = exit.kind == ExitKind::Stairs && !exit.open;
+        let color = if dim { Color::srgb(0.5, 0.5, 0.58) } else { Color::WHITE };
+        if sprite.color != color {
+            sprite.color = color;
+        }
     }
 }
 

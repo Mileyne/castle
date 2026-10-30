@@ -1,12 +1,10 @@
 title: intro
 ---
-knight: Le château est silencieux. Trop silencieux. Restez groupés. #line:intro_01
-sorcerer: Silencieux ? Écoute... il murmure. Tu ne l'entends pas ? #line:intro_02
+knight: La forêt est silencieuse. Trop silencieuse. Restez groupés. #line:intro_01
+sorcerer: Silencieuse ? Écoute... au loin, le château murmure. Tu ne l'entends pas ? #line:intro_02
 ranger: Je n'entends que du vent et des ennuis. Gardez les yeux ouverts. #line:intro_03
 forgebraise: Des ennuis ? Parfait ! J'ai apporté de quoi tout faire sauter ! #line:intro_04
 knight: Pas dans mon dos. Et pas sans mon ordre. #line:intro_05
-castle: Bienvenue, petits héros. #line:intro_06
-sorcerer: Vous avez entendu ça aussi ? #line:intro_07
 ===
 title: royal_door
 ---
@@ -42,4 +40,66 @@ forgebraise: Une alcôve verrouillée. Je pourrais la faire sauter. #line:alcove
     ranger: Sage. Les monstres et les générateurs en portent parfois. #line:alcove_02
 -> Boum ! #line:alcove_opt_boom
     forgebraise: Euh... mes bombes ne sont pas encore prêtes. Cherchons une clé. #line:alcove_03
+===
+title: bridge_intro
+---
+knight: Le pont du marais est brisé. Sans lui, impossible de gagner l'autre rive. #line:bridge_01
+forgebraise: Du bois, du fer, un peu de patience : je peux le remettre d'aplomb. #line:bridge_02
+forgebraise: Il me faut juste une pièce de rechange, cachée quelque part dans les clairières. #line:bridge_03
+ranger: Les loups rôdent, et le marais cache pire encore. Gardez les yeux ouverts. #line:bridge_04
+knight: Quand tu l'auras trouvée, prends la main sur le Forgebraise avec la touche 4, puis rejoins le pont. #line:bridge_05
+===
+title: bridge_panel
+---
+forgebraise: Voilà l'ouvrage : un mécanisme grippé, comme prévu. #line:bridge_panel_01
+forgebraise: Avec la pièce de rechange, je m'en occupe. Contrôlez-moi (touche 4) et maintenez F devant lui. #line:bridge_panel_02
+knight: On te couvre. Dépêche-toi avant le retour des loups. #line:bridge_panel_03
+===
+title: drawbridge_intro
+---
+knight: Le château, enfin. Mais le pont-levis est relevé. #line:drawbridge_01
+ranger: Sa chaîne passe devant une cible, là-bas. Une flèche bien placée, et il s'abaisse. #line:drawbridge_02
+ranger: Il me manque le disque de la cible. Il doit traîner dans les clairières. #line:drawbridge_03
+sorcerer: Et si je faisais fondre la chaîne ? #line:drawbridge_04
+ranger: Si tu veux la retrouver au fond du fossé... Touche 3 pour me passer la main. #line:drawbridge_05
+knight: On dit que des gardes sont enfermés dans des cages, le long du chemin. Délivrons-les si nous le pouvons. #line:drawbridge_06
+===
+title: drawbridge_panel
+---
+ranger: Le support de la cible : il lui manque son disque. #line:drawbridge_panel_01
+ranger: Je le fixe en maintenant F devant lui, puis je tire dessus : une flèche (Espace) suffit. #line:drawbridge_panel_02
+===
+title: gate_intro
+---
+knight: La grande porte du château. Et la meute n'est pas décidée à nous laisser approcher. #line:gate_01
+sorcerer: La porte est scellée par une rune. Je peux la dissiper, mais il me faut trois cristaux violets. #line:gate_02
+sorcerer: Les bêtes en gardent sûrement. Ce sont leurs jouets préférés. #line:gate_03
+forgebraise: Alors on les assomme, on ramasse, et on revient. #line:gate_04
+knight: Touche 2 pour l'Ensorceleur, le moment venu. Pour l'instant, venons à bout de la meute. #line:gate_05
+===
+title: gate_panel
+---
+sorcerer: Le sceau. Trois logements vides, comme je le pensais. #line:gate_panel_01
+sorcerer: Avec les trois cristaux, je le dissipe : prenez la main sur moi (touche 2) et maintenez F devant la rune. #line:gate_panel_02
+===
+title: knight_intro
+---
+knight: Les cryptes. Au fond, la porte royale : une masse d'acier que personne n'a franchie depuis des siècles. #line:knight_01
+sorcerer: Aucun sort ne la fera céder. Ce n'est pas une affaire de magie. #line:knight_02
+forgebraise: Ni de bombes, à ce qu'on dit. Quel dommage. #line:knight_03
+ranger: Alors c'est à toi, Chevalier. Prends la tête : touche 1. #line:knight_04
+knight: Ma lame et mon bouclier. Quand les morts se lèvent, appuyez sur E : mon Rempart protège toute l'équipe. #line:knight_05
+===
+title: knight_door
+---
+knight: Voilà la porte royale. Il y faudra de la force et du courage. #line:knight_door_01
+knight: Contrôlez-moi (touche 1) et maintenez F contre la porte. Restez derrière moi : le Rempart (E) vous couvrira. #line:knight_door_02
+===
+title: castle_intro
+---
+knight: Une nouvelle porte royale. Même combat, mais cette fois nous savons tous nous servir de nos talents. #line:castle_01
+sorcerer: Gardée par trois obstacles, un pour chacun de nous. #line:castle_02
+forgebraise: Une garde violette, un mécanisme grippé, une herse... Du travail pour tout le monde ! #line:castle_03
+ranger: Et il faudra trouver de quoi les vaincre : des cristaux, une pièce de rechange, un disque de cible. #line:castle_04
+knight: Quand tout sera réglé, la porte, elle, est pour moi. Rassemblez ce qu'il faut. #line:castle_05
 ===

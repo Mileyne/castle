@@ -109,8 +109,9 @@ fn update_lights(
     active: Option<Single<&HeroClass, With<LocalPlayer>>>,
     mut smooth: Local<Option<(Vec3, f32, Vec3)>>,
     mut environment: ResMut<Grade>,
+    expeditions: Query<&Expedition>,
     heroes: Query<(&Transform, &PartyId, &HeroClass), With<Player>>,
-    sources: Query<(&Transform, Option<&Generator>, Option<&Portal>), Or<(With<Generator>, With<Portal>, With<Turret>)>>,
+    sources: Query<(&Transform, Option<&Generator>, Option<&LevelExit>), Or<(With<Generator>, With<LevelExit>, With<Turret>)>>,
     camera: Single<&Transform, With<Camera2d>>,
     overlay: Single<&MeshMaterial2d<LightingMaterial>>,
     mut materials: ResMut<Assets<LightingMaterial>>,
@@ -136,9 +137,10 @@ fn update_lights(
     let view = camera.translation.truncate();
     let mut near: Vec<(f32, Vec4)> = sources
         .iter()
-        .map(|(t, generator, portal)| {
-            let (radius, intensity) = if portal.is_some() {
-                (95.0, 0.95)
+        .map(|(t, generator, exit)| {
+            // Une sortie fermée n'éclaire presque pas; ouverte, elle guide les héros.
+            let (radius, intensity) = if let Some(exit) = exit {
+                if exit.open { (95.0, 0.95) } else { (40.0, 0.5) }
             } else if generator.is_some() {
                 (70.0, 0.8)
             } else {
@@ -157,7 +159,16 @@ fn update_lights(
         *slot = *light;
     }
     let gore = *theme == ArtTheme::Gore;
-    let ambient = if gore { GORE_AMBIENT_DARKNESS } else { AMBIENT_DARKNESS };
+    let mut ambient = if gore { GORE_AMBIENT_DARKNESS } else { AMBIENT_DARKNESS };
+    // Dehors, c'est le jour (un peu brumeux): l'obscurité du donjon s'efface.
+    if let Some(expedition) = expeditions.iter().last() {
+        ambient = match expedition.region {
+            Region::Forest => ambient.min(if gore { 0.55 } else { 0.3 }),
+            Region::Marsh => ambient.min(if gore { 0.65 } else { 0.5 }),
+            Region::Approach => ambient.min(if gore { 0.6 } else { 0.38 }),
+            _ => ambient,
+        };
+    }
     material.data.params = Vec4::new(count as f32, ambient, if gore { 1.0 } else { 0.0 }, 0.0);
 
     // La colorimétrie glisse doucement vers celle de la tenue du héros dirigé.

@@ -45,19 +45,28 @@ fn spawn_quest_hud(mut commands: Commands, assets: Res<AssetServer>) {
         });
 }
 
+/// L'objectif à montrer: le premier à accomplir (la chasse avant les autres), ou le dernier une fois tous remplis.
+fn current_quest<'a>(quests: impl Iterator<Item = &'a Quest>) -> Option<&'a Quest> {
+    let mut all: Vec<&Quest> = quests.collect();
+    all.sort_by_key(|quest| quest.kind != castle_shared::QuestKind::Hunt);
+    all.iter().copied().find(|quest| !quest.is_done()).or_else(|| all.last().copied())
+}
+
 fn update_quest_hud(
-    quest: Option<Single<&Quest>>,
+    quests: Query<&Quest>,
     mut hud: Single<&mut Visibility, With<QuestHud>>,
     mut name: Single<(&mut Tr, &mut TextColor), (With<QuestName>, Without<QuestCount>)>,
     mut count: Single<&mut Text, With<QuestCount>>,
 ) {
-    let Some(quest) = quest else {
+    let Some(quest) = current_quest(quests.iter()) else {
         **hud = Visibility::Hidden;
         return;
     };
+    // « Objectif accompli » seulement quand tous les objectifs le sont.
+    let all_done = quests.iter().all(|q| q.is_done());
     **hud = Visibility::Inherited;
     let (tr, color) = &mut *name;
-    let (key, shown, tint) = if quest.is_done() {
+    let (key, shown, tint) = if all_done {
         ("quest-done", String::new(), css::LIME)
     } else {
         (quest.kind.name_key(), format!("{}/{}", quest.progress, quest.goal), css::GOLD)
@@ -73,7 +82,7 @@ fn update_quest_hud(
     }
 }
 
-/// Donne un sprite aux reliques et aux prisonniers (images provisoires, en attendant les planches de l'artiste).
+/// Donne un sprite aux reliques (provisoire) et aux prisonniers (un prisonnier dans une cage).
 fn dress_quest_entities(
     mut commands: Commands,
     art: Res<Art>,
@@ -87,7 +96,7 @@ fn dress_quest_entities(
         commands.entity(entity).insert((sprite, Prop(object::KEY), PROP_ANCHOR, Transform::from_translation(pos.0.extend(0.6))));
     }
     for (entity, pos) in &captives {
-        let sprite = art.objects.sprite_sized(object_index(object::RUNE, 0), size);
-        commands.entity(entity).insert((sprite, Prop(object::RUNE), PROP_ANCHOR, Transform::from_translation(pos.0.extend(0.6))));
+        let sprite = art.objects.sprite_sized(object_index(object::CAPTIVE, 0), size);
+        commands.entity(entity).insert((sprite, Prop(object::CAPTIVE), PROP_ANCHOR, Transform::from_translation(pos.0.extend(0.6))));
     }
 }

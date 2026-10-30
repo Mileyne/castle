@@ -22,8 +22,8 @@ const HERO_FRAMES: usize = HERO_IDLE_FRAMES + HERO_WALK_FRAMES + HERO_ATTACK_FRA
 const MONSTER_FRAMES: usize = HERO_FRAMES;
 /// Cadence de toutes les animations lues à l'horloge: repos, battement d'ailes, objets (images par seconde).
 const ANIMATION_FPS: f32 = 25.0;
-/// Une ligne par monstre et par direction (cinq monstres, huit directions).
-const MONSTER_ROWS: u32 = 5 * 8;
+/// Une ligne par monstre et par direction (six monstres, huit directions).
+const MONSTER_ROWS: u32 = 6 * 8;
 /// Durée du geste d'une attaque, en secondes (la frappe tombe vers 60 % du geste).
 const ATTACK_DURATION: f32 = 0.4;
 /// Durée du geste d'attaque d'un ennemi: plus court, il enchaîne les coups.
@@ -36,6 +36,8 @@ pub const SPRITE_SIZE: f32 = 32.0;
 const PROP_FRAMES: usize = 20;
 /// Colonnes d'une ligne de la planche des tuiles: 4 sols, 2 dessus de mur, 2 faces de mur (une ligne par région).
 const TILE_COLUMNS: usize = 90;
+/// Lignes de la planche des tuiles: une par région (six du château, trois extérieures).
+const TILE_ROWS: u32 = 9;
 /// Découpage d'une ligne de la planche des tuiles (identique à `tools/sprite_forge`): 3 motifs de sol de 4x4 tuiles,
 /// 2 dessus de mur de 4x4 tuiles, 2 motifs de face de mur de 4 tuiles, 2 faces décorées.
 const MACRO: u32 = 4;
@@ -97,7 +99,7 @@ impl Plugin for ArtPlugin {
             .add_systems(Startup, (load_art, spawn_transition_overlay))
             .add_systems(
                 Update,
-                (start_transition, run_transition, rebuild_world, update_tile_blur, tint_tiles, animate_heroes, animate_monsters, animate_props).chain(),
+                (start_transition, run_transition, rebuild_world, tint_tiles, animate_heroes, animate_monsters, animate_props).chain(),
             );
     }
 }
@@ -126,11 +128,11 @@ impl Atlas {
 #[derive(Resource, Clone)]
 pub struct Art {
     pub tiles: Atlas,
-    /// Tuiles légèrement floues, puis plus floues, pour les zones éloignées du héros.
-    pub tiles_blur: [Atlas; 3],
     pub heroes: Atlas,
     pub monsters: Atlas,
     pub objects: Atlas,
+    /// Sorties de niveau, dessinées en grand (cases de 192 px).
+    pub exits: Atlas,
     pub projectiles: Atlas,
     pub fx: Atlas,
     pub decals: Atlas,
@@ -146,13 +148,11 @@ pub mod object {
     pub const FOOD: usize = 3;
     pub const KEY: usize = 4;
     // Les lignes 5 (levier) et 7 (mécanisme) de la planche sont des objets au sol que l'énigme n'utilise plus.
-    pub const RUNE: usize = 6;
     pub const TRAP_ARMED: usize = 8;
     pub const TRAP_OFF: usize = 9;
     pub const DOOR_LOCKED: usize = 10;
     pub const DOOR_ROYAL: usize = 11;
     pub const DOOR_ROYAL_EMBLEM: usize = 12;
-    pub const PORTAL: usize = 13;
     pub const POTION: usize = 14;
     pub const WALL_RUNE: usize = 15;
     pub const WALL_GEARS_JAMMED: usize = 16;
@@ -164,6 +164,40 @@ pub mod object {
     pub const INGREDIENT: usize = 22;
     pub const GEAR_PART: usize = 23;
     pub const TARGET_DISC: usize = 24;
+    pub const CAPTIVE: usize = 25;
+}
+
+/// Les sorties se dessinent en grand sur leur propre planche: cases de 192 px, dix images d'animation, une ligne par état.
+pub const EXIT_CELL: u32 = 192;
+pub const EXIT_FRAMES: usize = 10;
+/// Taille d'affichage d'une sortie, en unités du monde (quatre tuiles).
+pub const EXIT_SIZE: f32 = 64.0;
+
+/// La ligne de la planche des sorties qui dessine une sortie, selon son genre et si elle est ouverte.
+pub fn exit_row(kind: ExitKind, open: bool) -> usize {
+    match (kind, open) {
+        (ExitKind::Stairs, _) => 0,
+        (ExitKind::Gate, false) => 1,
+        (ExitKind::Gate, true) => 2,
+        (ExitKind::Bridge, false) => 3,
+        (ExitKind::Bridge, true) => 4,
+        (ExitKind::Drawbridge, false) => 5,
+        (ExitKind::Drawbridge, true) => 6,
+    }
+}
+
+/// Case de la planche des sorties pour une ligne et une image d'animation.
+pub fn exit_index(row: usize, frame: usize) -> usize {
+    row * EXIT_FRAMES + frame
+}
+
+/// Les grosses bêtes sont dessinées un peu plus grandes que les autres (rapport à la taille d'un sprite ordinaire).
+pub fn monster_scale(kind: MonsterKind) -> f32 {
+    match kind {
+        MonsterKind::Wolf => 1.1,
+        MonsterKind::Orc => 1.15,
+        _ => 1.0,
+    }
 }
 
 /// Cases de la planche de projectiles (dessinés vers la droite, orientés par le jeu).
@@ -206,6 +240,7 @@ pub fn monster_index(kind: MonsterKind, direction: usize, frame: usize) -> usize
         MonsterKind::Goblin => 2,
         MonsterKind::Orc => 3,
         MonsterKind::Ghoul => 4,
+        MonsterKind::Wolf => 5,
     };
     (row * 8 + direction) * MONSTER_FRAMES + frame
 }
@@ -258,15 +293,11 @@ fn load_set(assets: &AssetServer, layouts: &mut Assets<TextureAtlasLayout>, them
         layout: layouts.add(TextureAtlasLayout::from_grid(UVec2::splat(cell), columns, rows, None, None)),
     };
     Art {
-        tiles: atlas("tiles.png", TILE_COLUMNS as u32, 6, TILE_CELL, false),
-        tiles_blur: [
-            atlas("tiles_blur1.png", TILE_COLUMNS as u32, 6, TILE_CELL, false),
-            atlas("tiles_blur2.png", TILE_COLUMNS as u32, 6, TILE_CELL, false),
-            atlas("tiles_blur3.png", TILE_COLUMNS as u32, 6, TILE_CELL, false),
-        ],
+        tiles: atlas("tiles.png", TILE_COLUMNS as u32, TILE_ROWS, TILE_CELL, false),
         heroes: atlas("heroes.png", HERO_FRAMES as u32, 32, HERO_CELL, true),
         monsters: atlas("monsters.png", MONSTER_FRAMES as u32, MONSTER_ROWS, HERO_CELL, true),
-        objects: atlas("objects.png", PROP_FRAMES as u32, 25, HERO_CELL, true),
+        objects: atlas("objects.png", PROP_FRAMES as u32, 26, HERO_CELL, true),
+        exits: atlas("exits.png", EXIT_FRAMES as u32, 7, EXIT_CELL, true),
         projectiles: atlas("projectiles.png", 4, 1, 64, true),
         fx: atlas("fx.png", 2, 1, 96, true),
         decals: atlas("decals.png", 13, 1, 128, true),
@@ -378,16 +409,16 @@ fn run_transition(
         let new = library.0.iter().find(|(t, _)| *t == target).map(|(_, art)| art.clone()).expect("thème chargé");
         let old = std::mem::replace(&mut *art, new);
         let new = &*art;
-        let mut pairs: Vec<(&Atlas, &Atlas)> = vec![
+        let pairs: Vec<(&Atlas, &Atlas)> = vec![
             (&old.tiles, &new.tiles),
             (&old.heroes, &new.heroes),
             (&old.monsters, &new.monsters),
             (&old.objects, &new.objects),
+            (&old.exits, &new.exits),
             (&old.projectiles, &new.projectiles),
             (&old.fx, &new.fx),
             (&old.decals, &new.decals),
         ];
-        pairs.extend(old.tiles_blur.iter().zip(new.tiles_blur.iter()));
         for mut sprite in &mut sprites {
             if let Some((_, to)) = pairs.iter().find(|(from, _)| from.image == sprite.image) {
                 sprite.image = to.image.clone();
@@ -437,19 +468,16 @@ fn run_transition(
 #[derive(Component)]
 struct WorldTile;
 
-/// Niveau de flou d'une tuile: 0 nette, puis 1 à 3 de plus en plus floue.
+/// Marque une tuile du décor (pour la teinte du héros dirigé).
 #[derive(Component)]
-struct TileBlur(u8);
-
-/// Distances (en unités du monde) à partir desquelles le décor passe au flou 1, 2 puis 3.
-const BLUR_RINGS: [f32; 3] = [110.0, 150.0, 190.0];
+struct TileMark;
 
 /// Teint les tuiles de la couleur du héros dirigé (multiplication de la couleur): seul le décor change, les
 /// personnages gardent leurs couleurs. Appliqué quand la teinte bouge, et à toute nouvelle tuile.
 fn tint_tiles(
     grade: Res<crate::lighting::Grade>,
-    fresh: Query<(), Added<TileBlur>>,
-    mut tiles: Query<&mut Sprite, With<TileBlur>>,
+    fresh: Query<(), Added<TileMark>>,
+    mut tiles: Query<&mut Sprite, With<TileMark>>,
     mut last: Local<Vec3>,
 ) {
     if last.distance(grade.0) < 0.002 && fresh.is_empty() {
@@ -459,27 +487,6 @@ fn tint_tiles(
     let color = Color::srgb(grade.0.x, grade.0.y, grade.0.z);
     for mut sprite in &mut tiles {
         sprite.color = color;
-    }
-}
-
-/// Floute le décor loin du centre de la vue. Les anneaux suivent la caméra (lissée) et non le héros: en changeant
-/// de héros, ils glissent avec l'image au lieu de sauter, et le décor ne change pas d'un coup par plaques.
-fn update_tile_blur(
-    art: Res<Art>,
-    camera: Single<&Transform, With<Camera2d>>,
-    mut tiles: Query<(&Transform, &mut Sprite, &mut TileBlur), Without<Camera2d>>,
-) {
-    let at = camera.translation.truncate();
-    for (transform, mut sprite, mut blur) in &mut tiles {
-        let distance = transform.translation.truncate().distance(at);
-        let level = BLUR_RINGS.iter().filter(|ring| distance > **ring).count() as u8;
-        if blur.0 != level {
-            blur.0 = level;
-            sprite.image = match level {
-                0 => art.tiles.image.clone(),
-                n => art.tiles_blur[n as usize - 1].image.clone(),
-            };
-        }
     }
 }
 
@@ -500,11 +507,13 @@ fn rebuild_world(
     let Some(expedition) = expeditions.iter().last() else {
         return;
     };
-    info!("building castle from seed {} ({:?})", expedition.seed, expedition.region);
+    info!("building level {} ({:?})", expedition.level, expedition.region);
     for entity in &old_tiles {
         commands.entity(entity).despawn();
     }
-    let dungeon = Dungeon::generate(expedition.seed);
+    let dungeon = castle_shared::level_def(expedition.level)
+        .to_dungeon()
+        .unwrap_or_else(|e| panic!("niveau {}: {e}", expedition.level));
     let room = &dungeon.room;
     let region_row = Region::ALL.iter().position(|r| *r == expedition.region).unwrap_or(0);
     let size = room.size();
@@ -537,7 +546,7 @@ fn rebuild_world(
             let center = room.tile_center(x, y);
             commands.spawn((
                 WorldTile,
-                TileBlur(0),
+                TileMark,
                 art.tiles.sprite_sized(region_row * TILE_COLUMNS + column, Vec2::splat(TILE_SIZE)),
                 Transform::from_translation(center.extend(0.0)),
             ));
@@ -677,7 +686,10 @@ fn decal_palette(region_row: usize) -> [Color; 2] {
         2 => [c(0.1, 0.04, 0.02, 0.24), c(0.08, 0.04, 0.16, 0.24)],  // encre
         3 => [c(0.0, 0.0, 0.0, 0.32), c(0.1, 0.03, 0.0, 0.34)],      // suie, brûlures
         4 => [c(0.02, 0.03, 0.12, 0.26), c(0.06, 0.12, 0.3, 0.22)],  // humidité froide
-        _ => [c(0.28, 0.04, 0.08, 0.22), c(0.1, 0.05, 0.1, 0.24)],   // vin renversé, cire
+        5 => [c(0.28, 0.04, 0.08, 0.22), c(0.1, 0.05, 0.1, 0.24)],   // vin renversé, cire
+        6 => [c(0.05, 0.1, 0.03, 0.22), c(0.2, 0.15, 0.05, 0.2)],    // feuilles mortes, terre
+        7 => [c(0.03, 0.08, 0.06, 0.28), c(0.05, 0.14, 0.1, 0.26)],  // vase, algues
+        _ => [c(0.12, 0.08, 0.04, 0.24), c(0.06, 0.05, 0.04, 0.22)], // poussière, ornières
     }
 }
 
@@ -752,7 +764,7 @@ mod tests {
 
     #[test]
     fn every_monster_has_its_own_rows_inside_the_sheet() {
-        let kinds = [MonsterKind::Skeleton, MonsterKind::Bat, MonsterKind::Goblin, MonsterKind::Orc, MonsterKind::Ghoul];
+        let kinds = [MonsterKind::Skeleton, MonsterKind::Bat, MonsterKind::Goblin, MonsterKind::Orc, MonsterKind::Ghoul, MonsterKind::Wolf];
         let mut seen = std::collections::HashSet::new();
         for kind in kinds {
             for direction in 0..8 {
