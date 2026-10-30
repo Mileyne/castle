@@ -81,6 +81,8 @@ enum Context {
         saves: bool,
     },
     Pause,
+    /// Bilan de fin de niveau: un seul bouton, OK.
+    Summary,
     Game {
         dialogue: bool,
     },
@@ -157,11 +159,14 @@ fn context(
     state: &ClientState,
     pause: &PauseMenu,
     dialogue: &DialogueState,
+    summary: bool,
 ) -> Context {
     if title.0 {
         Context::Title { address: mode.address, saves: mode.saves }
     } else if *state != ClientState::Connected {
         Context::Nothing
+    } else if summary {
+        Context::Summary
     } else if pause.open {
         Context::Pause
     } else {
@@ -234,6 +239,9 @@ fn layout(context: Context, size: Vec2) -> Vec<Button> {
             menu_arrows(&mut out);
             ok_back(&mut out);
         }
+        Context::Summary => {
+            out.push(Button::round(hold(KeyCode::Enter), Label::Key("touch-ok"), main, 42.0, Color::srgb(0.9, 0.75, 0.2)));
+        }
         Context::Game { dialogue } => {
             out.push(Button::round(hold(KeyCode::Space), Label::Key("touch-attack"), main, 44.0, Color::srgb(0.85, 0.25, 0.2)));
             out.push(Button::round(
@@ -299,12 +307,13 @@ fn read_controls(
     state: Res<State<ClientState>>,
     pause: Res<PauseMenu>,
     dialogue: Res<DialogueState>,
+    intro: Res<crate::level_intro::LevelIntro>,
 ) {
     let Ok((window_entity, window)) = windows.single() else {
         return;
     };
     let size = Vec2::new(window.width(), window.height());
-    let context = context(&title, &mode, state.get(), &pause, &dialogue);
+    let context = context(&title, &mode, state.get(), &pause, &dialogue, intro.summary_active());
     let controls = &mut *controls;
 
     if enabled() && (context != controls.context || size != controls.size) {
@@ -427,6 +436,7 @@ fn gamepad_keys(gamepad: &Gamepad, context: Context, left: Vec2, wanted: &mut Ve
     };
     match context {
         Context::Nothing => {}
+        Context::Summary => map(B::South, KeyCode::Enter),
         Context::Title { .. } | Context::Pause => {
             map(B::DPadUp, KeyCode::ArrowUp);
             map(B::DPadDown, KeyCode::ArrowDown);

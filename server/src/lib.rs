@@ -342,12 +342,15 @@ pub fn run(options: Options, stop: Option<StopFlag>) {
         .init_resource::<DialogueSession>()
         .init_resource::<Paused>()
         .init_resource::<NextParty>()
+        .init_resource::<LevelStats>()
+        .init_resource::<Transition>()
         .add_systems(Startup, (start_server, start_first_expedition))
         .add_systems(
             FixedUpdate,
             (
                 // Actions des héros, puis effets, puis monde et dialogues.
                 (
+                    hold_heroes,
                     move_players,
                     player_attacks,
                     resolve_attacks,
@@ -363,14 +366,14 @@ pub fn run(options: Options, stop: Option<StopFlag>) {
                 )
                     .chain(),
                 (
-                    run_generators,
+                    run_generators.run_if(not_in_transition),
                     run_dialogue_triggers,
                     tick_dialogue,
                     run_interactions,
                     run_ward,
                     run_traps,
                     open_locked_doors,
-                    monster_ai,
+                    monster_ai.run_if(not_in_transition),
                     reap_dead,
                     collect_pickups,
                     run_regen,
@@ -380,6 +383,7 @@ pub fn run(options: Options, stop: Option<StopFlag>) {
                     down_players,
                     revive_players,
                     check_wipe,
+                    track_stats,
                     run_portal,
                 )
                     .chain(),
@@ -392,6 +396,7 @@ pub fn run(options: Options, stop: Option<StopFlag>) {
         .add_observer(switch_hero)
         .add_observer(set_pause)
         .add_observer(apply_input)
+        .add_observer(continue_level)
         .add_observer(dialogue_advance)
         .add_observer(dialogue_skip)
         .add_observer(dialogue_vote)
@@ -444,6 +449,79 @@ struct Paused(bool);
 
 fn not_paused(paused: Res<Paused>) -> bool {
     !paused.0
+}
+
+/// Ce que l'équipe a fait dans le niveau en cours; remis à zéro à chaque nouveau niveau.
+#[derive(Resource, Default)]
+struct LevelStats {
+    seconds: f32,
+    kills: u32,
+    generators: u32,
+    damage_taken: f32,
+    downed: u32,
+    gold: u32,
+    keys: u32,
+    food: u32,
+    potions: u32,
+    pieces: u32,
+}
+
+/// Temps écoulé depuis que l'équipe est entrée dans le portail: les clients montrent le bilan, la partie est figée
+/// (monstres, générateurs et héros) et le niveau suivant attend que chaque joueur ait validé.
+#[derive(Resource, Default)]
+struct Transition(Option<f32>);
+
+/// Un joueur absent ne bloque pas les autres indéfiniment: au bout de ce délai, le niveau suivant démarre.
+const SUMMARY_TIMEOUT: f32 = 120.0;
+
+/// Sur un client: il a validé le bilan.
+#[derive(Component)]
+struct Ready;
+
+fn continue_level(input: On<FromClient<ContinueLevel>>, transition: Res<Transition>, mut commands: Commands) {
+    if transition.0.is_none() {
+        return;
+    }
+    if let Some(client) = input.client_id.entity() {
+        commands.entity(client).try_insert(Ready);
+    }
+}
+
+fn not_in_transition(transition: Res<Transition>) -> bool {
+    transition.0.is_none()
+}
+
+/// Pendant le bilan, les héros ne bougent ni ne frappent (le client n'envoie plus d'ordres, mais le dernier reste).
+fn hold_heroes(transition: Res<Transition>, mut heroes: Query<(&mut MoveDir, &mut Attacking), With<Player>>) {
+    if transition.0.is_none() {
+        return;
+    }
+    for (mut dir, mut attacking) in &mut heroes {
+        dir.0 = Vec2::ZERO;
+        attacking.0 = false;
+    }
+}
+
+/// Compte le temps passé, les points de vie perdus par les héros et les héros tombés.
+fn track_stats(
+    time: Res<Time>,
+    transition: Res<Transition>,
+    mut stats: ResMut<LevelStats>,
+    mut last: Local<HashMap<Entity, f32>>,
+    heroes: Query<(Entity, &Health), With<Player>>,
+    fallen: Query<(), (With<Player>, Added<Downed>)>,
+) {
+    for (hero, health) in &heroes {
+        // Seules les baisses comptent (les soins et les remises en forme les font monter).
+        let before = last.insert(hero, health.current).unwrap_or(health.current);
+        if transition.0.is_none() && before > health.current {
+            stats.damage_taken += before - health.current;
+        }
+    }
+    if transition.0.is_none() {
+        stats.seconds += time.delta_secs();
+        stats.downed += fallen.iter().count() as u32;
+    }
 }
 
 /// Le menu de pause fige la partie, mais seulement en solo: en coopératif les autres joueurs continuent.
@@ -930,12 +1008,18 @@ fn reap_dead(
         (With<Hurtbox>, Without<Player>),
     >,
     mut quests: Query<&mut Quest>,
+    mut stats: ResMut<LevelStats>,
 ) {
     for (entity, health, pos, is_generator, is_monster) in &dead {
         if health.current > 0.0 {
             continue;
         }
         commands.entity(entity).despawn();
+        if is_generator {
+            stats.generators += 1;
+        } else if is_monster {
+            stats.kills += 1;
+        }
         if is_monster || is_generator {
             for mut quest in &mut quests {
                 if quest.kind == QuestKind::Hunt && !quest.is_done() {
@@ -1047,6 +1131,7 @@ fn collect_pickups(
     team: Query<(Entity, &PartyId), With<Player>>,
     mut kit: Query<&mut PuzzleKit>,
     pickups: Query<(Entity, &Position, &Pickup), Without<Player>>,
+    mut stats: ResMut<LevelStats>,
 ) {
     for (entity, pickup_pos, pickup) in &pickups {
         for (pos, mut health, mut gold, mut keys, party) in &mut players {
@@ -1054,25 +1139,35 @@ fn collect_pickups(
                 continue;
             }
             match pickup.0 {
-                PickupKind::Coin => gold.0 += 1,
-                PickupKind::Key => keys.0 += 1,
+                PickupKind::Coin => {
+                    gold.0 += 1;
+                    stats.gold += 1;
+                }
+                PickupKind::Key => {
+                    keys.0 += 1;
+                    stats.keys += 1;
+                }
                 // Les pièces de l'énigme vont dans la réserve commune de l'équipe.
                 PickupKind::Ingredient => {
                     if let Ok(mut stock) = kit.single_mut() {
                         stock.ingredients = stock.ingredients.saturating_add(1);
+                        stats.pieces += 1;
                     }
                 }
                 PickupKind::GearPart => {
                     if let Ok(mut stock) = kit.single_mut() {
                         stock.gear = stock.gear.saturating_add(1);
+                        stats.pieces += 1;
                     }
                 }
                 PickupKind::TargetDisc => {
                     if let Ok(mut stock) = kit.single_mut() {
                         stock.target = stock.target.saturating_add(1);
+                        stats.pieces += 1;
                     }
                 }
                 PickupKind::Potion => {
+                    stats.potions += 1;
                     // Toute l'équipe de celui qui boit se régénère (boire une deuxième fois relance la durée).
                     for (hero, hero_party) in &team {
                         if hero_party == party {
@@ -1086,6 +1181,7 @@ fn collect_pickups(
                         continue;
                     }
                     health.current = (health.current + FOOD_HEAL).min(health.max);
+                    stats.food += 1;
                 }
             }
             commands.entity(entity).despawn();
@@ -1467,6 +1563,9 @@ fn run_portal(
     mut level: ResMut<Level>,
     mut campaign: ResMut<Campaign>,
     mut countdown: Local<f32>,
+    mut transition: ResMut<Transition>,
+    mut stats: ResMut<LevelStats>,
+    clients: Query<(Entity, Has<Ready>), With<ActiveHero>>,
     portals: Query<&Position, (With<Portal>, Without<Player>)>,
     mut players: Query<
         (Entity, &mut Position, &mut Health, &PartyId, &Gold, &Keys, Has<Downed>, Has<Controlled>),
@@ -1478,22 +1577,53 @@ fn run_portal(
     let Ok(portal) = portals.single() else {
         return;
     };
-    // Seuls les héros dirigés comptent: les compagnons sont ramenés avec eux.
-    let standing: Vec<_> = players
-        .iter()
-        .filter(|(.., downed, controlled)| !downed && *controlled)
-        .collect();
-    let all_in = !standing.is_empty()
-        && standing.iter().all(|(_, p, ..)| p.0.distance(portal.0) <= PORTAL_RADIUS);
-    if !all_in {
+    if let Some(elapsed) = transition.0.as_mut() {
+        // Les clients montrent le bilan: le niveau suivant attend que tous les joueurs aient validé.
+        *elapsed += time.delta_secs();
+        if *elapsed < SUMMARY_TIMEOUT && !clients.iter().all(|(_, ready)| ready) {
+            return;
+        }
+        transition.0 = None;
+        for (client, _) in &clients {
+            commands.entity(client).remove::<Ready>();
+        }
+    } else {
+        // Seuls les héros dirigés comptent: les compagnons sont ramenés avec eux.
+        let standing: Vec<_> = players
+            .iter()
+            .filter(|(.., downed, controlled)| !downed && *controlled)
+            .collect();
+        let all_in = !standing.is_empty()
+            && standing.iter().all(|(_, p, ..)| p.0.distance(portal.0) <= PORTAL_RADIUS);
+        if !all_in {
+            *countdown = 0.0;
+            return;
+        }
+        *countdown += time.delta_secs();
+        if *countdown < PORTAL_DELAY {
+            return;
+        }
         *countdown = 0.0;
+        commands.server_trigger(ToClients {
+            targets: SendTargets::All,
+            message: LevelSummary {
+                level: level.0,
+                seconds: stats.seconds,
+                kills: stats.kills,
+                generators: stats.generators,
+                damage_taken: stats.damage_taken,
+                downed: stats.downed,
+                gold: stats.gold,
+                keys: stats.keys,
+                food: stats.food,
+                potions: stats.potions,
+                pieces: stats.pieces,
+            },
+        });
+        transition.0 = Some(0.0);
         return;
     }
-    *countdown += time.delta_secs();
-    if *countdown < PORTAL_DELAY {
-        return;
-    }
-    *countdown = 0.0;
+    *stats = LevelStats::default();
 
     // Entrée dans le niveau suivant: c'est ici que la partie est sauvegardée.
     campaign.0.level += 1;
@@ -2251,7 +2381,7 @@ mod tests {
     #[test]
     fn potion_regenerates_the_whole_team_of_whoever_drinks_it() {
         let mut app = app_with_time();
-        app.add_systems(Update, collect_pickups);
+        app.init_resource::<LevelStats>().add_systems(Update, collect_pickups);
         let spot = Vec2::new(40.0, 40.0);
         let leader = hero(app.world_mut(), 0, spot, true, 50.0);
         let companion = hero(app.world_mut(), 0, Vec2::new(-300.0, 0.0), false, 50.0);
@@ -2265,7 +2395,7 @@ mod tests {
 
         // Un compagnon (non dirigé) qui passe dessus ne la ramasse pas.
         let mut app = app_with_time();
-        app.add_systems(Update, collect_pickups);
+        app.init_resource::<LevelStats>().add_systems(Update, collect_pickups);
         let idle = hero(app.world_mut(), 0, spot, false, 50.0);
         let potion = app.world_mut().spawn((Pickup(PickupKind::Potion), Position(spot))).id();
         app.update();
@@ -2356,6 +2486,29 @@ mod tests {
         assert!(ease(1) < ease(2) && ease(2) < ease(3));
         assert_eq!(ease(0), ease(1));
         assert_eq!(ease(10), 1.0);
+    }
+
+    #[test]
+    fn the_level_summary_counts_time_and_damage_but_not_healing_nor_the_transition() {
+        let mut app = app_with_time();
+        app.init_resource::<LevelStats>().init_resource::<Transition>().add_systems(Update, track_stats);
+        let id = hero(app.world_mut(), 0, Vec2::ZERO, true, 100.0);
+        advance(&mut app, 0.1);
+        app.world_mut().get_mut::<Health>(id).unwrap().current = 80.0;
+        advance(&mut app, 0.1);
+        app.world_mut().get_mut::<Health>(id).unwrap().current = 90.0;
+        advance(&mut app, 0.1);
+        {
+            let stats = app.world().resource::<LevelStats>();
+            assert!((stats.damage_taken - 20.0).abs() < 1e-3, "{}", stats.damage_taken);
+            assert!(stats.seconds > 0.25, "{}", stats.seconds);
+        }
+        // Une fois l'équipe dans le portail, plus rien ne compte.
+        app.world_mut().resource_mut::<Transition>().0 = Some(5.0);
+        app.world_mut().get_mut::<Health>(id).unwrap().current = 10.0;
+        advance(&mut app, 0.1);
+        let stats = app.world().resource::<LevelStats>();
+        assert!((stats.damage_taken - 20.0).abs() < 1e-3 && stats.seconds < 0.35);
     }
 
     #[test]
@@ -2618,7 +2771,7 @@ mod tests {
     #[test]
     fn found_pieces_go_into_the_shared_kit() {
         let mut app = app_with_time();
-        app.add_systems(Update, collect_pickups);
+        app.init_resource::<LevelStats>().add_systems(Update, collect_pickups);
         let kit = app.world_mut().spawn(PuzzleKit::default()).id();
         let spot = Vec2::new(5.0, 5.0);
         hero(app.world_mut(), 0, spot, true, 100.0);

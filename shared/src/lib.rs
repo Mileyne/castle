@@ -646,6 +646,32 @@ pub struct DialogueFinished;
 #[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct ScreenShake(pub f32);
 
+/// Bilan du niveau qui vient d'être terminé, envoyé quand l'équipe entre dans le portail: les clients l'affichent
+/// pendant que le serveur attend avant de générer le niveau suivant.
+#[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct LevelSummary {
+    /// Numéro du niveau terminé.
+    pub level: u32,
+    /// Temps passé dans le niveau, en secondes.
+    pub seconds: f32,
+    /// Monstres vaincus et générateurs détruits.
+    pub kills: u32,
+    pub generators: u32,
+    /// Points de vie perdus par l'équipe, et nombre de fois qu'un héros est tombé.
+    pub damage_taken: f32,
+    pub downed: u32,
+    /// Butin ramassé: or, clés, nourriture, potions et éléments d'énigme.
+    pub gold: u32,
+    pub keys: u32,
+    pub food: u32,
+    pub potions: u32,
+    pub pieces: u32,
+}
+
+/// Le joueur a validé le bilan de fin de niveau: le niveau suivant démarre quand tous les joueurs l'ont fait.
+#[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct ContinueLevel;
+
 /// Un joueur a maintenu Entrée: le serveur purge le dialogue en cours et ceux sur le point de démarrer.
 #[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct DialogueSkip;
@@ -712,6 +738,7 @@ impl Plugin for CastleSharedPlugin {
             .replicate::<Downed>()
             .add_server_event::<AttackFx>(Channel::Unordered)
             .add_server_event::<ScreenShake>(Channel::Unordered)
+            .add_server_event::<LevelSummary>(Channel::Ordered)
             .add_mapped_server_event::<YouAre>(Channel::Ordered)
             .add_server_event::<DialogueBegin>(Channel::Ordered)
             .add_server_event::<DialogueAdvance>(Channel::Ordered)
@@ -723,6 +750,7 @@ impl Plugin for CastleSharedPlugin {
             .add_client_event::<DialogueFinished>(Channel::Ordered)
             .add_client_event::<PlayerInput>(Channel::Unordered)
             .add_client_event::<SwitchHero>(Channel::Ordered)
+            .add_client_event::<ContinueLevel>(Channel::Ordered)
             .add_client_event::<SetPause>(Channel::Ordered);
     }
 }
