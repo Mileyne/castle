@@ -17,6 +17,8 @@ use bevy_replicon_renet::{
     netcode::{NetcodeServerTransport, ServerAuthentication, ServerConfig},
     renet::ConnectionConfig,
 };
+mod outdoor;
+
 use castle_shared::save::{self, GameMode, SaveGame};
 use castle_shared::*;
 
@@ -40,15 +42,18 @@ const MONSTER_REACH_SLACK: f32 = 6.0;
 const REVIVE_RANGE: f32 = 20.0;
 const REVIVE_TIME: f32 = 1.5;
 
+/// Une scène de dialogue ne démarre que si aucun monstre n'est à cette distance d'un héros.
+const DIALOGUE_SAFE_RADIUS: f32 = 170.0;
+
 const GENERATOR_HEALTH: f32 = 40.0;
 /// Un générateur ne produit que si un héros est à moins de cette distance.
 const GENERATOR_ACTIVATION: f32 = 220.0;
 const GENERATOR_INTERVAL: f32 = 2.2;
 /// Nombre maximal de monstres vivants dans la salle.
 const MAX_MONSTERS: usize = 28;
-/// Le portail s'active quand tous les héros debout sont dans ce rayon, pendant ce délai.
-const PORTAL_RADIUS: f32 = 36.0;
-const PORTAL_DELAY: f32 = 1.5;
+/// La sortie s'active quand tous les héros debout sont dans ce rayon, pendant ce délai.
+const EXIT_RADIUS: f32 = 48.0;
+const EXIT_DELAY: f32 = 1.5;
 
 /// Rempart: rayon d'effet, durée et part des dégâts qui passe encore.
 const BULWARK_RADIUS: f32 = 90.0;
@@ -342,6 +347,7 @@ pub fn run(options: Options, stop: Option<StopFlag>) {
         .init_resource::<DialogueSession>()
         .init_resource::<Paused>()
         .init_resource::<NextParty>()
+        .insert_resource(LevelRegion(Region::Crypts))
         .init_resource::<LevelStats>()
         .init_resource::<Transition>()
         .add_systems(Startup, (start_server, start_first_expedition))
@@ -379,12 +385,13 @@ pub fn run(options: Options, stop: Option<StopFlag>) {
                     run_regen,
                     collect_relics,
                     rescue_captives,
-                    open_portal,
+                    update_mechanism_quests,
+                    open_exit,
                     down_players,
                     revive_players,
                     check_wipe,
                     track_stats,
-                    run_portal,
+                    run_exit,
                 )
                     .chain(),
             )
@@ -425,7 +432,7 @@ impl Options {
 
     /// Reprend la partie de ce nom, ou en commence une nouvelle.
     fn open_campaign(&self) -> Campaign {
-        let save = match save::load(&self.save) {
+        let mut save = match save::load(&self.save) {
             Some(save) => save,
             None => {
                 let seed = SystemTime::now()
@@ -439,6 +446,10 @@ impl Options {
                 fresh
             }
         };
+        // L'éditeur de niveaux lance le jeu sur un niveau précis pour l'essayer.
+        if let Some(level) = std::env::var("CASTLE_START_LEVEL").ok().and_then(|v| v.parse::<u32>().ok()) {
+            save.level = level.clamp(1, LEVEL_COUNT);
+        }
         Campaign(save)
     }
 }
@@ -450,6 +461,10 @@ struct Paused(bool);
 fn not_paused(paused: Res<Paused>) -> bool {
     !paused.0
 }
+
+/// Région du niveau en cours (elle décide des monstres que les générateurs produisent).
+#[derive(Resource)]
+struct LevelRegion(Region);
 
 /// Ce que l'équipe a fait dans le niveau en cours; remis à zéro à chaque nouveau niveau.
 #[derive(Resource, Default)]
@@ -491,14 +506,29 @@ fn not_in_transition(transition: Res<Transition>) -> bool {
     transition.0.is_none()
 }
 
-/// Pendant le bilan, les héros ne bougent ni ne frappent (le client n'envoie plus d'ordres, mais le dernier reste).
-fn hold_heroes(transition: Res<Transition>, mut heroes: Query<(&mut MoveDir, &mut Attacking), With<Player>>) {
-    if transition.0.is_none() {
+/// Les héros sont retenus pendant le bilan de fin de niveau et pendant les dialogues: une scène ne démarre qu'à l'abri des
+/// ennemis, et on ne la laisse pas passer inaperçue (on peut la passer en maintenant Entrée). Une scène d'introduction qui
+/// n'a pas encore démarré (elle attend un court délai à l'arrivée) retient déjà les héros. Le client n'envoie plus d'ordres,
+/// mais le dernier reste: on remet tout à zéro.
+fn hold_heroes(
+    transition: Res<Transition>,
+    session: Res<DialogueSession>,
+    triggers: Query<&DialogueTrigger>,
+    monsters: Query<&Position, (With<Monster>, Without<Player>)>,
+    mut heroes: Query<(&Position, &mut MoveDir, &mut Attacking, &mut SpecialInput, &mut Interacting), With<Player>>,
+) {
+    // Une scène qui n'a pas encore démarré ne retient les héros que si elle peut le faire tout de suite: tant qu'un monstre
+    // est à proximité elle attend, et les héros doivent pouvoir se battre (sinon ils resteraient figés sous les crocs).
+    let calm = !monsters.iter().any(|m| heroes.iter().any(|(p, ..)| p.0.distance(m.0) <= DIALOGUE_SAFE_RADIUS));
+    let scene = session.active.is_some() || (calm && triggers.iter().any(|t| t.node.ends_with("intro") && !t.fired));
+    if transition.0.is_none() && !scene {
         return;
     }
-    for (mut dir, mut attacking) in &mut heroes {
+    for (_, mut dir, mut attacking, mut special, mut interacting) in &mut heroes {
         dir.0 = Vec2::ZERO;
         attacking.0 = false;
+        special.queued = false;
+        interacting.0 = false;
     }
 }
 
@@ -579,6 +609,7 @@ fn spawn_party(
     add: On<Add, AuthorizedClient>,
     mut commands: Commands,
     layout: Res<Layout>,
+    room: Res<Room>,
     campaign: Res<Campaign>,
     mut next_party: ResMut<NextParty>,
     heroes: Query<(), With<Player>>,
@@ -602,7 +633,7 @@ fn spawn_party(
                 Mana::full(stats.max_mana),
                 Gold(if i == 0 { gold } else { 0 }),
                 Keys(if i == 0 { keys } else { 0 }),
-                Position(spawn_point(first_slot + i, &layout)),
+                Position(spawn_point(first_slot + i, &layout, &room)),
             ))
             .insert((
                 MoveDir::default(),
@@ -900,6 +931,7 @@ fn run_generators(
     players: Query<&Position, (With<Player>, Without<Downed>, Without<Generator>)>,
     monsters: Query<(), With<Monster>>,
     level: Res<Level>,
+    region: Res<LevelRegion>,
 ) {
     let mut alive = monsters.iter().count();
     for (pos, mut timer) in &mut generators {
@@ -915,7 +947,7 @@ fn run_generators(
             continue;
         }
         timer.0 = GENERATOR_INTERVAL / ease(level.0);
-        let kind = MonsterKind::pick(level.0, rng.next_f32());
+        let kind = MonsterKind::pick_in(region.0, level.0, rng.next_f32());
         // Le monstre sort du côté du héros, sauf si un mur gêne.
         let out = pos.0 + (target - pos.0).normalize_or_zero() * (GENERATOR_HALF_SIZE + 6.0);
         let at = if room.overlaps_wall(out, kind.stats().half_size) { pos.0 } else { out };
@@ -1081,6 +1113,7 @@ fn rescue_captives(
     players: Query<&Position, (With<Player>, With<Controlled>, Without<Downed>)>,
     mut captives: Query<(Entity, &Position, &mut RescueHold), (With<Captive>, Without<Player>)>,
     mut quests: Query<&mut Quest>,
+    mut rng: ResMut<Rng>,
 ) {
     for (entity, captive_pos, mut hold) in &mut captives {
         if players.iter().any(|pos| pos.0.distance(captive_pos.0) <= RESCUE_RANGE) {
@@ -1090,6 +1123,11 @@ fn rescue_captives(
         }
         if hold.0 >= RESCUE_TIME {
             commands.entity(entity).despawn();
+            // Un prisonnier délivré remercie: quelques pièces et de quoi se soigner.
+            for _ in 0..3 {
+                spawn_pickup(&mut commands, PickupKind::Coin, captive_pos.0, &mut rng);
+            }
+            spawn_pickup(&mut commands, PickupKind::Food, captive_pos.0, &mut rng);
             for mut quest in &mut quests {
                 if quest.kind == QuestKind::Rescue && !quest.is_done() {
                     quest.progress += 1;
@@ -1100,11 +1138,28 @@ fn rescue_captives(
 }
 
 /// L'objectif est rempli: le portail de sortie apparaît dans la salle de sortie, avec une secousse.
-fn open_portal(
+/// Un objectif propre à une classe (réparer le pont, libérer le pont-levis, briser le sceau) est rempli dès que son mécanisme
+/// est accompli.
+fn update_mechanism_quests(interactables: Query<&Interactable>, mut quests: Query<&mut Quest>) {
+    for mut quest in &mut quests {
+        let Some(kind) = quest.kind.mechanism() else {
+            continue;
+        };
+        // Une porte poussée disparaît: l'objectif, une fois rempli, le reste.
+        if quest.progress < quest.goal && interactables.iter().any(|i| i.kind == kind && i.done) {
+            quest.progress = quest.goal;
+        }
+    }
+}
+
+/// La sortie s'ouvre quand l'objectif du niveau est rempli (ou, sans objectif, quand plus rien ne reste à combattre), que
+/// tous les mécanismes du niveau sont accomplis et, dans un combat de boss, que la meute est vaincue.
+fn open_exit(
     mut commands: Commands,
-    layout: Res<Layout>,
+    level: Res<Level>,
     mut quests: Query<&mut Quest>,
-    portals: Query<(), With<Portal>>,
+    mut exits: Query<&mut LevelExit>,
+    interactables: Query<&Interactable>,
     remaining: Query<(), Or<(With<Monster>, With<Generator>)>>,
 ) {
     // Plus rien à combattre: la chasse est réputée accomplie, pour ne jamais bloquer la sortie.
@@ -1115,10 +1170,15 @@ fn open_portal(
             }
         }
     }
-    if quests.iter_mut().any(|quest| quest.is_changed() && quest.is_done()) && portals.is_empty() {
-        let exit = &layout.rooms[layout.exit];
-        commands.spawn((Replicated, Portal, Position(tile_to_world(exit.center()))));
-        commands.server_trigger(ToClients { targets: SendTargets::All, message: ScreenShake(0.5) });
+    let quests_done = if quests.is_empty() { remaining.is_empty() } else { quests.iter().all(|quest| quest.is_done()) };
+    let mechanisms_done = interactables.iter().all(|i| i.done);
+    let fight_done = !is_boss_level(level.0) || remaining.is_empty();
+    let done = quests_done && mechanisms_done && fight_done;
+    for mut exit in &mut exits {
+        if done && !exit.open {
+            exit.open = true;
+            commands.server_trigger(ToClients { targets: SendTargets::All, message: ScreenShake(0.5) });
+        }
     }
 }
 
@@ -1274,7 +1334,7 @@ fn check_wipe(
     order.dedup();
     let mut given = Vec::new();
     for (slot, (entity, mut pos, mut health, mut gold, mut keys, party, _)) in players.iter_mut().enumerate() {
-        pos.0 = spawn_point(slot, &dungeon.layout);
+        pos.0 = spawn_point(slot, &dungeon.layout, &dungeon.room);
         health.current = health.max;
         commands.entity(entity).remove::<Downed>();
         let index = order.iter().position(|p| *p == party.0).unwrap_or(0);
@@ -1292,20 +1352,21 @@ fn check_wipe(
 }
 
 /// Point d'apparition d'un héros dans la salle de départ: quatre par rangée.
-fn spawn_point(slot: usize, layout: &Layout) -> Vec2 {
+fn spawn_point(slot: usize, layout: &Layout, room: &Room) -> Vec2 {
     // Option de développement: `CASTLE_DEBUG_START=royal` fait apparaître l'équipe dans l'antichambre de la porte royale,
     // pour essayer l'énigme sans traverser tout le château.
+    let map = room;
     let room = match std::env::var("CASTLE_DEBUG_START").as_deref() {
         Ok("royal") => layout.royal_connection().b,
         _ => layout.start,
     };
-    let center = tile_to_world(layout.rooms[room].center());
+    let center = tile_to_world(map, layout.rooms[room].center());
     center + Vec2::new((slot % 4) as f32 * 22.0 - 33.0, (slot / 4) as f32 * 24.0)
 }
 
 /// Centre d'une tuile en pixels; la carte est centrée sur l'origine, comme `Room::tile_center`.
-fn tile_to_world(tile: UVec2) -> Vec2 {
-    (tile.as_vec2() + Vec2::splat(0.5)) * TILE_SIZE - (GRID * CELL).as_vec2() * TILE_SIZE / 2.0
+fn tile_to_world(room: &Room, tile: UVec2) -> Vec2 {
+    room.tile_center(tile.x, tile.y)
 }
 
 /// Un point au hasard sur le sol d'une salle, à `margin` tuiles des bords.
@@ -1314,10 +1375,10 @@ fn random_point(room: &Room, info: &RoomInfo, margin: u32, rng: &mut Rng) -> Vec
         let x = info.min.x + margin + (rng.next_f32() * (info.size().x - 2 * margin) as f32) as u32;
         let y = info.min.y + margin + (rng.next_f32() * (info.size().y - 2 * margin) as f32) as u32;
         if room.tile(x as i32, y as i32) == Tile::Floor {
-            return tile_to_world(UVec2::new(x, y));
+            return tile_to_world(room, UVec2::new(x, y));
         }
     }
-    tile_to_world(info.center())
+    tile_to_world(room, info.center())
 }
 
 /// Purge tout dialogue en cours ou en attente (nouveau niveau, retour au début du niveau): la session du serveur est remise à
@@ -1328,8 +1389,8 @@ fn reset_dialogues(commands: &mut Commands, session: &mut DialogueSession) {
     commands.server_trigger(ToClients { targets: SendTargets::All, message: DialogueAbort });
 }
 
-/// Génère le niveau de la campagne, en rejouant l'état aléatoire sauvegardé à son entrée: le même château revient
-/// à chaque chargement et à chaque retour au début du niveau. `old` est l'ancien château, à effacer.
+/// Charge le niveau de la campagne: c'est toujours le même (un fichier de `shared/levels/`), à chaque chargement et à
+/// chaque retour au début du niveau. `old` est l'ancien château, à effacer.
 fn generate_level(
     commands: &mut Commands,
     rng: &mut Rng,
@@ -1342,10 +1403,13 @@ fn generate_level(
     }
     reset_dialogues(commands, session);
     rng.0 = campaign.0.entry_rng;
-    let seed = rng.next_u64();
-    let dungeon = Dungeon::generate(seed);
-    let first = campaign.0.level == 1 && !campaign.0.intro_done;
-    populate(commands, &dungeon, seed, campaign.0.level, first, rng);
+    let level = campaign.0.level;
+    let def = level_def(level);
+    let dungeon = def.to_dungeon().unwrap_or_else(|e| panic!("niveau {level}: {e}"));
+    let first = level == 1 && !campaign.0.intro_done;
+    // Les décors au sol tirent leurs détails de cette graine: elle ne dépend que du niveau.
+    let seed = u64::from(level).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+    spawn_level(commands, def, level, first, seed);
     dungeon
 }
 
@@ -1373,12 +1437,42 @@ struct RescueHold(f32);
 const RESCUE_TIME: f32 = 1.2;
 const RESCUE_RANGE: f32 = 22.0;
 
-/// Remplit un nouveau château: générateurs, énigme, pièges, trésor, portes, objectif de niveau et dialogues.
-fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, first: bool, rng: &mut Rng) {
+/// Scènes de dialogue qu'un niveau peut déclencher (les noms sont des chaînes dans les fichiers de niveau).
+fn dialogue_node(name: &str) -> Option<&'static str> {
+    [
+        "intro",
+        "royal_door",
+        "alcove",
+        "puzzle_target",
+        "puzzle_rune",
+        "puzzle_gears",
+        "bridge_intro",
+        "bridge_panel",
+        "drawbridge_intro",
+        "drawbridge_panel",
+        "gate_intro",
+        "gate_panel",
+        "castle_intro",
+        "knight_intro",
+        "knight_door",
+    ]
+    .into_iter()
+    .find(|n| *n == name)
+}
+
+/// Compose un niveau à partir d'un château généré: tous les tirages au sort (générateurs, monstres, pièges, trésor, butin,
+/// énigme, objectif) se font ici, et le résultat est une description (`LevelDef`) qu'on peut écrire dans un fichier.
+fn plan_level(dungeon: &Dungeon, name: &str, region: Region, level: u32, rng: &mut Rng) -> LevelDef {
     let (room, layout) = (&dungeon.room, &dungeon.layout);
-    let region = Region::ALL[(rng.next_u64() % Region::ALL.len() as u64) as usize];
-    info!("new expedition: level {level}, seed {seed}, region {region:?}");
-    commands.spawn((Replicated, Expedition { seed, region, level }));
+    let size = room.size();
+    let mut things = Vec::new();
+    // Position en tuiles d'un point du monde, pour la description du niveau.
+    let at = |world: Vec2| LevelDef::tile_in(size, world);
+    // Un objet au sol est un peu décalé de son point d'origine.
+    let scattered = |world: Vec2, rng: &mut Rng| {
+        let jitter = Vec2::new(rng.next_f32() - 0.5, rng.next_f32() - 0.5) * 12.0;
+        at(world + jitter)
+    };
 
     for info in &layout.rooms {
         match info.kind {
@@ -1387,73 +1481,60 @@ fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, f
                 // Une salle de taille moyenne a deux générateurs, une grande salle en a parfois trois.
                 let count = 1 + u32::from(area > 90) + u32::from(area > 200 && rng.next_f32() < 0.5);
                 for _ in 0..count {
-                    commands.spawn((
-                        Replicated,
-                        Generator,
-                        Health::full(GENERATOR_HEALTH),
-                        Position(random_point(room, info, 2, rng)),
-                        Hurtbox(GENERATOR_HALF_SIZE),
-                        SpawnTimer(GENERATOR_INTERVAL),
-                    ));
+                    things.push(Thing::Generator { at: at(random_point(room, info, 2, rng)) });
                 }
                 for _ in 0..monsters_per_room(level) {
                     let kind = MonsterKind::pick(level, rng.next_f32());
-                    spawn_monster(commands, kind, random_point(room, info, 2, rng));
+                    things.push(Thing::Monster { kind, at: at(random_point(room, info, 2, rng)) });
                 }
                 if rng.next_f32() < 0.4 {
                     for _ in 0..3 {
-                        commands.spawn((
-                            Replicated,
-                            Trap { armed: false },
-                            Position(random_point(room, info, 2, rng)),
-                            Hold::default(),
-                            TrapCooldown::default(),
-                            TrapIdle::default(),
-                        ));
+                        things.push(Thing::Trap { at: at(random_point(room, info, 2, rng)) });
                     }
                 }
             }
             RoomKind::Treasure => {
-                let center = tile_to_world(info.center());
+                let center = tile_to_world(room, info.center());
                 for offset in [(-20.0, -12.0), (-20.0, 12.0), (0.0, -12.0), (0.0, 12.0), (20.0, 0.0)] {
-                    spawn_pickup(commands, PickupKind::Coin, center + Vec2::from(offset), rng);
+                    things.push(Thing::Pickup { kind: PickupKind::Coin, at: scattered(center + Vec2::from(offset), rng) });
                 }
-                spawn_pickup(commands, PickupKind::Food, center, rng);
-                spawn_pickup(commands, PickupKind::Potion, center + Vec2::new(0.0, -22.0), rng);
+                things.push(Thing::Pickup { kind: PickupKind::Food, at: scattered(center, rng) });
+                things.push(Thing::Pickup { kind: PickupKind::Potion, at: scattered(center + Vec2::new(0.0, -22.0), rng) });
             }
             RoomKind::Start | RoomKind::Exit => {}
         }
     }
 
     // Des potions de régénération dans les salles de combat.
-    let fights_for_potions: Vec<&RoomInfo> = layout.rooms.iter().filter(|r| r.kind == RoomKind::Combat).collect();
-    if !fights_for_potions.is_empty() {
+    let fights: Vec<&RoomInfo> = layout.rooms.iter().filter(|r| r.kind == RoomKind::Combat).collect();
+    if !fights.is_empty() {
         for _ in 0..potions_in_level(level) {
-            let info = fights_for_potions[(rng.next_u64() % fights_for_potions.len() as u64) as usize];
-            spawn_pickup(commands, PickupKind::Potion, random_point(room, info, 2, rng), rng);
+            let info = fights[(rng.next_u64() % fights.len() as u64) as usize];
+            let world = random_point(room, info, 2, rng);
+            things.push(Thing::Pickup { kind: PickupKind::Potion, at: scattered(world, rng) });
         }
     }
 
-    // L'énigme de la porte royale: trois obstacles, un par classe, sont des panneaux dans le mur de l'antichambre; ce qu'il
-    // faut pour les vaincre est dispersé dans le château.
+    // Au niveau du Chevalier, la porte royale n'a ni garde, ni herse, ni panneaux: il suffit de la pousser. Ailleurs c'est
+    // l'énigme complète: trois obstacles, un par classe, sont des panneaux dans le mur de l'antichambre; ce qu'il faut
+    // pour les vaincre est dispersé dans le château.
+    let knight_level = level == KNIGHT_LEVEL;
     let sites = layout.puzzle_sites(room);
-    commands.spawn((Replicated, PuzzleKit::default()));
-    commands.spawn((Replicated, Ward { radius: WARD_RADIUS }, Position(sites.door)));
-    let herse_half = if sites.vertical { Vec2::new(TILE_SIZE / 2.0, TILE_SIZE) } else { Vec2::new(TILE_SIZE, TILE_SIZE / 2.0) };
-    commands.spawn((Replicated, Portcullis { vertical: sites.vertical }, Position(sites.portcullis), Solid(herse_half)));
-    let kinds = [InteractKind::Target, InteractKind::Rune, InteractKind::Mechanism];
-    let nodes = ["puzzle_target", "puzzle_rune", "puzzle_gears"];
-    // L'attribution des panneaux varie d'un château à l'autre.
-    let shift = (rng.next_u64() % 3) as usize;
-    for (i, panel) in sites.panels.iter().enumerate() {
-        let k = (i + shift) % 3;
-        commands.spawn((Replicated, Interactable::new(kinds[k]), Position(*panel), Hold::default()));
-        commands.spawn((Position(*panel), DialogueTrigger { node: nodes[k], radius: 64.0, delay: 0.4, fired: false }));
+    if !knight_level {
+        things.push(Thing::Ward { at: at(sites.door) });
+        things.push(Thing::Portcullis { at: at(sites.portcullis), vertical: sites.vertical });
+        let kinds = [InteractKind::Target, InteractKind::Rune, InteractKind::Mechanism];
+        let nodes = ["puzzle_target", "puzzle_rune", "puzzle_gears"];
+        // L'attribution des panneaux varie d'un château à l'autre.
+        let shift = (rng.next_u64() % 3) as usize;
+        for (i, panel) in sites.panels.iter().enumerate() {
+            let k = (i + shift) % 3;
+            things.push(Thing::Panel { kind: kinds[k], at: at(*panel), node: nodes[k].to_string() });
+        }
     }
     // Trois ingrédients violets, une pièce orange et un disque de cible vert, chacun dans une salle de combat.
-    let hunting_grounds: Vec<&RoomInfo> = layout.rooms.iter().filter(|r| r.kind == RoomKind::Combat).collect();
-    if !hunting_grounds.is_empty() {
-        let mut order: Vec<usize> = (0..hunting_grounds.len()).collect();
+    if !fights.is_empty() && !knight_level {
+        let mut order: Vec<usize> = (0..fights.len()).collect();
         for i in (1..order.len()).rev() {
             order.swap(i, (rng.next_u64() % (i as u64 + 1)) as usize);
         }
@@ -1465,15 +1546,112 @@ fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, f
         let mut next = 0;
         for (kind, count) in wanted {
             for _ in 0..count {
-                let info = hunting_grounds[order[next % order.len()]];
+                let info = fights[order[next % order.len()]];
                 next += 1;
-                spawn_pickup(commands, kind, random_point(room, info, 2, rng), rng);
+                let world = random_point(room, info, 2, rng);
+                things.push(Thing::Pickup { kind, at: scattered(world, rng) });
+            }
+        }
+    }
+
+    // L'objectif du niveau, et ce qu'il faut trouver pour l'accomplir.
+    let (kind, goal) = if knight_level { (QuestKind::Breach, 1) } else { QuestKind::for_level(level) };
+    if !fights.is_empty() {
+        for _ in 0..goal {
+            let info = fights[(rng.next_u64() % fights.len() as u64) as usize];
+            let pos = at(random_point(room, info, 2, rng));
+            match kind {
+                QuestKind::Retrieve => things.push(Thing::Relic { at: pos }),
+                QuestKind::Rescue => things.push(Thing::Captive { at: pos }),
+                QuestKind::Hunt | QuestKind::Repair | QuestKind::Release | QuestKind::Unseal | QuestKind::Breach => {}
+            }
+        }
+    }
+    // Une scène présente le niveau: celui du Chevalier, puis la première énigme complète.
+    let intro = match level {
+        KNIGHT_LEVEL => Some("knight_intro"),
+        6 => Some("castle_intro"),
+        _ => None,
+    };
+    if let Some(node) = intro {
+        things.push(Thing::Trigger {
+            node: node.to_string(),
+            at: at(tile_to_world(room, layout.rooms[layout.start].center())),
+            radius: 200.0,
+            delay: 2.0,
+        });
+    }
+    LevelDef::from_dungeon(name, region, dungeon, Some((kind, goal)), things)
+}
+
+/// Pose un niveau dans le monde: ses éléments, ses portes et son objectif.
+fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool, seed: u64) {
+    info!("new expedition: level {level} ({}), region {:?}", def.name, def.region);
+    commands.spawn((Replicated, Expedition { seed, region: def.region, level }));
+    commands.insert_resource(LevelRegion(def.region));
+    commands.spawn((Replicated, PuzzleKit::default()));
+
+    for thing in &def.things {
+        let pos = def.world(thing.at());
+        match thing {
+            Thing::Monster { kind, .. } => spawn_monster(commands, *kind, pos),
+            Thing::Generator { .. } => {
+                commands.spawn((
+                    Replicated,
+                    Generator,
+                    Health::full(GENERATOR_HEALTH),
+                    Position(pos),
+                    Hurtbox(GENERATOR_HALF_SIZE),
+                    SpawnTimer(GENERATOR_INTERVAL),
+                ));
+            }
+            Thing::Pickup { kind, .. } => {
+                commands.spawn((Replicated, Pickup(*kind), Position(pos)));
+            }
+            Thing::Trap { .. } => {
+                commands.spawn((
+                    Replicated,
+                    Trap { armed: false },
+                    Position(pos),
+                    Hold::default(),
+                    TrapCooldown::default(),
+                    TrapIdle::default(),
+                ));
+            }
+            Thing::Relic { .. } => {
+                commands.spawn((Replicated, Relic, Position(pos)));
+            }
+            Thing::Captive { .. } => {
+                commands.spawn((Replicated, Captive, Position(pos), RescueHold(0.0)));
+            }
+            Thing::Ward { .. } => {
+                commands.spawn((Replicated, Ward { radius: WARD_RADIUS }, Position(pos)));
+            }
+            Thing::Portcullis { vertical, .. } => {
+                let half = if *vertical { Vec2::new(TILE_SIZE / 2.0, TILE_SIZE) } else { Vec2::new(TILE_SIZE, TILE_SIZE / 2.0) };
+                commands.spawn((Replicated, Portcullis { vertical: *vertical }, Position(pos), Solid(half)));
+            }
+            Thing::Panel { kind, node, .. } => {
+                commands.spawn((Replicated, Interactable::new(*kind), Position(pos), Hold::default()));
+                if let Some(node) = dialogue_node(node) {
+                    commands.spawn((Position(pos), DialogueTrigger { node, radius: 64.0, delay: 0.4, fired: false }));
+                }
+            }
+            Thing::Exit { kind, .. } => {
+                commands.spawn((Replicated, LevelExit { kind: *kind, open: false }, Position(pos)));
+            }
+            Thing::Trigger { node, radius, delay, .. } => {
+                if let Some(node) = dialogue_node(node) {
+                    commands.spawn((Position(pos), DialogueTrigger { node, radius: *radius, delay: *delay, fired: false }));
+                }
             }
         }
     }
 
     // Portes: la royale devant la sortie, une porte à clé devant le trésor.
-    for conn in &layout.connections {
+    let royal_node = if def.things.iter().any(|t| matches!(t, Thing::Ward { .. })) { "royal_door" } else { "knight_door" };
+    let center_of = |tile: UVec2| def.world(tile.as_vec2() + Vec2::splat(0.5));
+    for conn in &def.layout.connections {
         let Some(kind) = conn.door else {
             continue;
         };
@@ -1482,7 +1660,7 @@ fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, f
         } else {
             (conn.door_min, conn.door_min + UVec2::X)
         };
-        let center = (tile_to_world(a) + tile_to_world(b)) / 2.0;
+        let center = (center_of(a) + center_of(b)) / 2.0;
         let half = if conn.door_vertical {
             Vec2::new(TILE_SIZE / 2.0, TILE_SIZE)
         } else {
@@ -1502,7 +1680,7 @@ fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, f
                 commands
                     .entity(door)
                     .insert((Interactable::new(InteractKind::Push), Hold::default()));
-                ("royal_door", WARD_RADIUS + 40.0)
+                (royal_node, WARD_RADIUS + 40.0)
             }
             DoorKind::Locked => ("alcove", 70.0),
         };
@@ -1512,34 +1690,163 @@ fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, f
         ));
     }
 
-    // L'objectif du niveau. Le portail de sortie n'apparaît qu'une fois celui-ci rempli (voir `open_portal`).
-    let (kind, goal) = QuestKind::for_level(level);
-    commands.spawn((Replicated, Quest { kind, goal, progress: 0 }));
-    let fights: Vec<&RoomInfo> = layout.rooms.iter().filter(|r| r.kind == RoomKind::Combat).collect();
-    if !fights.is_empty() {
-        for i in 0..goal {
-            let info = fights[(rng.next_u64() % fights.len() as u64) as usize];
-            let pos = random_point(room, info, 2, rng);
-            match kind {
-                QuestKind::Retrieve => {
-                    commands.spawn((Replicated, Relic, Position(pos)));
-                }
-                QuestKind::Rescue => {
-                    commands.spawn((Replicated, Captive, Position(pos), RescueHold(0.0)));
-                }
-                QuestKind::Hunt => {
-                    let _ = i;
-                }
-            }
+    // Sans sortie posée à la main, elle est au centre de la salle de sortie.
+    if !def.things.iter().any(|t| matches!(t, Thing::Exit { .. })) {
+        let exit = def.layout.rooms[def.layout.exit].center();
+        commands.spawn((Replicated, LevelExit { kind: ExitKind::Stairs, open: false }, Position(center_of(exit))));
+    }
+
+    // L'objectif du niveau. La sortie reste fermée tant qu'il n'est pas rempli (voir `open_exit`).
+    // Dans un combat de boss, vaincre toute la meute est un objectif à part, affiché avant les autres.
+    if is_boss_level(level) && def.quest.is_none_or(|(kind, _)| kind != QuestKind::Hunt) {
+        let beasts = def.things.iter().filter(|t| matches!(t, Thing::Monster { .. })).count() as u32;
+        if beasts > 0 {
+            commands.spawn((Replicated, Quest { kind: QuestKind::Hunt, goal: beasts, progress: 0 }));
         }
+    }
+    if let Some((kind, goal)) = def.quest {
+        commands.spawn((Replicated, Quest { kind, goal, progress: 0 }));
     }
 
     if first {
+        let start = def.layout.rooms[def.layout.start].center();
         commands.spawn((
-            Position(tile_to_world(layout.rooms[layout.start].center())),
+            Position(center_of(start)),
             DialogueTrigger { node: "intro", radius: 200.0, delay: 3.0, fired: false },
         ));
     }
+}
+
+/// Région de chaque niveau de la campagne (les extérieurs d'abord, puis les régions du château).
+/// Le niveau où le Chevalier est à l'honneur: la porte royale n'a qu'à être poussée.
+const KNIGHT_LEVEL: u32 = 5;
+
+const CAMPAIGN_REGIONS: [Region; LEVEL_COUNT as usize] = [
+    Region::Forest,
+    Region::Marsh,
+    Region::Approach,
+    Region::Approach,
+    Region::Crypts,
+    Region::Gardens,
+    Region::Library,
+    Region::Library,
+    Region::Forge,
+    Region::Tower,
+    Region::Royal,
+    Region::Royal,
+];
+
+/// Les niveaux extérieurs de la campagne: la forêt (chasser la meute pour ouvrir la barrière), le marais (retrouver les
+/// planches du pont), le chemin du château (délivrer les gardes qui baissent le pont-levis) et l'arène de la meute, devant
+/// la porte du château.
+fn outdoor_spec(level: u32) -> Option<outdoor::OutdoorSpec> {
+    let spec = match level {
+        // Le premier niveau sert d'introduction: pas de mécanisme, juste la chasse.
+        1 => outdoor::OutdoorSpec {
+            name: "La forêt de brume",
+            region: Region::Forest,
+            level,
+            clearings: 3,
+            pack: 3,
+            // Douze loups en plus: la forêt est infestée.
+            extra_wolves: 12,
+            generators: false,
+            quest: Some((QuestKind::Hunt, 12)),
+            exit: ExitKind::Gate,
+            arena: false,
+            mechanism: None,
+            captives: 0,
+        },
+        // Le Forgebraise répare le pont avec une pièce de rechange trouvée dans une clairière.
+        2 => outdoor::OutdoorSpec {
+            name: "Les marais hantés",
+            region: Region::Marsh,
+            level,
+            clearings: 4,
+            pack: 3,
+            extra_wolves: 0,
+            generators: true,
+            quest: Some((QuestKind::Repair, 1)),
+            exit: ExitKind::Bridge,
+            arena: false,
+            mechanism: Some(outdoor::Mechanism { kind: InteractKind::Mechanism, intro: "bridge_intro", panel: "bridge_panel" }),
+            captives: 0,
+        },
+        // Le Rôdeur fixe le disque d'une cible puis la touche d'une flèche pour libérer le pont-levis; des gardes du château
+        // sont prisonniers dans des cages le long du chemin (délivrés, ils laissent du butin).
+        3 => outdoor::OutdoorSpec {
+            name: "Le chemin du château",
+            region: Region::Approach,
+            level,
+            clearings: 4,
+            pack: 4,
+            extra_wolves: 0,
+            generators: true,
+            quest: Some((QuestKind::Release, 1)),
+            exit: ExitKind::Drawbridge,
+            arena: false,
+            mechanism: Some(outdoor::Mechanism { kind: InteractKind::Target, intro: "drawbridge_intro", panel: "drawbridge_panel" }),
+            captives: 2,
+        },
+        // La meute garde la porte: l'Ensorceleur brise le sceau (trois ingrédients), une fois la meute vaincue.
+        4 => outdoor::OutdoorSpec {
+            name: "La meute",
+            region: Region::Approach,
+            level,
+            clearings: 1,
+            pack: 12,
+            extra_wolves: 0,
+            generators: false,
+            quest: Some((QuestKind::Unseal, 1)),
+            exit: ExitKind::Gate,
+            arena: true,
+            mechanism: Some(outdoor::Mechanism { kind: InteractKind::Rune, intro: "gate_intro", panel: "gate_panel" }),
+            captives: 0,
+        },
+        _ => return None,
+    };
+    Some(spec)
+}
+
+/// Écrit les niveaux de départ de la campagne dans `dir`: les extérieurs sont générés, l'intérieur vient de châteaux
+/// générés avec une graine fixe. Ils sont à retoucher ensuite dans l'éditeur: un niveau déjà écrit n'est jamais écrasé,
+/// sauf avec `force` (et `only` limite l'export à certains niveaux).
+pub fn export_levels(dir: &std::path::Path, force: bool, only: Option<&[u32]>) -> std::io::Result<()> {
+    for level in 1..=LEVEL_COUNT {
+        if only.is_some_and(|only| !only.contains(&level)) {
+            continue;
+        }
+        let path = dir.join(level_file(level));
+        let existing = std::fs::read_to_string(&path).unwrap_or_default();
+        if !force && !existing.trim().is_empty() && existing.trim() != "()" {
+            println!("niveau {level}: déjà écrit, laissé tel quel ({})", path.display());
+            continue;
+        }
+        let seed = 1000 + u64::from(level) * 7919;
+        let def = match outdoor_spec(level) {
+            Some(spec) => outdoor::outdoor_level(&spec, seed),
+            None => {
+                let dungeon = Dungeon::generate(seed);
+                let region = CAMPAIGN_REGIONS[level as usize - 1];
+                plan_level(&dungeon, &format!("Niveau {level}"), region, level, &mut Rng(seed | 1))
+            }
+        };
+        let problems = def.validate();
+        if !problems.is_empty() {
+            return Err(std::io::Error::other(format!("niveau {level}: {problems:?}")));
+        }
+        std::fs::write(&path, def.to_ron())?;
+        println!("niveau {level}: {}", path.display());
+    }
+    Ok(())
+}
+
+/// Remplit un nouveau château généré: tirage au sort puis pose (utilisé par les tests; la campagne lit des fichiers).
+#[cfg(test)]
+fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, first: bool, rng: &mut Rng) {
+    let region = Region::CASTLE[(rng.next_u64() % Region::CASTLE.len() as u64) as usize];
+    let def = plan_level(dungeon, &format!("château {seed}"), region, level, rng);
+    spawn_level(commands, &def, level, first, seed);
 }
 
 /// Or et clés de chaque équipe, dans l'ordre d'arrivée des équipes.
@@ -1553,9 +1860,9 @@ fn purses<'a>(heroes: impl Iterator<Item = (&'a PartyId, &'a Gold, &'a Keys)>) -
     by_party.into_values().collect()
 }
 
-/// Quand tous les héros debout sont dans le portail, l'équipe entre dans le niveau suivant: la partie est sauvegardée
+/// Quand tous les héros debout sont dans la sortie, l'équipe entre dans le niveau suivant: la partie est sauvegardée
 /// à cet instant, puis le château est généré.
-fn run_portal(
+fn run_exit(
     mut commands: Commands,
     time: Res<Time>,
     mut rng: ResMut<Rng>,
@@ -1566,7 +1873,7 @@ fn run_portal(
     mut transition: ResMut<Transition>,
     mut stats: ResMut<LevelStats>,
     clients: Query<(Entity, Has<Ready>), With<ActiveHero>>,
-    portals: Query<&Position, (With<Portal>, Without<Player>)>,
+    exits: Query<(&Position, &LevelExit), Without<Player>>,
     mut players: Query<
         (Entity, &mut Position, &mut Health, &PartyId, &Gold, &Keys, Has<Downed>, Has<Controlled>),
         With<Player>,
@@ -1574,7 +1881,7 @@ fn run_portal(
     world: Query<Entity, (With<Replicated>, Without<Player>)>,
     triggers: Query<Entity, With<DialogueTrigger>>,
 ) {
-    let Ok(portal) = portals.single() else {
+    let Ok((exit_pos, exit)) = exits.single() else {
         return;
     };
     if let Some(elapsed) = transition.0.as_mut() {
@@ -1593,14 +1900,15 @@ fn run_portal(
             .iter()
             .filter(|(.., downed, controlled)| !downed && *controlled)
             .collect();
-        let all_in = !standing.is_empty()
-            && standing.iter().all(|(_, p, ..)| p.0.distance(portal.0) <= PORTAL_RADIUS);
+        let all_in = exit.open
+            && !standing.is_empty()
+            && standing.iter().all(|(_, p, ..)| p.0.distance(exit_pos.0) <= EXIT_RADIUS);
         if !all_in {
             *countdown = 0.0;
             return;
         }
         *countdown += time.delta_secs();
-        if *countdown < PORTAL_DELAY {
+        if *countdown < EXIT_DELAY {
             return;
         }
         *countdown = 0.0;
@@ -1634,7 +1942,7 @@ fn run_portal(
 
     let dungeon = generate_level(&mut commands, &mut rng, &campaign, &mut session, world.iter().chain(triggers.iter()));
     for (slot, (entity, mut pos, mut health, ..)) in players.iter_mut().enumerate() {
-        pos.0 = spawn_point(slot, &dungeon.layout);
+        pos.0 = spawn_point(slot, &dungeon.layout, &dungeon.room);
         health.current = health.max;
         commands.entity(entity).remove::<Downed>();
     }
@@ -1802,6 +2110,7 @@ fn run_interactions(
     mut things: Query<(Entity, &Position, &mut Interactable, &mut Hold), Without<Player>>,
     mut kit: Query<&mut PuzzleKit>,
     wards: Query<Entity, With<Ward>>,
+    mut quests: Query<&mut Quest>,
 ) {
     let dt = time.delta_secs();
     let puzzle_ready = things
@@ -1874,6 +2183,14 @@ fn run_interactions(
                 interactable.done = true;
                 interactable.progress = 1.0;
                 commands.entity(entity).despawn();
+            }
+        }
+        // Un objectif propre à cette classe est rempli sur-le-champ (la porte poussée disparaît: on ne pourrait plus le lire).
+        if kind != InteractKind::Target {
+            for mut quest in &mut quests {
+                if quest.kind.mechanism() == Some(kind) {
+                    quest.progress = quest.goal;
+                }
             }
         }
     }
@@ -2000,8 +2317,13 @@ fn run_dialogue_triggers(
     mut session: ResMut<DialogueSession>,
     mut triggers: Query<(&Position, &mut DialogueTrigger)>,
     players: Query<&Position, (With<Player>, Without<Downed>, Without<DialogueTrigger>)>,
+    monsters: Query<&Position, (With<Monster>, Without<Player>, Without<DialogueTrigger>)>,
 ) {
     if session.active.is_some() {
+        return;
+    }
+    // Les scènes n'ont lieu que quand il n'y a plus d'ennemi à proximité: on ne fait pas avancer l'intrigue en plein combat.
+    if monsters.iter().any(|m| players.iter().any(|p| p.0.distance(m.0) <= DIALOGUE_SAFE_RADIUS)) {
         return;
     }
     for (pos, mut trigger) in &mut triggers {
@@ -2511,6 +2833,116 @@ mod tests {
         assert!((stats.damage_taken - 20.0).abs() < 1e-3 && stats.seconds < 0.35);
     }
 
+    /// Du début à la fin: le héros de la bonne classe actionne le mécanisme du niveau, puis la sortie s'ouvre.
+    #[test]
+    fn the_featured_hero_can_open_the_exit_on_levels_two_four_and_five() {
+        for (level, class) in [(2, HeroClass::Forgebraise), (4, HeroClass::Sorcerer), (5, HeroClass::Knight)] {
+            let mut app = networked_app();
+            let mut save = SaveGame::new("test", GameMode::Solo, 77);
+            save.level = level;
+            save.intro_done = true;
+            app.insert_resource(Rng(5));
+            app.insert_resource(Campaign(save));
+            app.insert_resource(DialogueSession::default());
+            app.insert_resource(Level(level));
+            app.init_resource::<LevelStats>().init_resource::<Transition>();
+            app.add_systems(Startup, |mut commands: Commands, mut rng: ResMut<Rng>, campaign: Res<Campaign>, mut session: ResMut<DialogueSession>| {
+                generate_level(&mut commands, &mut rng, &campaign, &mut session, []);
+            });
+            app.add_systems(Update, (run_interactions, update_mechanism_quests, open_exit).chain());
+            app.update();
+            // Plus de monstre ni de générateur; l'équipe a trouvé ce qu'il faut.
+            let beasts: Vec<Entity> = {
+                let world = app.world_mut();
+                let mut query = world.query_filtered::<Entity, Or<(With<Monster>, With<Generator>)>>();
+                query.iter(world).collect()
+            };
+            for beast in beasts {
+                app.world_mut().despawn(beast);
+            }
+            let mut kit = app.world_mut().query::<&mut PuzzleKit>();
+            for mut kit in kit.iter_mut(app.world_mut()) {
+                kit.ingredients = INGREDIENTS_NEEDED;
+                kit.gear = 1;
+                kit.target = 1;
+            }
+            // Le mécanisme de la classe à l'honneur (le panneau, ou la porte à pousser).
+            let wanted = match class {
+                HeroClass::Forgebraise => InteractKind::Mechanism,
+                HeroClass::Sorcerer => InteractKind::Rune,
+                HeroClass::Ranger => InteractKind::Target,
+                HeroClass::Knight => InteractKind::Push,
+            };
+            let at = {
+                let world = app.world_mut();
+                let mut query = world.query::<(&Position, &Interactable)>();
+                query.iter(world).find(|(_, i)| i.kind == wanted).map(|(p, _)| p.0).expect("le mécanisme du niveau")
+            };
+            app.world_mut().spawn((
+                Player,
+                PartyId(0),
+                class,
+                Position(at),
+                Health { current: 100.0, max: 100.0 },
+                Gold::default(),
+                Keys::default(),
+                Controlled,
+                Interacting(true),
+            ));
+            for _ in 0..12 {
+                advance(&mut app, 0.5);
+            }
+            let open = {
+                let world = app.world_mut();
+                let mut query = world.query::<&LevelExit>();
+                query.iter(world).all(|e| e.open)
+            };
+            assert!(open, "niveau {level}: la sortie doit être ouverte une fois le mécanisme de {class:?} accompli");
+        }
+    }
+
+    /// Une scène d'arrivée qui attend des ennemis proches ne fige pas les héros: ils peuvent se battre.
+    #[test]
+    fn heroes_are_free_to_fight_while_an_intro_scene_waits_for_a_calm_moment() {
+        let mut app = App::new();
+        app.init_resource::<Transition>().init_resource::<DialogueSession>().add_systems(Update, hold_heroes);
+        let hero = app
+            .world_mut()
+            .spawn((Player, Position(Vec2::ZERO), MoveDir(Vec2::X), Attacking(true), SpecialInput::default(), Interacting::default()))
+            .id();
+        app.world_mut().spawn((Monster(MonsterKind::Wolf), Position(Vec2::new(60.0, 0.0))));
+        app.world_mut().spawn((Position(Vec2::ZERO), DialogueTrigger { node: "gate_intro", radius: 200.0, delay: 2.0, fired: false }));
+        app.update();
+        assert_eq!(app.world().get::<MoveDir>(hero).unwrap().0, Vec2::X, "un loup est là: on se bat");
+        assert!(app.world().get::<Attacking>(hero).unwrap().0);
+    }
+
+    #[test]
+    fn heroes_stay_put_until_the_intro_scene_is_over() {
+        let mut app = App::new();
+        app.init_resource::<Transition>().init_resource::<DialogueSession>().add_systems(Update, hold_heroes);
+        let hero = app
+            .world_mut()
+            .spawn((Player, Position(Vec2::ZERO), MoveDir(Vec2::X), Attacking(true), SpecialInput { held: true, queued: true }, Interacting(true)))
+            .id();
+        let trigger = app
+            .world_mut()
+            .spawn((Position(Vec2::ZERO), DialogueTrigger { node: "intro", radius: 200.0, delay: 3.0, fired: false }))
+            .id();
+        app.update();
+        assert_eq!(app.world().get::<MoveDir>(hero).unwrap().0, Vec2::ZERO, "retenus avant la scène");
+        assert!(!app.world().get::<Attacking>(hero).unwrap().0);
+        // La scène est jouée (ou passée): le déclencheur est consommé et les héros sont libres.
+        app.world_mut().get_mut::<DialogueTrigger>(trigger).unwrap().fired = true;
+        app.world_mut().get_mut::<MoveDir>(hero).unwrap().0 = Vec2::X;
+        app.update();
+        assert_eq!(app.world().get::<MoveDir>(hero).unwrap().0, Vec2::X);
+        // Pendant la scène elle-même, ils restent retenus.
+        app.world_mut().resource_mut::<DialogueSession>().active = Some("intro".to_string());
+        app.update();
+        assert_eq!(app.world().get::<MoveDir>(hero).unwrap().0, Vec2::ZERO);
+    }
+
     #[test]
     fn a_downed_hero_does_not_wake_a_trap() {
         let mut app = app_with_time();
@@ -2659,6 +3091,131 @@ mod tests {
         assert!(session.active.is_none(), "la scène du niveau précédent est abandonnée");
         assert!(session.votes.is_empty() && session.idle == 0.0 && session.vote_timer == 0.0);
         assert!(app.world().get_entity(old_trigger).is_err(), "l'ancienne zone de dialogue a disparu");
+    }
+
+    /// Sur chaque niveau de la campagne, une équipe qui a rempli l'objectif et se tient dans la sortie lance le bilan.
+    #[test]
+    fn every_campaign_level_can_be_left_through_its_exit() {
+        for level in 1..=LEVEL_COUNT {
+            let mut app = networked_app();
+            let mut save = SaveGame::new("test", GameMode::Solo, 77);
+            save.level = level;
+            save.intro_done = true;
+            app.insert_resource(Rng(5));
+            app.insert_resource(Campaign(save));
+            app.insert_resource(DialogueSession::default());
+            app.insert_resource(Level(level));
+            app.init_resource::<LevelStats>().init_resource::<Transition>();
+            app.add_systems(Startup, |mut commands: Commands, mut rng: ResMut<Rng>, campaign: Res<Campaign>, mut session: ResMut<DialogueSession>| {
+                generate_level(&mut commands, &mut rng, &campaign, &mut session, []);
+            });
+            app.add_systems(Update, (open_exit, run_exit).chain());
+            app.update();
+            let exit = {
+                let world = app.world_mut();
+                let mut query = world.query::<(&Position, &LevelExit)>();
+                let found: Vec<_> = query.iter(world).map(|(p, e)| (p.0, e.open)).collect();
+                assert_eq!(found.len(), 1, "niveau {level}: une seule sortie");
+                found[0].0
+            };
+            // Un joueur connecté qui n'a pas encore validé le bilan.
+            app.world_mut().spawn(ActiveHero(Entity::PLACEHOLDER));
+            app.world_mut().spawn((
+                Player,
+                PartyId(0),
+                HeroClass::Knight,
+                Position(exit),
+                Health { current: 100.0, max: 100.0 },
+                Gold::default(),
+                Keys::default(),
+                Controlled,
+                Interacting::default(),
+            ));
+            // L'objectif est rempli: les quêtes sont accomplies, et il ne reste plus de monstre ni de générateur.
+            let beasts: Vec<Entity> = {
+                let world = app.world_mut();
+                let mut query = world.query_filtered::<Entity, Or<(With<Monster>, With<Generator>)>>();
+                query.iter(world).collect()
+            };
+            for beast in beasts {
+                app.world_mut().despawn(beast);
+            }
+            let mut quests = app.world_mut().query::<&mut Quest>();
+            for mut quest in quests.iter_mut(app.world_mut()) {
+                quest.progress = quest.goal;
+            }
+            // Les mécanismes du niveau sont accomplis (ce que fait l'équipe avec ses talents).
+            let mut interactables = app.world_mut().query::<&mut Interactable>();
+            for mut interactable in interactables.iter_mut(app.world_mut()) {
+                interactable.done = true;
+            }
+            for _ in 0..4 {
+                advance(&mut app, 1.0);
+            }
+            if app.world().resource::<Transition>().0.is_none() {
+                let world = app.world_mut();
+                let mut exits = world.query::<(&Position, &LevelExit)>();
+                let state: Vec<_> = exits.iter(world).map(|(p, e)| (p.0, e.open, e.kind)).collect();
+                let mut quests = world.query::<&Quest>();
+                let q: Vec<_> = quests.iter(world).map(|q| (q.progress, q.goal)).collect();
+                panic!("niveau {level}: sortie {state:?}, quêtes {q:?}, héros en {exit:?}");
+            }
+        }
+    }
+
+    /// Une scène de dialogue ne démarre pas tant qu'un monstre est à proximité d'un héros.
+    #[test]
+    fn dialogues_wait_until_no_enemy_is_near() {
+        let mut app = networked_app();
+        app.insert_resource(DialogueSession::default());
+        app.add_systems(Update, run_dialogue_triggers);
+        app.world_mut().spawn((Player, Position(Vec2::ZERO)));
+        let monster = app.world_mut().spawn((Monster(MonsterKind::Wolf), Position(Vec2::new(80.0, 0.0)))).id();
+        let trigger = app
+            .world_mut()
+            .spawn((Position(Vec2::ZERO), DialogueTrigger { node: "bridge_intro", radius: 200.0, delay: 0.1, fired: false }))
+            .id();
+        advance(&mut app, 1.0);
+        assert!(!app.world().get::<DialogueTrigger>(trigger).unwrap().fired, "un loup rôde: pas de scène");
+        assert!(app.world().resource::<DialogueSession>().active.is_none());
+        app.world_mut().despawn(monster);
+        advance(&mut app, 1.0);
+        assert!(app.world().get::<DialogueTrigger>(trigger).unwrap().fired, "plus d'ennemi: la scène démarre");
+        assert_eq!(app.world().resource::<DialogueSession>().active.as_deref(), Some("bridge_intro"));
+    }
+
+    /// Les niveaux 2 à 5 mettent chacun une classe à l'honneur; le niveau 1 n'a pas de mécanisme; le 6 est l'énigme complète.
+    #[test]
+    fn levels_two_to_five_each_feature_one_hero() {
+        let expected = [
+            (2, QuestKind::Repair, InteractKind::Mechanism, PickupKind::GearPart),
+            (3, QuestKind::Release, InteractKind::Target, PickupKind::TargetDisc),
+            (4, QuestKind::Unseal, InteractKind::Rune, PickupKind::Ingredient),
+        ];
+        for (level, quest, kind, supply) in expected {
+            let def = level_def(level);
+            assert_eq!(def.quest.map(|(k, _)| k), Some(quest), "niveau {level}");
+            let panels: Vec<_> = def.things.iter().filter(|t| matches!(t, Thing::Panel { kind: k, .. } if *k == kind)).collect();
+            assert_eq!(panels.len(), 1, "niveau {level}: un panneau {kind:?}");
+            assert!(def.things.iter().any(|t| matches!(t, Thing::Pickup { kind: k, .. } if *k == supply)), "niveau {level}: de quoi l'actionner");
+            assert!(def.things.iter().any(|t| matches!(t, Thing::Trigger { node, .. } if node.ends_with("intro"))), "niveau {level}: une scène d'arrivée");
+            // Chaque scène nommée existe bien.
+            for thing in &def.things {
+                if let Thing::Trigger { node, .. } | Thing::Panel { node, .. } = thing {
+                    assert!(dialogue_node(node).is_some(), "niveau {level}: scène inconnue {node}");
+                }
+            }
+        }
+        // Niveau 1: une introduction, sans mécanisme.
+        assert!(!level_def(1).things.iter().any(|t| matches!(t, Thing::Panel { .. })));
+        // Niveau 5: le Chevalier pousse la porte royale, sans garde ni herse; niveau 6: l'énigme complète.
+        let knight = level_def(5);
+        assert_eq!(knight.quest.map(|(k, _)| k), Some(QuestKind::Breach));
+        assert!(!knight.things.iter().any(|t| matches!(t, Thing::Ward { .. } | Thing::Panel { .. } | Thing::Portcullis { .. })));
+        assert!(knight.layout.connections.iter().any(|c| c.door == Some(DoorKind::Royal)));
+        let full = level_def(6);
+        assert!(full.things.iter().any(|t| matches!(t, Thing::Ward { .. })));
+        assert_eq!(full.things.iter().filter(|t| matches!(t, Thing::Panel { .. })).count(), 3);
     }
 
     /// Une application de test qui sait envoyer des événements réseau (secousse d'écran...), sans connexion.
@@ -2882,8 +3439,8 @@ mod tests {
             let dungeon = Dungeon::generate(seed);
             let (room, layout) = (&dungeon.room, &dungeon.layout);
             for target in 0..layout.rooms.len() {
-                let goal = tile_to_world(layout.rooms[target].center());
-                let mut pos = tile_to_world(layout.rooms[layout.start].center());
+                let goal = tile_to_world(&dungeon.room, layout.rooms[target].center());
+                let mut pos = tile_to_world(&dungeon.room, layout.rooms[layout.start].center());
                 let mut route = Route::default();
                 let mut arrived = false;
                 for _ in 0..(60 * 64) {

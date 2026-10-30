@@ -7,3 +7,5 @@ description = "Éditeur d'art de Castle: retouche des tuiles et réglage des mod
 [dependencies]
 eframe = "0.37.0"
 sprite_forge = { path = "../sprite_forge" }
+castle_shared = { path = "../../shared" }
+bevy = { workspace = true }

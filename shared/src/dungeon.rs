@@ -15,7 +15,7 @@ pub const CELL: UVec2 = UVec2::new(22, 16);
 /// Largeur des couloirs, en tuiles.
 pub const CORRIDOR_WIDTH: u32 = 2;
 
-/// Les six régions du château.
+/// Les six régions du château, et les trois décors extérieurs des abords.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Region {
     Crypts,
@@ -24,10 +24,30 @@ pub enum Region {
     Forge,
     Tower,
     Royal,
+    /// Forêt, à l'entrée de l'aventure.
+    Forest,
+    /// Marais.
+    Marsh,
+    /// Le chemin qui mène aux portes du château.
+    Approach,
 }
 
 impl Region {
-    pub const ALL: [Region; 6] = [
+    /// Toutes les régions, dans l'ordre des lignes de la planche des tuiles.
+    pub const ALL: [Region; 9] = [
+        Region::Crypts,
+        Region::Gardens,
+        Region::Library,
+        Region::Forge,
+        Region::Tower,
+        Region::Royal,
+        Region::Forest,
+        Region::Marsh,
+        Region::Approach,
+    ];
+
+    /// Les régions de l'intérieur du château.
+    pub const CASTLE: [Region; 6] = [
         Region::Crypts,
         Region::Gardens,
         Region::Library,
@@ -35,6 +55,11 @@ impl Region {
         Region::Tower,
         Region::Royal,
     ];
+
+    /// Un décor extérieur (au grand jour, sans murs de pierre).
+    pub fn is_outdoor(self) -> bool {
+        matches!(self, Self::Forest | Self::Marsh | Self::Approach)
+    }
 
     /// Clé de localisation du nom de la région.
     pub fn name_key(self) -> &'static str {
@@ -45,6 +70,9 @@ impl Region {
             Self::Forge => "region-forge",
             Self::Tower => "region-tower",
             Self::Royal => "region-royal",
+            Self::Forest => "region-forest",
+            Self::Marsh => "region-marsh",
+            Self::Approach => "region-approach",
         }
     }
 
@@ -57,6 +85,9 @@ impl Region {
             Self::Forge => ([1.25, 0.8, 0.7], [1.2, 0.75, 0.65]),
             Self::Tower => ([0.9, 0.85, 1.25], [0.85, 0.8, 1.25]),
             Self::Royal => ([1.15, 1.0, 0.8], [1.2, 1.05, 0.7]),
+            Self::Forest => ([0.9, 1.1, 0.8], [0.8, 1.05, 0.75]),
+            Self::Marsh => ([0.85, 1.0, 0.85], [0.8, 0.95, 0.9]),
+            Self::Approach => ([1.1, 1.0, 0.85], [1.0, 0.95, 0.9]),
         }
     }
 }
@@ -70,7 +101,7 @@ pub struct Expedition {
     pub level: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RoomKind {
     Start,
     Combat,
@@ -80,7 +111,7 @@ pub enum RoomKind {
     Exit,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RoomInfo {
     /// Tuiles de la salle, bornes incluses.
     pub min: UVec2,
@@ -99,7 +130,7 @@ impl RoomInfo {
 }
 
 /// Couloir entre deux salles, avec l'emplacement d'une éventuelle porte.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Connection {
     pub a: usize,
     pub b: usize,
@@ -110,7 +141,7 @@ pub struct Connection {
     pub door: Option<DoorKind>,
 }
 
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, Serialize, Deserialize)]
 pub struct Layout {
     pub rooms: Vec<RoomInfo>,
     pub connections: Vec<Connection>,

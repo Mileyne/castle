@@ -3,8 +3,12 @@
 use bevy::{ecs::entity::MapEntities, prelude::*};
 
 mod dungeon;
+pub mod campaign;
+pub mod level;
 pub mod save;
 pub use dungeon::*;
+pub use campaign::{BOSS_EVERY, LEVEL_COUNT, is_boss_level, level_def, level_file};
+pub use level::{LEVEL_FORMAT, LevelDef, Thing};
 use bevy_replicon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -307,6 +311,8 @@ pub enum MonsterKind {
     Orc,
     /// Décharné, rapide et mordant.
     Ghoul,
+    /// Rapide et vorace, il chasse en meute (forêt, marais, abords du château).
+    Wolf,
 }
 
 pub struct MonsterStats {
@@ -325,8 +331,9 @@ impl MonsterKind {
             Self::Skeleton => MonsterStats { max_hp: 30.0, speed: 40.0, damage: 8.0, cooldown: 0.8, half_size: 5.0, sight: 110.0 },
             Self::Bat => MonsterStats { max_hp: 12.0, speed: 75.0, damage: 4.0, cooldown: 0.6, half_size: 3.5, sight: 150.0 },
             Self::Goblin => MonsterStats { max_hp: 18.0, speed: 62.0, damage: 5.0, cooldown: 0.5, half_size: 4.0, sight: 130.0 },
-            Self::Orc => MonsterStats { max_hp: 70.0, speed: 33.0, damage: 14.0, cooldown: 1.1, half_size: 7.0, sight: 100.0 },
+            Self::Orc => MonsterStats { max_hp: 70.0, speed: 33.0, damage: 14.0, cooldown: 1.1, half_size: 8.5, sight: 100.0 },
             Self::Ghoul => MonsterStats { max_hp: 40.0, speed: 52.0, damage: 9.0, cooldown: 0.7, half_size: 5.0, sight: 140.0 },
+            Self::Wolf => MonsterStats { max_hp: 24.0, speed: 68.0, damage: 6.0, cooldown: 0.6, half_size: 6.0, sight: 150.0 },
         }
     }
 
@@ -340,9 +347,28 @@ impl MonsterKind {
         }
     }
 
+    /// Les monstres qu'un générateur produit dans cette région: les extérieurs ont leurs propres bêtes, l'intérieur du château
+    /// suit la table du niveau.
+    pub fn spawn_table_in(region: Region, level: u32) -> &'static [(MonsterKind, f32)] {
+        match region {
+            Region::Forest => &[(Self::Wolf, 0.6), (Self::Goblin, 0.25), (Self::Bat, 0.15)],
+            Region::Marsh => &[(Self::Ghoul, 0.35), (Self::Wolf, 0.25), (Self::Bat, 0.25), (Self::Goblin, 0.15)],
+            Region::Approach => &[(Self::Wolf, 0.35), (Self::Goblin, 0.3), (Self::Skeleton, 0.2), (Self::Orc, 0.15)],
+            _ => Self::spawn_table(level),
+        }
+    }
+
+    /// Le monstre tiré par `roll` (entre 0 et 1) dans la table de cette région (voir `spawn_table_in`).
+    pub fn pick_in(region: Region, level: u32, roll: f32) -> MonsterKind {
+        Self::pick_from(Self::spawn_table_in(region, level), roll)
+    }
+
     /// Le monstre tiré par `roll` (entre 0 et 1) dans la table du niveau.
     pub fn pick(level: u32, roll: f32) -> MonsterKind {
-        let table = Self::spawn_table(level);
+        Self::pick_from(Self::spawn_table(level), roll)
+    }
+
+    fn pick_from(table: &'static [(MonsterKind, f32)], roll: f32) -> MonsterKind {
         let total: f32 = table.iter().map(|(_, weight)| weight).sum();
         let mut left = roll.clamp(0.0, 1.0) * total;
         for (kind, weight) in table {
@@ -395,6 +421,14 @@ pub enum QuestKind {
     Retrieve,
     /// Délivrer des prisonniers enfermés dans les salles de combat.
     Rescue,
+    /// Réparer le pont: le Forgebraise remet en marche un mécanisme grippé avec une pièce de rechange.
+    Repair,
+    /// Libérer le pont-levis: le Rôdeur fixe le disque d'une cible puis la touche d'une flèche.
+    Release,
+    /// Briser le sceau de la porte: l'Ensorceleur dissipe une rune avec trois ingrédients.
+    Unseal,
+    /// Forcer la porte royale: le Chevalier la pousse de toute sa force.
+    Breach,
 }
 
 impl QuestKind {
@@ -404,6 +438,21 @@ impl QuestKind {
             Self::Hunt => "quest-hunt",
             Self::Retrieve => "quest-retrieve",
             Self::Rescue => "quest-rescue",
+            Self::Repair => "quest-repair",
+            Self::Release => "quest-release",
+            Self::Unseal => "quest-unseal",
+            Self::Breach => "quest-breach",
+        }
+    }
+
+    /// Le mécanisme dont l'accomplissement remplit cet objectif, pour les objectifs propres à une classe.
+    pub fn mechanism(self) -> Option<InteractKind> {
+        match self {
+            Self::Repair => Some(InteractKind::Mechanism),
+            Self::Release => Some(InteractKind::Target),
+            Self::Unseal => Some(InteractKind::Rune),
+            Self::Breach => Some(InteractKind::Push),
+            Self::Hunt | Self::Retrieve | Self::Rescue => None,
         }
     }
 
@@ -584,9 +633,26 @@ pub struct Door {
     pub vertical: bool,
 }
 
-/// Portail de sortie de l'expédition.
-#[derive(Component, Serialize, Deserialize)]
-pub struct Portal;
+/// Genres de sortie d'un niveau (chacun a son décor).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExitKind {
+    /// Escalier, à l'intérieur du château.
+    Stairs,
+    /// Barrière de rondins qui ferme le sentier de la forêt.
+    Gate,
+    /// Pont du marais, brisé puis réparé.
+    Bridge,
+    /// Pont-levis du château, levé puis baissé.
+    Drawbridge,
+}
+
+/// Sortie du niveau: quand tous les héros debout y sont, le niveau est terminé. Elle est fermée tant que l'objectif du
+/// niveau n'est pas rempli.
+#[derive(Component, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct LevelExit {
+    pub kind: ExitKind,
+    pub open: bool,
+}
 
 /// Piège au sol. Invisible sauf à proximité d'un héros qui détecte; le Rôdeur peut le désamorcer.
 #[derive(Component, Clone, Copy, Serialize, Deserialize)]
@@ -715,7 +781,7 @@ impl Plugin for CastleSharedPlugin {
             .replicate::<Health>()
             .replicate::<Interactable>()
             .replicate::<Door>()
-            .replicate::<Portal>()
+            .replicate::<LevelExit>()
             .replicate::<PuzzleKit>()
             .replicate::<Ward>()
             .replicate::<Portcullis>()

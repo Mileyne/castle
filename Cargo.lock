@@ -6405,6 +6405,8 @@ dependencies = [
 name = "sprite_editor"
 version = "0.1.0"
 dependencies = [
+ "bevy",
+ "castle_shared",
  "eframe",
  "sprite_forge",
 ]

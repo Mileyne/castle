@@ -17,6 +17,9 @@ const REGION_NAMES: [&str; REGIONS] = [
     "Forges infernales",
     "Tours astrales",
     "Appartements royaux",
+    "Forêt (extérieur)",
+    "Marais (extérieur)",
+    "Chemin du château (extérieur)",
 ];
 
 /// Nombre d'étapes d'annulation gardées.
