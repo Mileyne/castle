@@ -384,7 +384,8 @@ fn read_controls(
     let touch_dir = controls
         .stick
         .as_ref()
-        .map(|s| s.offset / STICK_RADIUS)
+        // L'écran a Y vers le bas, la direction du jeu (comme la manette) vers le haut.
+        .map(|s| Vec2::new(s.offset.x, -s.offset.y) / STICK_RADIUS)
         .filter(|d| d.length() > STICK_DEAD_ZONE);
     stick.0 = match touch_dir {
         Some(dir) => dir,

@@ -1,3 +1,11 @@
 target/
 .DS_Store
 dist/
+
+# Builds et journaux iOS / tvOS
+ios/build/
+tvos/build/
+target-tvos/
+*.xcworkspace/
+build_*.log
+tvos_build.log

@@ -14,3 +14,7 @@ bevy_yarnspinner.workspace = true
 fluent_content = "0.0.5"
 unic-langid = { version = "0.9", features = ["macros"] }
 sys-locale = "0.3"
+
+# Manettes sur iOS / tvOS (framework GameController): voir gamecontroller.rs.
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
