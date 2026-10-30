@@ -10,8 +10,12 @@ const TARGET_VIEW_HEIGHT: f32 = 240.0;
 /// Vitesse à laquelle la caméra rattrape le héros.
 const FOLLOW_SPEED: f32 = 8.0;
 /// Zoom supplémentaire dans un passage étroit entre deux salles, et vitesse à laquelle on y entre et on en sort.
-const CORRIDOR_ZOOM: f32 = 1.4;
-const ZOOM_SPEED: f32 = 4.0;
+const CORRIDOR_ZOOM: f32 = 1.2;
+const ZOOM_SPEED: f32 = 1.6;
+/// Le cadrage d'une salle commence quand le héros est à cette distance de ses portes (en tuiles), et se fait en
+/// `ROOM_BLEND_SECONDS`, à vitesse régulière puis adoucie aux deux bouts.
+const ROOM_APPROACH_TILES: i32 = 3;
+const ROOM_BLEND_SECONDS: f32 = 1.6;
 /// Quand les quatre héros de l'équipe sont groupés, on se rapproche jusqu'à les cadrer, sans dépasser ce zoom en plus.
 const TEAM_ZOOM_MAX: f32 = 2.2;
 /// Zoom maximal quand la vue cadre la salle où l'on se trouve, et marge laissée autour d'elle (en unités du monde).
@@ -96,7 +100,8 @@ fn follow_hero(
     layout: Option<Res<Layout>>,
     mut corridor_zoom: Local<Option<f32>>,
     mut team_zoom: Local<Option<f32>>,
-    mut room_boost: Local<Option<f32>>,
+    mut room_blend: Local<f32>,
+    mut last_frame: Local<Option<(Vec2, Vec2)>>,
     mut base: Local<Option<Vec2>>,
     party: Option<Res<LocalParty>>,
     heroes: Query<(&Transform, &PartyId), (With<Player>, Without<Camera2d>)>,
@@ -136,12 +141,26 @@ fn follow_hero(
     *team_boost += (team_target - *team_boost) * (1.0 - (-ZOOM_SPEED * time.delta_secs()).exp());
     let team_boost = *team_boost;
 
-    // Zoom de salle: à l'intérieur, la vue cadre toute la salle (elle remplace le zoom d'équipe).
-    let room_target = hero_room.map_or(1.0, |(_, frame)| room_zoom(frame, base_view));
-    let room_boost = room_boost.get_or_insert(1.0);
-    *room_boost += (room_target - *room_boost) * (1.0 - (-ZOOM_SPEED * time.delta_secs()).exp());
-    let in_room = hero_room.is_some();
-    let extra = if in_room { *room_boost } else { corridor_boost.max(team_boost).max(*room_boost) };
+    // Cadrage de salle: un fondu unique (0 hors de la salle, 1 dedans) qui mène à la fois le zoom et le centrage, de façon
+    // régulière et adoucie plutôt qu'un bond. Il démarre un peu avant la porte, et la salle quittée reste cadrée pendant
+    // le fondu de sortie.
+    let approaching = match (&hero, &room, &layout) {
+        (Some(hero), Some(room), Some(layout)) => layout
+            .room_near(room, hero.translation.truncate(), ROOM_APPROACH_TILES)
+            .map(|index| layout.room_frame(room, index)),
+        _ => None,
+    };
+    if approaching.is_some() {
+        *last_frame = approaching;
+    }
+    let blend_target = if approaching.is_some() { 1.0 } else { 0.0 };
+    let step = time.delta_secs() / ROOM_BLEND_SECONDS;
+    *room_blend += (blend_target - *room_blend).clamp(-step, step);
+    let blend = *room_blend * *room_blend * (3.0 - 2.0 * *room_blend);
+    let ambient = corridor_boost.max(team_boost);
+    let room_boost = last_frame.map_or(1.0, |(_, frame)| room_zoom(frame, base_view));
+    // Interpolation géométrique: le zoom paraît régulier à l'œil.
+    let extra = (ambient.ln() * (1.0 - blend) + room_boost.ln() * blend).exp();
 
     // Échelle: un pixel d'art occupe `zoom` pixels d'écran (entier au repos, plus fin pendant les zooms d'ambiance).
     let zoom = base_zoom * extra;
@@ -162,9 +181,9 @@ fn follow_hero(
     let grouped = ((team_boost - 1.0) / (TEAM_ZOOM_MAX - 1.0)).clamp(0.0, 1.0);
     let mut focus = hero.translation.truncate().lerp(team_center, grouped);
     // Dans une salle, la vue se centre sur la salle, qui tient tout entière à l'écran.
-    if let Some((center, frame)) = hero_room {
+    if let Some((center, frame)) = *last_frame {
         if frame.x + 2.0 * ROOM_MARGIN <= base_view.x && frame.y + 2.0 * ROOM_MARGIN <= base_view.y {
-            focus = center;
+            focus = focus.lerp(center, blend);
         }
     }
     let target = focus.clamp(-limit, limit);

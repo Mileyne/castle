@@ -138,9 +138,15 @@ pub struct PuzzleSites {
 impl Layout {
     /// Index de la salle qui contient ce point du monde (les couloirs n'en sont pas).
     pub fn room_at(&self, room: &Room, point: Vec2) -> Option<usize> {
+        self.room_near(room, point, 0)
+    }
+
+    /// Comme `room_at`, mais en comptant aussi les `margin` tuiles autour de la salle (pour annoncer son approche).
+    pub fn room_near(&self, room: &Room, point: Vec2, margin: i32) -> Option<usize> {
         let tile = room.world_to_tile(point);
         self.rooms.iter().position(|r| {
-            (r.min.x as i32..=r.max.x as i32).contains(&tile.x) && (r.min.y as i32..=r.max.y as i32).contains(&tile.y)
+            (r.min.x as i32 - margin..=r.max.x as i32 + margin).contains(&tile.x)
+                && (r.min.y as i32 - margin..=r.max.y as i32 + margin).contains(&tile.y)
         })
     }
 

@@ -21,18 +21,18 @@ use castle_shared::save::{self, GameMode, SaveGame};
 use castle_shared::*;
 
 /// Compagnons: distance de détection des ennemis, portée de tir, retour auprès du chef.
-const AI_AGGRO: f32 = 80.0;
+const AI_AGGRO: f32 = 110.0;
 /// Un itinéraire est recalculé quand le but a bougé de plus que cela, ou après ce délai.
 const ROUTE_GOAL_DRIFT: f32 = 24.0;
 const ROUTE_MAX_AGE: f32 = 0.6;
 const AI_SHOT_REACH: f32 = 150.0;
 const AI_LEASH: f32 = 220.0;
 /// Les compagnons n'engagent que les ennemis à cette distance du héros dirigé.
-const AI_GROUP_RADIUS: f32 = 120.0;
-/// Les compagnons soutiennent le héros dirigé sans le remplacer: leurs coups font moins mal et sont plus lents, et
-/// ils ne s'attaquent qu'aux monstres (les générateurs restent l'affaire du joueur).
-const AI_DAMAGE_FACTOR: f32 = 0.35;
-const AI_COOLDOWN_FACTOR: f32 = 1.6;
+const AI_GROUP_RADIUS: f32 = 150.0;
+/// Les compagnons soutiennent le héros dirigé sans le remplacer: leurs coups font un peu moins mal et sont un peu plus
+/// lents, et ils s'attaquent aux monstres comme aux générateurs.
+const AI_DAMAGE_FACTOR: f32 = 0.6;
+const AI_COOLDOWN_FACTOR: f32 = 1.25;
 /// Les corps se bloquent: marge ajoutée à la portée de frappe d'un monstre.
 const MONSTER_REACH_SLACK: f32 = 6.0;
 
@@ -120,7 +120,13 @@ fn potions_in_level(level: u32) -> u32 {
 
 /// Monstres posés d'avance dans chaque salle de combat, en plus de ceux des générateurs.
 fn monsters_per_room(level: u32) -> u32 {
-    (2 + level / 2).min(6)
+    (1 + level / 2).min(6)
+}
+
+/// Les premiers niveaux sont plus doux: les monstres vont moins vite, voient moins loin et les générateurs produisent
+/// moins souvent. Le facteur monte de niveau en niveau jusqu'à 1.
+fn ease(level: u32) -> f32 {
+    (0.7 + 0.1 * level.saturating_sub(1) as f32).min(1.0)
 }
 
 /// Direction demandée par le joueur, jamais répliquée.
@@ -830,7 +836,7 @@ fn run_generators(
         if timer.0 > 0.0 || alive >= MAX_MONSTERS {
             continue;
         }
-        timer.0 = GENERATOR_INTERVAL;
+        timer.0 = GENERATOR_INTERVAL / ease(level.0);
         let kind = MonsterKind::pick(level.0, rng.next_f32());
         // Le monstre sort du côté du héros, sauf si un mur gêne.
         let out = pos.0 + (target - pos.0).normalize_or_zero() * (GENERATOR_HALF_SIZE + 6.0);
@@ -844,6 +850,7 @@ fn monster_ai(
     time: Res<Time>,
     room: Res<Room>,
     layout: Res<Layout>,
+    level: Res<Level>,
     doors: Query<(&Position, &Solid), (Without<Monster>, Without<Player>)>,
     generators: Query<(&Position, &Hurtbox), (With<Generator>, Without<Monster>, Without<Player>)>,
     mut monsters: Query<
@@ -856,6 +863,7 @@ fn monster_ai(
     >,
 ) {
     let dt = time.delta_secs();
+    let ease = ease(level.0);
     // Obstacles fixes pour tous les monstres, puis les corps des monstres entre eux.
     let fixed: Vec<(Vec2, Vec2)> = doors
         .iter()
@@ -875,7 +883,7 @@ fn monster_ai(
         let target = players
             .iter_mut()
             .map(|(p, h, shielded)| (p.0.distance(pos.0), p.0, h, shielded))
-            .filter(|(d, ..)| *d <= stats.sight)
+            .filter(|(d, ..)| *d <= stats.sight * ease)
             .filter(|(_, hero, ..)| home.is_none_or(|h| layout.room_at(&room, *hero) == Some(h)))
             .min_by(|a, b| a.0.total_cmp(&b.0));
         let Some((dist, target_pos, mut health, shielded)) = target else {
@@ -884,7 +892,7 @@ fn monster_ai(
         if dist <= stats.half_size + HERO_HALF_SIZE + MONSTER_REACH_SLACK {
             if cooldown.0 == 0.0 {
                 let factor = if shielded { BULWARK_DAMAGE_FACTOR } else { 1.0 };
-                health.current -= stats.damage * factor;
+                health.current -= stats.damage * factor * ease;
                 cooldown.0 = stats.cooldown;
             }
         } else {
@@ -898,7 +906,7 @@ fn monster_ai(
             );
             pos.0 = room.move_and_collide_solids(
                 pos.0,
-                dir * stats.speed * dt,
+                dir * stats.speed * ease * dt,
                 stats.half_size,
                 &solids,
             );
@@ -2073,7 +2081,7 @@ fn hero_ai(
     >,
     leaders: Query<(&PartyId, &Position), (With<Controlled>, Without<Downed>)>,
     downed: Query<(&PartyId, &Position), (With<Player>, With<Downed>)>,
-    enemies: Query<&Position, (With<Monster>, Without<Player>)>,
+    enemies: Query<&Position, (Or<(With<Monster>, With<Generator>)>, Without<Player>)>,
 ) {
     let dt = time.delta_secs();
     let solids: Vec<_> = doors.iter().map(|(p, s)| (p.0, s.0)).collect();
@@ -2082,7 +2090,7 @@ fn hero_ai(
         attacking.0 = false;
         let leader = leaders.iter().find(|(id, _)| *id == party).map(|(_, p)| p.0);
 
-        // Un ennemi n'est engagé que s'il est visible (pas derrière un mur) et proche du groupe.
+        // Un ennemi (monstre ou générateur) n'est engagé que s'il est visible (pas derrière un mur) et proche du groupe.
         let nearest = enemies
             .iter()
             .map(|e| (e.0.distance(pos.0), e.0))
@@ -2282,7 +2290,7 @@ mod tests {
             assert!(generators >= fights, "niveau {level}: {generators} générateurs pour {fights} salles");
             assert!(potions >= potions_in_level(level), "niveau {level}: {potions} potions");
         }
-        assert!(monsters_per_room(1) >= 2 && monsters_per_room(99) <= 6);
+        assert!(monsters_per_room(1) >= 1 && monsters_per_room(99) <= 6);
         assert!(potions_in_level(9) > potions_in_level(1));
     }
 
@@ -2338,6 +2346,13 @@ mod tests {
         assert_eq!(app.world().get::<Health>(hero).unwrap().current, 100.0 - TRAP_DAMAGE);
         advance(&mut app, TRAP_COOLDOWN);
         assert_eq!(app.world().get::<Health>(hero).unwrap().current, 100.0 - 2.0 * TRAP_DAMAGE);
+    }
+
+    #[test]
+    fn early_levels_are_easier_and_difficulty_reaches_full_strength() {
+        assert!(ease(1) < ease(2) && ease(2) < ease(3));
+        assert_eq!(ease(0), ease(1));
+        assert_eq!(ease(10), 1.0);
     }
 
     #[test]

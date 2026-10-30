@@ -9,3 +9,4 @@ target-tvos/
 *.xcworkspace/
 build_*.log
 tvos_build.log
+target-win/
