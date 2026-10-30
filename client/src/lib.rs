@@ -19,6 +19,8 @@ use art::{Art, HERO_ANCHOR, PROP_ANCHOR, Prop, SPRITE_SIZE, WALL_ANCHOR, WalkCyc
 mod art;
 mod camera;
 mod dialogue;
+#[cfg(target_os = "ios")]
+mod gamecontroller;
 mod gore;
 mod host;
 mod i18n;
@@ -26,6 +28,7 @@ mod lighting;
 mod pause;
 mod puzzle;
 mod level_intro;
+mod music;
 mod quest;
 mod title;
 mod touch;
@@ -73,7 +76,17 @@ pub fn run() {
             gore::GorePlugin,
             dialogue::DialoguePlugin,
         ))
-        .add_plugins((puzzle::PuzzlePlugin, touch::TouchPlugin))
+        .add_plugins((puzzle::PuzzlePlugin, touch::TouchPlugin, music::MusicPlugin))
+        .add_plugins({
+            #[cfg(target_os = "ios")]
+            {
+                gamecontroller::GameControllerPlugin
+            }
+            #[cfg(not(target_os = "ios"))]
+            {
+                ()
+            }
+        })
         .insert_resource(ClearColor(Color::BLACK))
         // Fenêtre au premier plan: rendu continu. En arrière-plan: le jeu se met presque au repos.
         .insert_resource(bevy::winit::WinitSettings::game())

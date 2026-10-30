@@ -6,7 +6,7 @@ use castle_shared::{Layout, PartyId, Player, Room, ScreenShake};
 use crate::{LocalParty, LocalPlayer};
 
 /// Hauteur visée de la vue, en pixels d'art. L'échelle entière choisie donne au moins cette hauteur.
-const TARGET_VIEW_HEIGHT: f32 = 200.0;
+const TARGET_VIEW_HEIGHT: f32 = 240.0;
 /// Vitesse à laquelle la caméra rattrape le héros.
 const FOLLOW_SPEED: f32 = 8.0;
 /// Zoom supplémentaire dans un passage étroit entre deux salles, et vitesse à laquelle on y entre et on en sort.
@@ -14,6 +14,9 @@ const CORRIDOR_ZOOM: f32 = 1.4;
 const ZOOM_SPEED: f32 = 4.0;
 /// Quand les quatre héros de l'équipe sont groupés, on se rapproche jusqu'à les cadrer, sans dépasser ce zoom en plus.
 const TEAM_ZOOM_MAX: f32 = 2.2;
+/// Zoom maximal quand la vue cadre la salle où l'on se trouve, et marge laissée autour d'elle (en unités du monde).
+const ROOM_ZOOM_MAX: f32 = 2.4;
+const ROOM_MARGIN: f32 = 12.0;
 /// Marge ajoutée autour du groupe (en unités du monde), et taille minimale du cadre pour ne pas zoomer à l'extrême quand ils
 /// sont empilés.
 const TEAM_MARGIN: f32 = 34.0;
@@ -35,6 +38,13 @@ pub fn team_framing(positions: &[Vec2], base_view: Vec2) -> (f32, Vec2) {
     let frame = (high - low + Vec2::splat(2.0 * TEAM_MARGIN)).max(TEAM_MIN_FRAME);
     let fit = (base_view.x / frame.x).min(base_view.y / frame.y);
     (fit.clamp(1.0, TEAM_ZOOM_MAX), center)
+}
+
+/// Le zoom supplémentaire qui fait tenir toute la salle (`frame`: sa taille, murs compris) dans la vue, entre 1 et
+/// `ROOM_ZOOM_MAX`; 1 si la salle est plus grande que la vue.
+pub fn room_zoom(frame: Vec2, base_view: Vec2) -> f32 {
+    let fit = (base_view.x / (frame.x + 2.0 * ROOM_MARGIN)).min(base_view.y / (frame.y + 2.0 * ROOM_MARGIN));
+    fit.clamp(1.0, ROOM_ZOOM_MAX)
 }
 
 /// Tremblement d'écran: la « traumatisme » monte avec chaque secousse demandée par le serveur puis retombe;
@@ -86,6 +96,7 @@ fn follow_hero(
     layout: Option<Res<Layout>>,
     mut corridor_zoom: Local<Option<f32>>,
     mut team_zoom: Local<Option<f32>>,
+    mut room_boost: Local<Option<f32>>,
     mut base: Local<Option<Vec2>>,
     party: Option<Res<LocalParty>>,
     heroes: Query<(&Transform, &PartyId), (With<Player>, Without<Camera2d>)>,
@@ -96,16 +107,15 @@ fn follow_hero(
 ) {
     let (mut transform, mut projection) = camera.into_inner();
 
-    // Zoom d'ambiance: on se rapproche quand le héros dirigé est dans un passage étroit, hors de toute salle.
-    let in_corridor = match (&hero, &room, &layout) {
+    // Salle où se trouve le héros dirigé (aucune dans un passage étroit).
+    let hero_room = match (&hero, &room, &layout) {
         (Some(hero), Some(room), Some(layout)) => {
-            let tile = room.world_to_tile(hero.translation.truncate());
-            !layout.rooms.iter().any(|r| {
-                (r.min.x as i32..=r.max.x as i32).contains(&tile.x) && (r.min.y as i32..=r.max.y as i32).contains(&tile.y)
-            })
+            layout.room_at(room, hero.translation.truncate()).map(|index| layout.room_frame(room, index))
         }
-        _ => false,
+        _ => None,
     };
+    // Zoom d'ambiance: on se rapproche quand le héros dirigé est dans un passage étroit, hors de toute salle.
+    let in_corridor = matches!((&hero, &room, &layout), (Some(_), Some(_), Some(_))) && hero_room.is_none();
     let target = if in_corridor { CORRIDOR_ZOOM } else { 1.0 };
     let boost = corridor_zoom.get_or_insert(1.0);
     *boost += (target - *boost) * (1.0 - (-ZOOM_SPEED * time.delta_secs()).exp());
@@ -126,8 +136,15 @@ fn follow_hero(
     *team_boost += (team_target - *team_boost) * (1.0 - (-ZOOM_SPEED * time.delta_secs()).exp());
     let team_boost = *team_boost;
 
+    // Zoom de salle: à l'intérieur, la vue cadre toute la salle (elle remplace le zoom d'équipe).
+    let room_target = hero_room.map_or(1.0, |(_, frame)| room_zoom(frame, base_view));
+    let room_boost = room_boost.get_or_insert(1.0);
+    *room_boost += (room_target - *room_boost) * (1.0 - (-ZOOM_SPEED * time.delta_secs()).exp());
+    let in_room = hero_room.is_some();
+    let extra = if in_room { *room_boost } else { corridor_boost.max(team_boost).max(*room_boost) };
+
     // Échelle: un pixel d'art occupe `zoom` pixels d'écran (entier au repos, plus fin pendant les zooms d'ambiance).
-    let zoom = base_zoom * corridor_boost.max(team_boost);
+    let zoom = base_zoom * extra;
     if let Projection::Orthographic(ortho) = &mut *projection {
         let scale = 1.0 / zoom;
         if ortho.scale != scale {
@@ -143,7 +160,13 @@ fn follow_hero(
     let limit = ((room.size().as_vec2() * castle_shared::TILE_SIZE) / 2.0 - half_view).max(Vec2::ZERO);
     // Plus l'équipe est cadrée de près, plus on regarde le centre du groupe (le héros dirigé en fait toujours partie).
     let grouped = ((team_boost - 1.0) / (TEAM_ZOOM_MAX - 1.0)).clamp(0.0, 1.0);
-    let focus = hero.translation.truncate().lerp(team_center, grouped);
+    let mut focus = hero.translation.truncate().lerp(team_center, grouped);
+    // Dans une salle, la vue se centre sur la salle, qui tient tout entière à l'écran.
+    if let Some((center, frame)) = hero_room {
+        if frame.x + 2.0 * ROOM_MARGIN <= base_view.x && frame.y + 2.0 * ROOM_MARGIN <= base_view.y {
+            focus = center;
+        }
+    }
     let target = focus.clamp(-limit, limit);
 
     // La position « propre » de la caméra est mémorisée à part: la secousse s'y ajoute sans la déformer.
@@ -179,6 +202,19 @@ mod tests {
         assert!(boost > 1.4, "un petit groupe doit être bien plus zoomé: {boost}");
         assert!(boost <= TEAM_ZOOM_MAX);
         assert_eq!(center, Vec2::new(500.0, -200.0));
+    }
+
+    #[test]
+    fn a_small_room_is_zoomed_to_fill_the_view() {
+        let zoom = room_zoom(Vec2::new(160.0, 128.0), VIEW);
+        assert!(zoom > 1.0 && zoom <= ROOM_ZOOM_MAX, "{zoom}");
+        // Toute la salle tient dans la vue zoomée.
+        assert!(160.0 + 2.0 * ROOM_MARGIN <= VIEW.x / zoom + 0.01 && 128.0 + 2.0 * ROOM_MARGIN <= VIEW.y / zoom + 0.01);
+    }
+
+    #[test]
+    fn a_room_bigger_than_the_view_gets_no_extra_zoom() {
+        assert_eq!(room_zoom(Vec2::new(900.0, 700.0), VIEW), 1.0);
     }
 
     #[test]

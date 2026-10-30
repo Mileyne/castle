@@ -136,6 +136,22 @@ pub struct PuzzleSites {
 }
 
 impl Layout {
+    /// Index de la salle qui contient ce point du monde (les couloirs n'en sont pas).
+    pub fn room_at(&self, room: &Room, point: Vec2) -> Option<usize> {
+        let tile = room.world_to_tile(point);
+        self.rooms.iter().position(|r| {
+            (r.min.x as i32..=r.max.x as i32).contains(&tile.x) && (r.min.y as i32..=r.max.y as i32).contains(&tile.y)
+        })
+    }
+
+    /// Centre et taille d'une salle en coordonnées du monde, murs compris.
+    pub fn room_frame(&self, room: &Room, index: usize) -> (Vec2, Vec2) {
+        let info = &self.rooms[index];
+        let low = room.tile_center(info.min.x, info.min.y) - Vec2::splat(TILE_SIZE);
+        let high = room.tile_center(info.max.x, info.max.y) + Vec2::splat(TILE_SIZE);
+        ((low + high) / 2.0, high - low)
+    }
+
     /// Le couloir de la porte royale: la salle `a` est la salle de sortie, `b` l'antichambre.
     pub fn royal_connection(&self) -> &Connection {
         self.connections

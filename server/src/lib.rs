@@ -843,6 +843,7 @@ fn run_generators(
 fn monster_ai(
     time: Res<Time>,
     room: Res<Room>,
+    layout: Res<Layout>,
     doors: Query<(&Position, &Solid), (Without<Monster>, Without<Player>)>,
     generators: Query<(&Position, &Hurtbox), (With<Generator>, Without<Monster>, Without<Player>)>,
     mut monsters: Query<
@@ -869,10 +870,13 @@ fn monster_ai(
     for (entity, mut pos, mut cooldown, monster) in &mut monsters {
         let stats = monster.0.stats();
         cooldown.0 = (cooldown.0 - dt).max(0.0);
+        // Un monstre n'engage un héros que dans sa propre salle: depuis un couloir ou une autre salle, rien.
+        let home = layout.room_at(&room, pos.0);
         let target = players
             .iter_mut()
             .map(|(p, h, shielded)| (p.0.distance(pos.0), p.0, h, shielded))
             .filter(|(d, ..)| *d <= stats.sight)
+            .filter(|(_, hero, ..)| home.is_none_or(|h| layout.room_at(&room, *hero) == Some(h)))
             .min_by(|a, b| a.0.total_cmp(&b.0));
         let Some((dist, target_pos, mut health, shielded)) = target else {
             continue;
