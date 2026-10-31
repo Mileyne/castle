@@ -4,7 +4,6 @@
 //! sont affichés sur iPhone et iPad seulement, jamais sur Apple TV ni sur ordinateur; le joueur peut en décider autrement dans
 //! les réglages (écran titre ou menu de pause). Le choix est gardé dans un petit fichier à côté des parties.
 
-use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -134,13 +133,8 @@ pub fn set_touch_ui(on: bool) {
     save();
 }
 
-fn path() -> PathBuf {
-    let saves = castle_shared::save::save_dir();
-    saves.parent().map(PathBuf::from).unwrap_or(saves).join("settings.txt")
-}
-
 fn load() {
-    let Ok(text) = std::fs::read_to_string(path()) else {
+    let Some(text) = castle_shared::save::read_settings() else {
         return;
     };
     for line in text.lines() {
@@ -174,11 +168,7 @@ fn save() {
         3 => "ui_size=large\n",
         _ => "",
     };
-    let path = path();
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if let Err(err) = std::fs::write(&path, format!("{touch}{pad}{size}")) {
+    if let Err(err) = castle_shared::save::write_settings(&format!("{touch}{pad}{size}")) {
         warn!("cannot write settings: {err}");
     }
 }

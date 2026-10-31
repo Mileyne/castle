@@ -43,7 +43,8 @@ impl Plugin for DialoguePlugin {
             .init_resource::<DialogueState>()
             .init_resource::<SkipHold>()
             .add_systems(Startup, (spawn_panel, spawn_prologue_screen))
-            .add_systems(Update, play_voice)
+            .init_resource::<Prologue>()
+            .add_systems(Update, (play_voice, drive_prologue))
             .add_systems(
                 Update,
                 (
@@ -88,9 +89,8 @@ pub struct DialogueState {
     voted: bool,
     /// Nombre de caractères déjà affichés (effet machine à écrire).
     revealed: f32,
-    /// Le prologue de Samélia est à l'écran, ou vient de s'achever (l'annonce du niveau 1 l'attend).
+    /// Une réplique du prologue de Samélia est à l'écran.
     in_prologue: bool,
-    pub prologue_done: bool,
 }
 
 impl DialogueState {
@@ -111,6 +111,125 @@ struct DialoguePanel;
 /// Écran à part du prologue: le portrait de la princesse Samélia en grand, sur fond noir, sous le dialogue.
 #[derive(Component)]
 struct PrologueScreen;
+
+/// Une photo de l'écran du prologue (0: Samélia, 1 à 4: les héros dans l'ordre de `PROLOGUE_PHOTOS`): son opacité suit le fondu
+/// et la photo de celui qui parle.
+#[derive(Component)]
+struct ProloguePhoto(usize);
+
+/// Les photos du prologue: (orateur, fichier, largeur / hauteur). Samélia d'abord, elle parle la première.
+const PROLOGUE_PHOTOS: [(&str, &str, f32); 5] = [
+    ("samelia", "art/samelia.png", 1195.0 / 896.0),
+    ("knight", "art/prologue_knight.png", 2.0 / 3.0),
+    ("sorcerer", "art/prologue_sorcerer.png", 2.0 / 3.0),
+    ("ranger", "art/prologue_ranger.png", 2.0 / 3.0),
+    ("forgebraise", "art/prologue_forgebraise.png", 2.0 / 3.0),
+];
+/// Vitesse (part de l'opacité par seconde) du passage d'une photo à la suivante quand l'orateur change.
+const PHOTO_SWAP: f32 = 3.0;
+
+/// Où en est l'écran du prologue: fond noir qui couvre la génération du premier niveau, photo qui apparaît en fondu, répliques,
+/// puis la photo s'efface vers le noir avant que l'annonce du niveau ne prenne le relais.
+#[derive(Resource, Default)]
+pub struct Prologue {
+    phase: ProloguePhase,
+    elapsed: f32,
+    /// Au moins une réplique du prologue a été affichée.
+    seen: bool,
+    /// L'écran est parti (ou n'a pas lieu d'être): l'annonce du niveau peut commencer.
+    pub done: bool,
+    /// La photo de celui qui parle, et l'opacité de chaque photo.
+    speaker: usize,
+    weights: [f32; 5],
+}
+
+#[derive(Default, PartialEq, Clone, Copy)]
+enum ProloguePhase {
+    #[default]
+    Idle,
+    FadeIn,
+    Show,
+    FadeOut,
+}
+
+/// Durées (secondes) du fondu d'entrée de la photo, du fondu vers le noir, et attente maximale d'une première réplique.
+const PROLOGUE_FADE_IN: f32 = 1.5;
+const PROLOGUE_FADE_OUT: f32 = 1.2;
+const PROLOGUE_WAIT: f32 = 12.0;
+
+/// Mène l'écran du prologue. Il apparaît dès que Samélia est dans le niveau (à la toute première arrivée), avant même ses
+/// premières paroles, pour cacher le tracé du premier niveau.
+fn drive_prologue(
+    time: Res<Time>,
+    state: Res<DialogueState>,
+    guides: Query<(), (With<Guide>, Without<Captive>)>,
+    mut prologue: ResMut<Prologue>,
+    mut screen: Single<&mut Visibility, With<PrologueScreen>>,
+    mut photos: Query<(&ProloguePhoto, &mut ImageNode)>,
+) {
+    let dt = time.delta_secs();
+    prologue.elapsed += dt;
+    if state.in_prologue {
+        prologue.seen = true;
+        let speaker = state.line.as_ref().and_then(|l| l.speaker.as_deref());
+        if let Some(index) = PROLOGUE_PHOTOS.iter().position(|(name, ..)| Some(*name) == speaker) {
+            prologue.speaker = index;
+        }
+    }
+    // Les photos se fondent l'une dans l'autre quand l'orateur change.
+    let speaker = prologue.speaker;
+    for (index, weight) in prologue.weights.iter_mut().enumerate() {
+        let target = if index == speaker { 1.0 } else { 0.0 };
+        *weight = if *weight < target { (*weight + PHOTO_SWAP * dt).min(target) } else { (*weight - PHOTO_SWAP * dt).max(target) };
+    }
+    let alpha = match prologue.phase {
+        ProloguePhase::Idle => {
+            if prologue.done {
+                // L'écran ne part qu'une image après la fin du prologue: l'annonce du niveau a eu le temps de le remplacer.
+                if **screen != Visibility::Hidden {
+                    **screen = Visibility::Hidden;
+                }
+                return;
+            }
+            if guides.is_empty() {
+                return;
+            }
+            prologue.phase = ProloguePhase::FadeIn;
+            prologue.elapsed = 0.0;
+            0.0
+        }
+        ProloguePhase::FadeIn => {
+            if prologue.elapsed >= PROLOGUE_FADE_IN {
+                prologue.phase = ProloguePhase::Show;
+                prologue.elapsed = 0.0;
+            }
+            (prologue.elapsed / PROLOGUE_FADE_IN).min(1.0)
+        }
+        ProloguePhase::Show => {
+            // Fini quand les répliques ont été dites (ou passées), ou qu'aucune ne vient.
+            if (prologue.seen && !state.in_prologue) || prologue.elapsed > PROLOGUE_WAIT && !prologue.seen {
+                prologue.phase = ProloguePhase::FadeOut;
+                prologue.elapsed = 0.0;
+            }
+            1.0
+        }
+        ProloguePhase::FadeOut => {
+            if prologue.elapsed >= PROLOGUE_FADE_OUT {
+                prologue.phase = ProloguePhase::Idle;
+                prologue.done = true;
+                return;
+            }
+            1.0 - prologue.elapsed / PROLOGUE_FADE_OUT
+        }
+    };
+    if **screen != Visibility::Inherited {
+        **screen = Visibility::Inherited;
+    }
+    let smooth = alpha * alpha * (3.0 - 2.0 * alpha);
+    for (photo, mut image) in &mut photos {
+        image.color = Color::srgba(1.0, 1.0, 1.0, smooth * prologue.weights[photo.0]);
+    }
+}
 
 /// Répliques dont la voix est enregistrée (`assets/audio/voice/<identifiant>.ogg`), jouée en même temps que le texte.
 const VOICED: [&str; 5] = ["prologue_01", "prologue_02", "prologue_03", "prologue_04", "prologue_05"];
@@ -384,10 +503,24 @@ fn spawn_prologue_screen(mut commands: Commands, assets: Res<AssetServer>) {
             Visibility::Hidden,
         ))
         .with_children(|screen| {
-            screen.spawn((
-                ImageNode::new(assets.load("art/samelia.png")),
-                Node { height: Val::Percent(100.0), aspect_ratio: Some(1195.0 / 896.0), ..default() },
-            ));
+            for (index, (_, file, ratio)) in PROLOGUE_PHOTOS.iter().enumerate() {
+                // Chaque photo occupe tout l'écran (centrée), les unes sur les autres.
+                screen
+                    .spawn(Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    })
+                    .with_children(|slot| {
+                        slot.spawn((
+                            ProloguePhoto(index),
+                            ImageNode::new(assets.load(*file)).with_color(Color::srgba(1.0, 1.0, 1.0, 0.0)),
+                            Node { height: Val::Percent(100.0), aspect_ratio: Some(*ratio), ..default() },
+                        ));
+                    });
+            }
         });
 }
 
@@ -439,7 +572,6 @@ fn update_panel(
     localization: Option<Res<Localization>>,
     mut state: ResMut<DialogueState>,
     mut panel: Single<&mut Visibility, With<DialoguePanel>>,
-    mut screen: Single<&mut Visibility, (With<PrologueScreen>, Without<DialoguePanel>, Without<DialoguePortrait>)>,
     mut speaker: Single<(&mut Text, &mut TextColor), (With<SpeakerText>, Without<BodyText>, Without<PromptText>)>,
     mut body: Single<&mut Text, (With<BodyText>, Without<SpeakerText>, Without<PromptText>)>,
     mut prompt: Single<&mut Tr, With<PromptText>>,
@@ -449,27 +581,17 @@ fn update_panel(
     mode: Res<crate::controls::InputMode>,
 ) {
     let loc = localization.as_deref();
-    // Le prologue achevé (plus de réplique de prologue à l'écran) libère l'annonce du niveau.
     let showing_prologue = state.line.as_ref().is_some_and(|l| is_prologue(&l.key));
     if showing_prologue != state.in_prologue {
         state.in_prologue = showing_prologue;
-        state.prologue_done |= !showing_prologue;
     }
     let Some(line) = state.line.as_ref() else {
         if **panel != Visibility::Hidden {
             **panel = Visibility::Hidden;
         }
-        if **screen != Visibility::Hidden {
-            **screen = Visibility::Hidden;
-        }
         return;
     };
     let prologue = is_prologue(&line.key);
-    let wanted = if prologue { Visibility::Inherited } else { Visibility::Hidden };
-
-    if **screen != wanted {
-        **screen = wanted;
-    }
     if **panel != Visibility::Inherited {
         **panel = Visibility::Inherited;
     }
@@ -548,8 +670,9 @@ fn update_panel(
 }
 
 /// Retour à l'écran titre: la scène en cours disparaît.
-fn reset_dialogue(_: On<crate::title::ReturnToTitle>, mut state: ResMut<DialogueState>) {
+fn reset_dialogue(_: On<crate::title::ReturnToTitle>, mut state: ResMut<DialogueState>, mut prologue: ResMut<Prologue>) {
     *state = DialogueState::default();
+    *prologue = Prologue::default();
 }
 
 #[cfg(test)]

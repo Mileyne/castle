@@ -121,18 +121,64 @@ pub fn save_dir() -> PathBuf {
     }
 }
 
+/// Un autre lieu de stockage que les fichiers, pour les appareils où ils ne durent pas (l'Apple TV n'a pas de dossier
+/// d'enregistrement durable: le client y branche les préférences du système). Clés: le nom de fichier de la partie, `.bak` pour sa copie.
+pub trait Backend: Send + Sync {
+    fn get(&self, key: &str) -> Option<String>;
+    fn set(&self, key: &str, value: &str);
+    fn remove(&self, key: &str);
+    fn keys(&self) -> Vec<String>;
+}
+
+static BACKEND: std::sync::OnceLock<Box<dyn Backend>> = std::sync::OnceLock::new();
+
+/// Remplace les fichiers par ce lieu de stockage (à appeler une fois, au démarrage).
+pub fn use_backend(backend: Box<dyn Backend>) {
+    let _ = BACKEND.set(backend);
+}
+
+const SETTINGS_KEY: &str = "settings";
+
+/// Les réglages enregistrés (texte), et leur écriture: dans le lieu de stockage s'il y en a un, sinon à côté des parties.
+pub fn read_settings() -> Option<String> {
+    match BACKEND.get() {
+        Some(backend) => backend.get(SETTINGS_KEY),
+        None => std::fs::read_to_string(save_dir().parent().map(PathBuf::from).unwrap_or_else(save_dir).join("settings.txt")).ok(),
+    }
+}
+
+pub fn write_settings(text: &str) -> std::io::Result<()> {
+    if let Some(backend) = BACKEND.get() {
+        backend.set(SETTINGS_KEY, text);
+        return Ok(());
+    }
+    let dir = save_dir().parent().map(PathBuf::from).unwrap_or_else(save_dir);
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join("settings.txt"), text)
+}
+
 fn path_of(name: &str) -> PathBuf {
     save_dir().join(format!("{}.ron", file_stem(name)))
 }
 
-fn read(path: &std::path::Path) -> Option<SaveGame> {
-    let text = std::fs::read_to_string(path).ok()?;
+fn parse(text: &str) -> Option<SaveGame> {
     let save: SaveGame = ron::from_str(&text).ok()?;
     (save.version <= SAVE_VERSION).then_some(save)
 }
 
+fn read(path: &std::path::Path) -> Option<SaveGame> {
+    parse(&std::fs::read_to_string(path).ok()?)
+}
+
+fn key_of(name: &str) -> String {
+    format!("save.{}", file_stem(name))
+}
+
 /// Charge la partie de ce nom, si elle existe et si elle est lisible.
 pub fn load(name: &str) -> Option<SaveGame> {
+    if let Some(backend) = BACKEND.get() {
+        return parse(&backend.get(&key_of(name))?);
+    }
     read(&path_of(name))
 }
 
@@ -141,10 +187,18 @@ pub fn load(name: &str) -> Option<SaveGame> {
 pub fn write(save: &SaveGame) -> std::io::Result<()> {
     let mut save = save.clone();
     save.saved_at = now();
-    let path = path_of(&save.name);
-    std::fs::create_dir_all(save_dir())?;
     let text = ron::ser::to_string_pretty(&save, ron::ser::PrettyConfig::default())
         .map_err(std::io::Error::other)?;
+    if let Some(backend) = BACKEND.get() {
+        let key = key_of(&save.name);
+        if let Some(previous) = backend.get(&key) {
+            backend.set(&format!("{key}.bak"), &previous);
+        }
+        backend.set(&key, &text);
+        return Ok(());
+    }
+    let path = path_of(&save.name);
+    std::fs::create_dir_all(save_dir())?;
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, text)?;
     if path.exists() {
@@ -155,6 +209,12 @@ pub fn write(save: &SaveGame) -> std::io::Result<()> {
 
 /// Supprime une partie (et sa copie de secours).
 pub fn delete(name: &str) {
+    if let Some(backend) = BACKEND.get() {
+        let key = key_of(name);
+        backend.remove(&format!("{key}.bak"));
+        backend.remove(&key);
+        return;
+    }
     let path = path_of(name);
     let _ = std::fs::remove_file(path.with_extension("bak"));
     let _ = std::fs::remove_file(path);
@@ -162,16 +222,26 @@ pub fn delete(name: &str) {
 
 /// Les parties de ce mode, la plus récente d'abord.
 pub fn list(mode: GameMode) -> Vec<SaveGame> {
-    let Ok(entries) = std::fs::read_dir(save_dir()) else {
-        return Vec::new();
+    let mut saves: Vec<SaveGame> = if let Some(backend) = BACKEND.get() {
+        backend
+            .keys()
+            .iter()
+            .filter(|k| k.starts_with("save.") && !k.ends_with(".bak"))
+            .filter_map(|k| parse(&backend.get(k)?))
+            .filter(|s| s.mode == mode)
+            .collect()
+    } else {
+        let Ok(entries) = std::fs::read_dir(save_dir()) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "ron"))
+            .filter_map(|p| read(&p))
+            .filter(|s| s.mode == mode)
+            .collect()
     };
-    let mut saves: Vec<SaveGame> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "ron"))
-        .filter_map(|p| read(&p))
-        .filter(|s| s.mode == mode)
-        .collect();
     saves.sort_by(|a, b| b.saved_at.cmp(&a.saved_at));
     saves
 }
@@ -198,5 +268,31 @@ mod tests {
         delete("Ma Partie / 1");
         assert!(load("Ma Partie / 1").is_none());
         let _ = std::fs::remove_dir_all(dir);
+
+        // Avec un autre lieu de stockage, les parties et les réglages y vont (pas de fichier).
+        struct Memory(std::sync::Mutex<std::collections::HashMap<String, String>>);
+        impl Backend for Memory {
+            fn get(&self, key: &str) -> Option<String> {
+                self.0.lock().unwrap().get(key).cloned()
+            }
+            fn set(&self, key: &str, value: &str) {
+                self.0.lock().unwrap().insert(key.into(), value.into());
+            }
+            fn remove(&self, key: &str) {
+                self.0.lock().unwrap().remove(key);
+            }
+            fn keys(&self) -> Vec<String> {
+                self.0.lock().unwrap().keys().cloned().collect()
+            }
+        }
+        use_backend(Box::new(Memory(Default::default())));
+        write(&save).unwrap();
+        write(&save).unwrap();
+        assert_eq!(load("MA PARTIE / 1").map(|s| s.level), Some(3));
+        assert_eq!(list(GameMode::Coop).len(), 1, "la copie .bak n'est pas une partie");
+        write_settings("pad=xbox\n").unwrap();
+        assert_eq!(read_settings().as_deref(), Some("pad=xbox\n"));
+        delete("Ma Partie / 1");
+        assert!(load("Ma Partie / 1").is_none());
     }
 }

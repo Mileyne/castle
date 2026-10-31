@@ -25,6 +25,8 @@ mod dialogue;
 mod gamecontroller;
 mod gore;
 mod host;
+#[cfg(target_os = "ios")]
+mod prefs;
 mod i18n;
 mod lighting;
 #[cfg(feature = "live3d")]
@@ -152,7 +154,10 @@ fn log_plugin() -> bevy::log::LogPlugin {
 /// Lance le jeu (ne revient qu'à la fermeture).
 pub fn run() {
     #[cfg(target_os = "ios")]
-    log_objc_exceptions();
+    {
+        log_objc_exceptions();
+        prefs::use_on_tv();
+    }
     // Assets du dépôt si on lance depuis une compilation du dépôt, sinon à côté du programme.
     // Un dossier `assets` à côté du programme (version livrée) passe avant celui du dépôt.
     // Dans un paquet macOS (`Castle.app/Contents/MacOS/castle_client`), ils sont dans `Contents/Resources`.
