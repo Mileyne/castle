@@ -18,9 +18,12 @@ use sprite_forge::{Anim, LivePart, LiveShape, Theme, live_parts};
 use crate::art::{HERO_ANCHOR, PROP_ANCHOR, PoseKind, SPRITE_SIZE, WalkCycle, monster_scale};
 
 /// Cases de l'image: `GRID` x `GRID` de `SLOT` pixels, chacune montrant un carré de `CELL_M` mètres de côté.
-const GRID: usize = 16;
-const SLOT: usize = 160;
-const CELL_M: f32 = 2.4;
+const GRID: usize = 12;
+const SLOT: usize = 240;
+const CELL_M: f32 = 3.6;
+/// Les planches de sprites montraient 2,4 mètres par case: la case de l'image, plus large (un loup de profil dépassait de l'ancienne
+/// et son museau était coupé), s'affiche donc plus grande dans le même rapport.
+const CELL_SCALE: f32 = CELL_M / 2.4;
 /// Inclinaison de la vue (la même que celle des planches de sprites).
 const ELEVATION: f32 = 0.42;
 /// Où les pieds tombent dans la case, depuis le haut (comme dans les planches: 88 pixels sur 96).
@@ -145,7 +148,7 @@ fn attach(
         };
         let root = commands.spawn((Transform::from_translation(slot_origin(slot)), Visibility::default())).id();
         commands.entity(entity).insert((
-            Sprite { image: slots.atlas.clone(), rect: Some(slot_rect(slot)), custom_size: Some(size), ..default() },
+            Sprite { image: slots.atlas.clone(), rect: Some(slot_rect(slot)), custom_size: Some(size * CELL_SCALE), ..default() },
             anchor,
             Live3d { key, slot, root, parts: Vec::new() },
         ));
@@ -261,14 +264,17 @@ fn animate(
     }
 }
 
-/// Outil d'essai: avec `CASTLE_SHOT=<fichier.png>`, enregistre une capture de la fenêtre au bout de vingt secondes.
-fn shoot(mut commands: Commands, time: Res<Time>, mut done: Local<bool>) {
+/// Outil d'essai: avec `CASTLE_SHOT=<fichier.png>`, enregistre une capture de la fenêtre au bout de vingt secondes, puis toutes les six
+/// secondes (le nom reçoit le numéro de la capture avant `.png`).
+fn shoot(mut commands: Commands, time: Res<Time>, mut taken: Local<u32>) {
     use bevy::render::view::screenshot::{Screenshot, save_to_disk};
     let Some(path) = std::env::var_os("CASTLE_SHOT") else {
         return;
     };
-    if !*done && time.elapsed_secs() > 20.0 {
-        *done = true;
-        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+    let due = 20.0 + *taken as f32 * 6.0;
+    if time.elapsed_secs() > due && *taken < 8 {
+        let name = path.to_string_lossy().replace(".png", &format!("_{}.png", *taken));
+        *taken += 1;
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(name));
     }
 }

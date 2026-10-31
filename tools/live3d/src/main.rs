@@ -114,7 +114,7 @@ fn main() {
             results: Vec::new(),
         })
         .add_systems(Startup, setup)
-        .add_systems(Update, (rebuild_scene, fit_view, animate, drive_bench, update_hud).chain())
+        .add_systems(Update, (rebuild_scene, fit_view, animate, drive_bench, update_hud, shot_mode).chain())
         .run();
 }
 
@@ -153,7 +153,12 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: 
 
 /// La liste des modèles à montrer (héros et monstres), dans l'ordre.
 fn keys() -> Vec<String> {
-    models().into_iter().filter(|m| m.group == "Héros" || m.group == "Monstres").map(|m| m.key).collect()
+    // `--only <modèle>` (par exemple `monster:Wolf`) ne montre que ce modèle.
+    let only = std::env::args().skip_while(|a| a != "--only").nth(1);
+    models().into_iter().filter(|m| m.group == "Héros" || m.group == "Monstres")
+        .map(|m| m.key)
+        .filter(|k| only.as_ref().is_none_or(|o| k == o))
+        .collect()
 }
 
 fn rebuild_scene(mut commands: Commands, mut scene: ResMut<Scene>, characters: Query<Entity, With<Character>>) {
@@ -167,7 +172,7 @@ fn rebuild_scene(mut commands: Commands, mut scene: ResMut<Scene>, characters: Q
     let keys = keys();
     // Au-delà de ce qui tient à l'écran, on agrandit la vue (et la grille) en gardant la même densité de personnages.
     let zoom = (scene.count as f32 / 66.0).sqrt().max(1.0);
-    scene.view = VIEW_HEIGHT * zoom;
+    scene.view = std::env::args().skip_while(|a| a != "--view").nth(1).and_then(|v| v.parse().ok()).unwrap_or(VIEW_HEIGHT * zoom);
     let columns = (COLUMNS as f32 * zoom).ceil() as usize;
     let rows = scene.count.div_ceil(columns);
     for i in 0..scene.count {
@@ -259,7 +264,7 @@ fn animate(
             1 => Anim::Idle(((t * 1.0 + i * 0.07) % 1.0).abs()),
             _ => Anim::Attack(((t * 2.5 + i * 0.11) % 1.0).abs()),
         };
-        transform.rotation = Quat::from_rotation_y(t * 0.5 + i * 0.8);
+        transform.rotation = Quat::from_rotation_y(if std::env::args().any(|a| a == "--still") { i * std::f32::consts::FRAC_PI_4 } else { t * 0.5 + i * 0.8 });
         let list = live_parts(&character.key, Theme::Medieval, anim);
         calls += 1;
         if character.parts.len() != list.len() {
@@ -359,5 +364,19 @@ fn drive_bench(
         let _ = (fps, time.delta_secs());
         bench.results.push(line);
         bench.step += 1;
+    }
+}
+
+/// `--shot <fichier.png>`: enregistre l'image de la caméra après quelques secondes, puis quitte.
+fn shot_mode(mut commands: Commands, target: Res<Target>, mut frames: Local<u32>, mut exit: MessageWriter<AppExit>) {
+    let Some(path) = std::env::args().skip_while(|a| a != "--shot").nth(1) else {
+        return;
+    };
+    *frames += 1;
+    if *frames == 150 {
+        commands.spawn(Screenshot::image(target.0.clone())).observe(save_to_disk(path));
+    }
+    if *frames == 190 {
+        exit.write(AppExit::Success);
     }
 }

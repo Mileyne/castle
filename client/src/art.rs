@@ -373,9 +373,11 @@ pub const PROP_ANCHOR: Anchor = Anchor(Vec2::new(0.0, -0.417));
 pub const WALL_ANCHOR: Anchor = Anchor(Vec2::ZERO);
 
 /// Une entité dessinée devant ou derrière les autres selon sa position vers le haut ou le bas de l'écran (les héros, les monstres
-/// et les grands motifs): celle qui est plus bas est devant. Le nombre est une petite avance pour départager deux entités au même endroit.
+/// et les grands motifs): celle qui est plus bas est devant. Le premier nombre est une petite avance pour départager deux entités au même
+/// endroit; le second, de combien l'origine de l'entité est au-dessus de ses pieds (6 pour un héros, dont l'origine est le centre de sa
+/// boîte de collision): c'est la hauteur des pieds qui compte, pas celle de l'origine.
 #[derive(Component)]
-pub struct YSort(pub f32);
+pub struct YSort(pub f32, pub f32);
 
 /// Profondeur de l'ensemble des entités triées (voir `YSort`) et pente: un monde de 2 000 unités de haut reste entre 0,8 et 1,2.
 const SORT_DEPTH: f32 = 1.0;
@@ -383,7 +385,7 @@ const SORT_SLOPE: f32 = 0.0002;
 
 pub fn y_sort(mut sorted: Query<(&mut Transform, &YSort)>) {
     for (mut transform, sort) in &mut sorted {
-        let z = SORT_DEPTH - transform.translation.y * SORT_SLOPE + sort.0;
+        let z = SORT_DEPTH - (transform.translation.y - sort.1) * SORT_SLOPE + sort.0;
         if (transform.translation.z - z).abs() > 1e-6 {
             transform.translation.z = z;
         }

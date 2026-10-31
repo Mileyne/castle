@@ -472,7 +472,7 @@ fn dress_new_entities(
         commands.entity(entity).insert((
             sprite,
             anchor,
-            YSort(0.00004),
+            YSort(0.00004, 6.0),
             WalkCycle::default(),
             Transform::from_translation(pos.0.extend(1.0)),
         ));
@@ -482,7 +482,7 @@ fn dress_new_entities(
         commands.entity(entity).insert((
             sprite,
             anchor,
-            YSort(0.0),
+            YSort(0.0, 0.0),
             WalkCycle::default(),
             Transform::from_translation(pos.0.extend(1.0)),
         ));
@@ -548,7 +548,7 @@ fn dress_new_entities(
     }
     for (entity, pos, landmark) in &landmarks {
         let (sprite, anchor) = art.landmark_sprite(landmark.0);
-        commands.entity(entity).insert((sprite, anchor, YSort(0.0), Transform::from_translation(pos.0.extend(1.0))));
+        commands.entity(entity).insert((sprite, anchor, YSort(0.0, 0.0), Transform::from_translation(pos.0.extend(1.0))));
     }
     for (entity, pos, exit) in &exits {
         commands.entity(entity).insert((
