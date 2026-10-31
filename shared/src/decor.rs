@@ -98,12 +98,9 @@ impl DecorKind {
     }
 }
 
-/// Grands motifs posés sur le sol, dessinés en grand et qui bloquent le passage (au pied seulement): arbres, rochers, colonnes...
+/// Grands motifs posés sur le sol, dessinés en grand et qui bloquent le passage (au pied seulement): rochers, colonnes, statues, fontaines
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LandmarkKind {
-    Oak,
-    Pine,
-    DeadTree,
     Boulder,
     Pillar,
     Statue,
@@ -111,14 +108,11 @@ pub enum LandmarkKind {
 }
 
 impl LandmarkKind {
-    pub const ALL: [LandmarkKind; 7] = [Self::Oak, Self::Pine, Self::DeadTree, Self::Boulder, Self::Pillar, Self::Statue, Self::Fountain];
+    pub const ALL: [LandmarkKind; 4] = [Self::Boulder, Self::Pillar, Self::Statue, Self::Fountain];
 
     /// Nom pour l'éditeur.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Oak => "Chêne",
-            Self::Pine => "Sapin",
-            Self::DeadTree => "Arbre mort",
             Self::Boulder => "Gros rocher",
             Self::Pillar => "Colonne",
             Self::Statue => "Statue",
@@ -129,9 +123,6 @@ impl LandmarkKind {
     /// Nom du fichier de sa planche (voir `tools/sprite_forge`).
     pub fn file(self) -> &'static str {
         match self {
-            Self::Oak => "oak",
-            Self::Pine => "pine",
-            Self::DeadTree => "deadtree",
             Self::Boulder => "boulder",
             Self::Pillar => "pillar",
             Self::Statue => "statue",
@@ -142,7 +133,6 @@ impl LandmarkKind {
     /// Facteur d'affichage par rapport à la case de 64 unités des grands motifs (la fontaine est dessinée plus petite dans sa case).
     pub fn display_scale(self) -> f32 {
         match self {
-            Self::Oak => 1.15,
             Self::Fountain => 1.5,
             _ => 1.0,
         }
@@ -152,9 +142,6 @@ impl LandmarkKind {
     /// couronne.
     pub fn half_size(self) -> Vec2 {
         match self {
-            Self::Oak => Vec2::new(5.0, 4.0),
-            Self::Pine => Vec2::new(4.0, 4.0),
-            Self::DeadTree => Vec2::new(3.5, 3.5),
             Self::Boulder => Vec2::new(12.0, 8.0),
             Self::Pillar => Vec2::new(6.0, 6.0),
             Self::Statue => Vec2::new(7.0, 7.0),
@@ -166,11 +153,11 @@ impl LandmarkKind {
     pub fn for_region(region: Region) -> &'static [(LandmarkKind, f32)] {
         use LandmarkKind::*;
         match region {
-            Region::Forest => &[(Oak, 3.0), (Pine, 3.0), (Boulder, 0.6), (DeadTree, 0.4)],
-            Region::Marsh => &[(DeadTree, 3.0), (Oak, 1.5), (Boulder, 1.0)],
-            Region::Approach => &[(Boulder, 2.0), (DeadTree, 1.5), (Pillar, 0.8), (Pine, 1.0)],
+            Region::Forest => &[(Boulder, 1.0)],
+            Region::Marsh => &[(Boulder, 1.0)],
+            Region::Approach => &[(Boulder, 2.0), (Pillar, 0.8)],
             Region::Crypts => &[(Pillar, 3.0), (Statue, 1.5)],
-            Region::Gardens => &[(Statue, 1.5), (Oak, 1.5), (Fountain, 0.5)],
+            Region::Gardens => &[(Statue, 1.5), (Fountain, 0.5)],
             Region::Library => &[(Pillar, 3.0), (Statue, 1.0)],
             Region::Forge => &[(Pillar, 2.0), (Boulder, 1.0)],
             Region::Tower => &[(Pillar, 3.0), (Statue, 1.0)],
@@ -235,7 +222,7 @@ impl LevelDef {
     }
 
     /// Sème des grands motifs (arbres, colonnes, rochers...) dans les endroits dégagés du niveau: jamais près d'un élément déjà posé,
-    /// dans les zones de départ et de sortie, ni dans un passage étroit (il faut trois tuiles de sol de côté autour d'un arbre ou d'une colonne, cinq pour un gros motif).
+    /// dans les zones de départ et de sortie, ni dans un passage étroit (il faut trois tuiles de sol de côté autour d'une colonne, cinq pour un gros motif).
     /// Le résultat ne dépend que de `seed`.
     pub fn scatter_landmarks(&self, seed: u64) -> Vec<Thing> {
         let mut state = seed.wrapping_mul(0xD1B5_4A32_D192_ED03) | 1;
@@ -265,8 +252,8 @@ impl LevelDef {
             candidates.swap(i, (next() * (i + 1) as f32) as usize % (i + 1));
         }
         let floor_tiles = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| floor(x, y)).count();
-        // Les extérieurs sont plus boisés que l'intérieur du château.
-        let target = floor_tiles / if self.region.is_outdoor() { 55 } else { 110 };
+        // Dehors, les rochers sont plus rares que les colonnes du château.
+        let target = floor_tiles / if self.region.is_outdoor() { 160 } else { 110 };
         let mut placed: Vec<(Vec2, LandmarkKind)> = Vec::new();
         for (x, y) in candidates {
             if placed.len() >= target {

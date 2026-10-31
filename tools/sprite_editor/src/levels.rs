@@ -84,10 +84,7 @@ impl Item {
         Item::Pickup(PickupKind::TargetDisc),
     ];
 
-    const LANDMARKS: [Item; 7] = [
-        Item::Landmark(castle_shared::LandmarkKind::Oak),
-        Item::Landmark(castle_shared::LandmarkKind::Pine),
-        Item::Landmark(castle_shared::LandmarkKind::DeadTree),
+    const LANDMARKS: [Item; 4] = [
         Item::Landmark(castle_shared::LandmarkKind::Boulder),
         Item::Landmark(castle_shared::LandmarkKind::Pillar),
         Item::Landmark(castle_shared::LandmarkKind::Statue),

@@ -628,6 +628,9 @@ fn run_transition(
 
 /// Débordement maximal, en pixels, de la lisière irrégulière entre une clairière et sa forêt.
 const RAGGED_REACH: f32 = 22.0;
+/// Amplitude et longueur d'onde, en pixels, de la limite ondulée entre la bande des troncs et l'herbe.
+const BOUNDARY_REACH: f32 = 9.0;
+const BOUNDARY_WAVE: f32 = 13.0;
 /// Longueur d'onde, en pixels, des ondulations de la lisière.
 const RAGGED_WAVE: f32 = 17.0;
 /// Largeur, en pixels, sur laquelle une tuile se fond dans celle d'un voisin d'une autre région.
@@ -659,10 +662,19 @@ const TILE_OVERLAP: f32 = 0.35;
 /// Assombrit un rectangle (haut, bas, gauche, droite, en pixels) d'une tuile de l'image d'un bloc, avec la teinte des ombres du
 /// décor, comme le ferait un voile translucide posé dessus (le mélange se fait en lumière linéaire, comme à l'écran).
 fn shade_pixels(pixels: &mut [u8], origin: usize, width: usize, (top, bottom, left, right): (usize, usize, usize, usize), alpha: f32) {
+    for line in top..bottom {
+        for column in left..right {
+            shade_pixel(pixels, origin + (line * width + column) * 4, alpha);
+        }
+    }
+}
+
+/// Assombrit un pixel (RVBA, à l'indice `at`) avec la teinte des ombres du décor, comme un voile translucide d'opacité `alpha`.
+fn shade_pixel(pixels: &mut [u8], at: usize, alpha: f32) {
     // Tables de conversion sRGB <-> lumière linéaire (calculées une fois): il y a des millions de pixels à mélanger.
-    static TABLES: std::sync::OnceLock<(Vec<f32>, Vec<u8>)> = std::sync::OnceLock::new();
+    static TABLES: std::sync::OnceLock<(Vec<f32>, Vec<u8>, [f32; 3])> = std::sync::OnceLock::new();
     const STEPS: usize = 4096;
-    let (to_linear, to_byte) = TABLES.get_or_init(|| {
+    let (to_linear, to_byte, shade) = TABLES.get_or_init(|| {
         let forward = (0..=255u8).map(|byte| Color::srgb_u8(byte, byte, byte).to_linear().red).collect();
         let backward = (0..STEPS)
             .map(|i| {
@@ -670,19 +682,19 @@ fn shade_pixels(pixels: &mut [u8], origin: usize, width: usize, (top, bottom, le
                 (Srgba::from(LinearRgba::new(linear, linear, linear, 1.0)).red * 255.0 + 0.5) as u8
             })
             .collect();
-        (forward, backward)
+        let shade = Color::srgb(0.02, 0.0, 0.06).to_linear();
+        (forward, backward, [shade.red, shade.green, shade.blue])
     });
-    let shade = Color::srgb(0.02, 0.0, 0.06).to_linear();
-    let shade = [shade.red, shade.green, shade.blue];
-    for line in top..bottom {
-        for column in left..right {
-            let at = origin + (line * width + column) * 4;
-            for channel in 0..3 {
-                let mixed = to_linear[pixels[at + channel] as usize] * (1.0 - alpha) + shade[channel] * alpha;
-                pixels[at + channel] = to_byte[(mixed.clamp(0.0, 1.0) * (STEPS - 1) as f32 + 0.5) as usize];
-            }
-        }
+    for channel in 0..3 {
+        let mixed = to_linear[pixels[at + channel] as usize] * (1.0 - alpha) + shade[channel] * alpha;
+        pixels[at + channel] = to_byte[(mixed.clamp(0.0, 1.0) * (STEPS - 1) as f32 + 0.5) as usize];
     }
+}
+
+/// Décalage, en pixels, de la limite entre la bande des troncs et l'herbe, à la position `gx` (pixels, en coordonnées du niveau):
+/// positif, la bande descend dans l'herbe; négatif, l'herbe monte dans la bande.
+fn boundary_contour(gx: usize) -> f32 {
+    BOUNDARY_REACH * (2.0 * smooth_noise(gx as f32 / BOUNDARY_WAVE, 7) - 1.0) + 2.0 * (edge_noise(gx as u32, 5, 1, 1) - 0.5)
 }
 
 /// Tuile du décor, effacée quand le château est regénéré.
@@ -795,8 +807,8 @@ fn bake_chunk(def: &LevelDef, room: &Room, sources: &BakeSources, chunk_x: u32, 
                         continue;
                     }
                     let neighbor_wall = room.tile(nx, ny) == Tile::Wall;
-                    if neighbor_wall == wall || (neighbor_wall && room.tile(nx, ny - 1) == Tile::Floor) {
-                        // Même nature des deux côtés, ou le voisin montre sa face de tronc: pas de lisière à casser.
+                    if neighbor_wall == wall {
+                        // Même nature des deux côtés: pas de lisière à casser.
                         continue;
                     }
                     let neighbor_row = rank(def.region_at(nx, ny));
@@ -835,16 +847,53 @@ fn bake_chunk(def: &LevelDef, room: &Room, sources: &BakeSources, chunk_x: u32, 
                     }
                 }
             }
+            // Entre la bande des troncs (face d'un mur) et l'herbe qui la longe, la limite ondule le long du bord au lieu de suivre la
+            // ligne droite de la tuile: la face avance dans l'herbe par endroits, et l'herbe remonte dans la face ailleurs. Les deux
+            // tuiles lisent le même contour (en coordonnées du niveau), donc il est continu de l'une à l'autre.
+            let outdoor = Region::ALL[tile_row].is_outdoor();
+            if outdoor && !wall && room.tile(xi, yi + 1) == Tile::Wall {
+                let above_row = rank(def.region_at(xi, yi + 1));
+                let above_column = tile_column(x, y + 1, above_row, true, true);
+                for px in 0..tile_px {
+                    let depth = boundary_contour(x as usize * tile_px + px).max(0.0) as usize;
+                    for py in 0..depth.min(tile_px) {
+                        // La ligne du bas de la face est contre la ligne du haut de cette tuile.
+                        let from = ((above_row * TILE_CELL as usize + (tile_px - 1 - py)) * source_width + above_column * tile_px + px) * 4;
+                        let to = origin + (py * width + px) * 4;
+                        pixels[to..to + 3].copy_from_slice(&source[from..from + 3]);
+                    }
+                }
+            }
+            if outdoor && wall && room.tile(xi, yi - 1) == Tile::Floor {
+                let below_row = rank(def.region_at(xi, yi - 1));
+                let below_column = tile_column(x, y - 1, below_row, false, false);
+                for px in 0..tile_px {
+                    let depth = (-boundary_contour(x as usize * tile_px + px)).max(0.0) as usize;
+                    for d in 0..depth.min(tile_px) {
+                        let from = ((below_row * TILE_CELL as usize + d) * source_width + below_column * tile_px + px) * 4;
+                        let to = origin + ((tile_px - 1 - d) * width + px) * 4;
+                        pixels[to..to + 3].copy_from_slice(&source[from..from + 3]);
+                    }
+                }
+            }
             // Ombre portée sur le sol le long d'un mur: au-dessus (face du mur) et sur les côtés.
             if room.tile(xi, yi) == Tile::Floor {
+                if room.tile(xi, yi + 1) == Tile::Wall {
+                    // Sous le mur, l'ombre s'estompe progressivement (et suit le contour de la lisière, dehors).
+                    for px in 0..tile_px {
+                        let shift = if outdoor { 0.5 * boundary_contour(x as usize * tile_px + px).max(0.0) } else { 0.0 };
+                        for py in 0..(2 * tile_px / 3).min(tile_px) {
+                            let fade = 1.0 - (py as f32 - shift).max(0.0) / (tile_px as f32 * 0.5);
+                            if fade > 0.0 {
+                                shade_pixel(&mut pixels, origin + (py * width + px) * 4, 0.42 * fade.powf(1.6));
+                            }
+                        }
+                    }
+                }
                 let mut shade = |top: usize, bottom: usize, left: usize, right: usize, alpha: f32| {
                     shade_pixels(&mut pixels, origin, width, (top, bottom, left, right), alpha);
                 };
                 let unit = tile_px / 16;
-                if room.tile(xi, yi + 1) == Tile::Wall {
-                    shade(0, 6 * unit, 0, tile_px, 0.4);
-                    shade(6 * unit, 8 * unit, 0, tile_px, 0.2);
-                }
                 if room.tile(xi - 1, yi) == Tile::Wall {
                     shade(0, tile_px, 0, 3 * unit, 0.3);
                 }
