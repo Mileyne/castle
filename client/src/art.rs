@@ -627,9 +627,9 @@ fn run_transition(
 }
 
 /// Débordement maximal, en pixels, de la lisière irrégulière entre une clairière et sa forêt.
-const RAGGED_REACH: f32 = 22.0;
+const RAGGED_REACH: f32 = 26.0;
 /// Amplitude et longueur d'onde, en pixels, de la limite ondulée entre la bande des troncs et l'herbe.
-const BOUNDARY_REACH: f32 = 9.0;
+const BOUNDARY_REACH: f32 = 13.0;
 const BOUNDARY_WAVE: f32 = 13.0;
 /// Longueur d'onde, en pixels, des ondulations de la lisière.
 const RAGGED_WAVE: f32 = 17.0;
@@ -644,6 +644,13 @@ fn smooth_noise(t: f32, seed: u32) -> f32 {
     let value = |k: f32| edge_noise(k as i32 as u32, seed, 3, 7);
     let blend = f * f * (3.0 - 2.0 * f);
     value(i) * (1.0 - blend) + value(i + 1.0) * blend
+}
+
+/// Deux octaves de `smooth_noise`: de grandes ondulations avec des irrégularités plus fines par-dessus.
+fn fractal_noise(t: f32, seed: u32) -> f32 {
+    // Un mélange d'ondulations de plusieurs tailles tend vers 0,5: on le ré-étale sur tout l'intervalle de 0 à 1.
+    let mixed = 0.45 * smooth_noise(t * 0.4, seed + 23) + 0.35 * smooth_noise(t, seed) + 0.2 * smooth_noise(t * 2.7 + 5.0, seed + 11);
+    ((mixed - 0.5) * 2.8 + 0.5).clamp(0.0, 1.0)
 }
 
 /// Valeur pseudo-aléatoire stable entre 0 et 1 pour un bloc de pixels d'une tuile.
@@ -694,7 +701,7 @@ fn shade_pixel(pixels: &mut [u8], at: usize, alpha: f32) {
 /// Décalage, en pixels, de la limite entre la bande des troncs et l'herbe, à la position `gx` (pixels, en coordonnées du niveau):
 /// positif, la bande descend dans l'herbe; négatif, l'herbe monte dans la bande.
 fn boundary_contour(gx: usize) -> f32 {
-    BOUNDARY_REACH * (2.0 * smooth_noise(gx as f32 / BOUNDARY_WAVE, 7) - 1.0) + 2.0 * (edge_noise(gx as u32, 5, 1, 1) - 0.5)
+    BOUNDARY_REACH * (2.0 * fractal_noise(gx as f32 / BOUNDARY_WAVE, 7) - 1.0) - 3.0 + 2.0 * (edge_noise(gx as u32, 5, 1, 1) - 0.5)
 }
 
 /// Tuile du décor, effacée quand le château est regénéré.
@@ -828,9 +835,9 @@ fn bake_chunk(def: &LevelDef, room: &Room, sources: &BakeSources, chunk_x: u32, 
                             // tuile à l'autre), avec un peu de grain feuillu par-dessus.
                             let along = if dx != 0 { y as usize * tile_px + py } else { x as usize * tile_px + px };
                             let side = if dx != 0 { 1 } else { 2 };
-                            let wave = smooth_noise(along as f32 / RAGGED_WAVE, side);
+                            let wave = fractal_noise(along as f32 / RAGGED_WAVE, side);
                             let grain = edge_noise(x, y, px / 2, py / 2);
-                            let contour = reach * (0.3 + 0.7 * wave) + 3.0 * (grain - 0.5);
+                            let contour = reach * (0.08 + 0.92 * wave) + 3.0 * (grain - 0.5);
                             if (edge as f32) >= contour {
                                 continue;
                             }
@@ -1285,7 +1292,7 @@ mod tests {
         let (tiles, tiles_width) = read_png(&root.join("tiles.png"));
         let (decor, decor_width) = read_png(&root.join("decor.png"));
         let sources = BakeSources { tiles: &tiles, tiles_width, decor: &decor, decor_width };
-        for level in [1, 4, 6] {
+        for level in [1, 2, 3, 4, 6] {
             let def = castle_shared::level_def(level);
             let (whole, width, height) = bake_level(def, &sources);
             assert!(whole.chunks(4).all(|p| p[3] == 255), "niveau {level}: le sol est opaque");

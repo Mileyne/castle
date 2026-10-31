@@ -210,6 +210,15 @@ struct Route {
     waypoints: Vec<Vec2>,
     /// Temps depuis le dernier calcul; l'itinéraire est refait régulièrement car le chef bouge.
     age: f32,
+    /// Où le compagnon était il y a un instant, et depuis combien de temps: s'il n'a presque pas bougé alors qu'il voulait avancer,
+    /// il est coincé (voir `unstick`).
+    anchor: Vec2,
+    anchor_age: f32,
+    /// Temps restant d'un pas de côté pour se dégager, et son sens.
+    detour: f32,
+    detour_sign: f32,
+    /// Temps passé loin du chef (voir `leash_followers`).
+    lost: f32,
 }
 
 /// Coup en préparation: l'effet (dégâts, flèche partie) a lieu à l'instant de la frappe de l'animation d'arme.
@@ -2591,7 +2600,7 @@ fn spawn_monster(commands: &mut Commands, kind: MonsterKind, pos: Vec2) {
 /// Direction à prendre pour aller de `pos` à `goal`: tout droit si la voie est libre, sinon en suivant
 /// un itinéraire calculé à travers la carte (murs, couloirs, portes fermées).
 fn steer(room: &Room, solids: &[(Vec2, Vec2)], route: &mut Route, pos: Vec2, goal: Vec2, dt: f32) -> Vec2 {
-    if room.segment_clear(pos, goal, HERO_HALF_SIZE) {
+    if room.segment_clear_solids(pos, goal, HERO_HALF_SIZE, solids) {
         route.waypoints.clear();
         return (goal - pos).normalize_or_zero();
     }
@@ -2604,7 +2613,7 @@ fn steer(room: &Room, solids: &[(Vec2, Vec2)], route: &mut Route, pos: Vec2, goa
     // On saute les points déjà atteints, ou masqués par un raccourci direct.
     while let Some(first) = route.waypoints.first() {
         let reached = first.distance(pos) < 5.0;
-        let shortcut = route.waypoints.len() >= 2 && room.segment_clear(pos, route.waypoints[1], HERO_HALF_SIZE);
+        let shortcut = route.waypoints.len() >= 2 && room.segment_clear_solids(pos, route.waypoints[1], HERO_HALF_SIZE, solids);
         if reached || shortcut {
             route.waypoints.remove(0);
         } else {
@@ -2617,6 +2626,42 @@ fn steer(room: &Room, solids: &[(Vec2, Vec2)], route: &mut Route, pos: Vec2, goa
         None => (goal - pos).normalize_or_zero(),
     }
 }
+
+/// Un compagnon qui voulait avancer mais n'a presque pas bougé depuis presque une seconde est coincé (un angle, un obstacle que
+/// l'itinéraire n'avait pas prévu, un autre héros): il refait son itinéraire et fait un pas de côté, d'un côté puis de l'autre,
+/// au lieu de pousser contre l'obstacle jusqu'à être ramené de force près du chef.
+fn unstick(route: &mut Route, pos: Vec2, dir: Vec2, dt: f32) -> Vec2 {
+    if dir == Vec2::ZERO {
+        route.anchor = pos;
+        route.anchor_age = 0.0;
+        return dir;
+    }
+    route.anchor_age += dt;
+    if route.anchor_age >= STUCK_CHECK {
+        if pos.distance(route.anchor) < STUCK_DISTANCE {
+            route.waypoints.clear();
+            route.age = ROUTE_MAX_AGE;
+            route.detour = STUCK_DETOUR;
+            route.detour_sign = if route.detour_sign > 0.0 { -1.0 } else { 1.0 };
+        }
+        route.anchor = pos;
+        route.anchor_age = 0.0;
+    }
+    if route.detour > 0.0 {
+        route.detour -= dt;
+        return (dir.perp() * route.detour_sign + dir * 0.4).normalize_or_zero();
+    }
+    dir
+}
+
+/// Un compagnon est jugé coincé s'il avance de moins de `STUCK_DISTANCE` en `STUCK_CHECK` secondes; le pas de côté dure `STUCK_DETOUR`.
+const STUCK_CHECK: f32 = 0.8;
+const STUCK_DISTANCE: f32 = 4.0;
+const STUCK_DETOUR: f32 = 0.5;
+/// Un compagnon n'est ramené de force auprès du chef qu'au-delà de cette distance, ou après avoir été plus loin que `AI_LEASH`
+/// pendant `AI_LEASH_PATIENCE` secondes.
+const AI_LEASH_FAR: f32 = 480.0;
+const AI_LEASH_PATIENCE: f32 = 6.0;
 
 /// Les compagnons (héros non dirigés) suivent le héros dirigé, relèvent les alliés à terre et combattent seuls,
 /// avec leur seule arme de base: les pouvoirs spéciaux restent réservés au héros que dirige le joueur.
@@ -2664,7 +2709,9 @@ fn hero_ai(
             match class.stats().attack {
                 Attack::Melee { range, .. } => {
                     if distance > range * 0.7 {
-                        dir.0 = to;
+                        // Un obstacle entre le compagnon et l'ennemi: on le contourne au lieu de pousser dedans.
+                        dir.0 = if room.segment_clear_solids(pos.0, target, HERO_HALF_SIZE, &solids) { to } else { steer(&room, &solids, &mut route, pos.0, target, dt) };
+                        dir.0 = unstick(&mut route, pos.0, dir.0, dt);
                     }
                     attacking.0 = distance <= range + 6.0;
                 }
@@ -2674,7 +2721,8 @@ fn hero_ai(
                     if distance < 45.0 {
                         dir.0 = -to;
                     } else if distance > 100.0 {
-                        dir.0 = to;
+                        dir.0 = if room.segment_clear_solids(pos.0, target, HERO_HALF_SIZE, &solids) { to } else { steer(&room, &solids, &mut route, pos.0, target, dt) };
+                        dir.0 = unstick(&mut route, pos.0, dir.0, dt);
                     }
                 }
             }
@@ -2690,6 +2738,7 @@ fn hero_ai(
         if let Some(ally) = ally {
             if ally.distance(pos.0) > REVIVE_RANGE * 0.5 {
                 dir.0 = steer(&room, &solids, &mut route, pos.0, ally, dt);
+                dir.0 = unstick(&mut route, pos.0, dir.0, dt);
             }
         } else if let Some(leader) = leader {
             // Dans un couloir étroit la place prévue en formation tombe dans un mur: on suit alors le chef de près.
@@ -2698,8 +2747,10 @@ fn hero_ai(
             let (goal, stop) = if free { (slot, 10.0) } else { (leader, 16.0) };
             if goal.distance(pos.0) > stop {
                 dir.0 = steer(&room, &solids, &mut route, pos.0, goal, dt);
+                dir.0 = unstick(&mut route, pos.0, dir.0, dt);
             } else {
                 route.waypoints.clear();
+                route.detour = 0.0;
             }
         }
         if let Some(d) = dir.0.try_normalize() {
@@ -2718,16 +2769,28 @@ fn formation_offset(class: HeroClass) -> Vec2 {
     }
 }
 
-/// Un compagnon qui s'est perdu (coincé derrière un angle, ou trop loin) est ramené auprès du chef.
+/// Un compagnon vraiment perdu est ramené auprès du chef: très loin, tout de suite; moyennement loin (plus que `AI_LEASH`), après
+/// `AI_LEASH_PATIENCE` secondes pendant lesquelles il n'a pas réussi à rejoindre le groupe. Avant cela, il se débrouille (itinéraire
+/// autour des obstacles, pas de côté si coincé, voir `steer` et `unstick`).
 fn leash_followers(
-    mut followers: Query<(&PartyId, &mut Position), (With<Player>, Without<Controlled>, Without<Downed>)>,
+    time: Res<Time>,
+    mut followers: Query<(&PartyId, &mut Position, &mut Route), (With<Player>, Without<Controlled>, Without<Downed>)>,
     leaders: Query<(&PartyId, &Position), (With<Controlled>, Without<Downed>)>,
 ) {
-    for (party, mut pos) in &mut followers {
-        if let Some((_, leader)) = leaders.iter().find(|(id, _)| *id == party) {
-            if leader.0.distance(pos.0) > AI_LEASH {
-                pos.0 = leader.0;
-            }
+    for (party, mut pos, mut route) in &mut followers {
+        let Some((_, leader)) = leaders.iter().find(|(id, _)| *id == party) else {
+            continue;
+        };
+        let distance = leader.0.distance(pos.0);
+        if distance <= AI_LEASH {
+            route.lost = 0.0;
+            continue;
+        }
+        route.lost += time.delta_secs();
+        if distance > AI_LEASH_FAR || route.lost > AI_LEASH_PATIENCE {
+            pos.0 = leader.0;
+            route.lost = 0.0;
+            route.waypoints.clear();
         }
     }
 }
@@ -3699,6 +3762,32 @@ mod tests {
         assert!(world.get::<DialogueTrigger>(near).unwrap().fired, "la scène sur le point de partir est purgée");
         assert!(!world.get::<DialogueTrigger>(far).unwrap().fired, "une scène lointaine reste disponible");
         assert!(world.get::<DialogueTrigger>(done).unwrap().fired);
+    }
+
+    /// Un compagnon dont le chemin direct est barré par un gros rocher le contourne, au lieu de rester collé devant.
+    #[test]
+    fn a_follower_walks_around_a_boulder_in_its_way() {
+        let def = LevelDef::blank("essai", Region::Forest, UVec2::new(40, 24));
+        let room = def.to_dungeon().unwrap().room;
+        let (dt, speed) = (1.0 / 64.0, 75.0);
+        let from = room.tile_center(8, 12);
+        let goal = room.tile_center(30, 12);
+        for offset in [-4.0, 0.0, 5.0] {
+            let boulder = (room.tile_center(19, 12) + Vec2::new(0.0, offset), LandmarkKind::Boulder.half_size());
+            let solids = [boulder];
+            let (mut pos, mut route) = (from, Route::default());
+            let mut arrived = false;
+            for _ in 0..(40 * 64) {
+                if pos.distance(goal) < 12.0 {
+                    arrived = true;
+                    break;
+                }
+                let dir = steer(&room, &solids, &mut route, pos, goal, dt);
+                let dir = unstick(&mut route, pos, dir, dt);
+                pos = room.move_and_collide_solids(pos, dir * speed * dt, HERO_HALF_SIZE, &solids);
+            }
+            assert!(arrived, "décalage {offset}: bloqué à {pos} devant le rocher");
+        }
     }
 
     /// Un compagnon seul, avec les vraies collisions, doit atteindre chaque salle du château.

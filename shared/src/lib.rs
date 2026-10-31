@@ -161,6 +161,18 @@ impl Room {
         (0..=steps).all(|i| !self.overlaps_wall(from + d * (i as f32 / steps as f32), half))
     }
 
+    /// Comme `segment_clear`, en tenant compte aussi des obstacles rectangulaires (centre, demi-dimensions): un obstacle que la boîte
+    /// chevauche déjà au départ est ignoré, pour qu'on puisse s'en dégager.
+    pub fn segment_clear_solids(&self, from: Vec2, to: Vec2, half: f32, solids: &[(Vec2, Vec2)]) -> bool {
+        if !self.segment_clear(from, to, half) {
+            return false;
+        }
+        let hits = |p: Vec2, (c, h): &(Vec2, Vec2)| (p.x - c.x).abs() < h.x + half && (p.y - c.y).abs() < h.y + half;
+        let d = to - from;
+        let steps = (d.length() / 3.0).ceil().max(1.0) as u32;
+        solids.iter().filter(|s| !hits(from, s)).all(|s| (0..=steps).all(|i| !hits(from + d * (i as f32 / steps as f32), s)))
+    }
+
     /// Chemin de `from` à `to` à travers les salles et les couloirs, sous forme de points de passage.
     ///
     /// A* sur la grille de tuiles (déplacements en diagonale sans couper les coins), puis le chemin est
@@ -247,7 +259,7 @@ impl Room {
         let mut origin = from;
         while i < points.len() {
             let mut j = points.len() - 1;
-            while j > i && !self.segment_clear(origin, points[j], HERO_HALF_SIZE) {
+            while j > i && !self.segment_clear_solids(origin, points[j], HERO_HALF_SIZE, solids) {
                 j -= 1;
             }
             route.push(points[j]);
