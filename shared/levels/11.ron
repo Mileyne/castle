@@ -103,6 +103,918 @@
     "........................................................................................",
     "........................................................................................",
   ],
+  decor: [
+    (
+      kind: Crack,
+      variant: 1,
+      at: (47.695656, 2.354391),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (5.2102566, 3.4194803),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (38.3469, 3.3690128),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (51.195393, 3.2839112),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (78.22322, 3.343588),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (34.641075, 4.5927205),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (36.165184, 4.3055196),
+    ),
+    (
+      kind: Rug,
+      variant: 0,
+      at: (32.45845, 5.3209257),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (78.36618, 5.7960987),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (83.516396, 5.692523),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (2.8172398, 6.354811),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (7.289656, 6.2152376),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (15.352104, 6.6986494),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (18.606314, 6.6542654),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (22.550056, 6.585323),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (27.726282, 6.78667),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (52.81719, 6.3489103),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (77.325714, 6.578438),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (83.717415, 6.791102),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (13.689155, 7.3458686),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (14.828938, 7.7059565),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (29.244713, 7.7078485),
+    ),
+    (
+      kind: Rug,
+      variant: 0,
+      at: (30.419907, 7.5459876),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (31.54736, 7.7365546),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (38.831642, 7.2788043),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (44.409397, 7.65849),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (55.677975, 7.304727),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (61.746983, 7.2682023),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (67.692665, 7.461196),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (79.61188, 7.476445),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (4.8123007, 8.601863),
+    ),
+    (
+      kind: Rug,
+      variant: 0,
+      at: (9.809163, 8.200157),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (14.833286, 8.784547),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (15.42033, 8.826089),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (17.1557, 8.219019),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (34.803513, 8.768239),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (52.332413, 8.760886),
+    ),
+    (
+      kind: Rug,
+      variant: 0,
+      at: (60.407776, 8.5763855),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (72.15301, 8.834432),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (5.664693, 9.672881),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (11.39561, 9.489665),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (29.731737, 9.815779),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (51.403385, 9.251702),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (58.536526, 9.511631),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (38.7708, 10.560521),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (52.78929, 10.512276),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (76.72935, 10.514159),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (54.541466, 11.600726),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (76.815186, 11.539885),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (9.69856, 12.710888),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (55.582664, 12.320849),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (59.549557, 12.830764),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (10.3074875, 17.74355),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (54.59356, 19.329168),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (74.186, 19.811993),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (80.25959, 19.592884),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (16.43228, 20.675114),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (30.50164, 20.800404),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (31.807705, 20.693834),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (32.30235, 20.753426),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (36.179226, 20.648773),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (38.264633, 20.707943),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (51.682774, 20.651869),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (57.283016, 20.706598),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (78.18896, 20.554226),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (16.564054, 21.477518),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (30.388689, 21.25203),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (38.207386, 21.60576),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (47.52976, 21.52144),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (60.192966, 21.548952),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (62.680332, 21.790335),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (64.34956, 21.660877),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (79.279655, 21.17668),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (47.55515, 22.339727),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (67.78453, 22.754824),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (12.647869, 23.700966),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (29.761425, 23.650778),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (37.53126, 23.288225),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (50.527267, 23.399845),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (77.6027, 23.749178),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (78.16983, 23.631445),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (81.68653, 23.484743),
+    ),
+    (
+      kind: Rug,
+      variant: 0,
+      at: (11.39698, 24.179234),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (28.555628, 24.357439),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (32.83386, 24.516783),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (36.581825, 24.487087),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (49.46454, 24.571117),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (74.76902, 24.458239),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (34.823772, 25.785616),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (39.666885, 25.18661),
+    ),
+    (
+      kind: Rug,
+      variant: 0,
+      at: (58.2619, 25.658062),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (60.456707, 25.740665),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (32.276615, 26.65541),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (77.272316, 26.351675),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (78.67634, 26.217415),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (7.4772363, 27.24942),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (6.395478, 28.797924),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (15.83743, 28.516539),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (50.502033, 28.447737),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (53.364582, 28.677017),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (54.711315, 28.647963),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (9.371845, 29.184193),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (51.8105, 29.541574),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (52.290653, 29.209557),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (33.57887, 30.50944),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (33.837315, 32.397964),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (76.75299, 33.75433),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (14.438114, 34.199272),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (32.610523, 34.688694),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (68.38306, 34.47236),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (38.72652, 35.426666),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (39.811954, 35.746788),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (77.83017, 35.323917),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (13.194976, 36.43634),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (68.50664, 36.6484),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (82.201385, 36.159893),
+    ),
+    (
+      kind: Rug,
+      variant: 0,
+      at: (16.644436, 37.69111),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (30.337791, 37.772743),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (32.80064, 37.363525),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (70.74293, 37.37521),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (74.383736, 37.4764),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (78.54057, 37.272858),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (81.24789, 37.401737),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (7.15972, 38.314186),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (12.39789, 38.309635),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (18.637075, 38.535),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (32.71948, 38.235836),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (60.815266, 38.207306),
+    ),
+    (
+      kind: Rug,
+      variant: 0,
+      at: (78.17095, 38.84581),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (10.774076, 39.694454),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (11.253427, 39.560303),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (19.71216, 39.381035),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (28.356537, 39.400215),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (30.23862, 39.669598),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (39.30924, 39.19317),
+    ),
+    (
+      kind: Rubble,
+      variant: 1,
+      at: (51.351364, 39.726933),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (59.322, 39.269886),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (62.349434, 39.648846),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (77.35283, 39.230328),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (4.2164116, 40.75084),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (17.21241, 40.278236),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (35.804615, 40.29198),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (47.809883, 40.228924),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (49.353516, 40.76055),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (54.369263, 40.774906),
+    ),
+    (
+      kind: Ash,
+      variant: 2,
+      at: (55.58126, 40.829967),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (62.46906, 40.703682),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (13.472533, 41.826916),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (16.416225, 41.58474),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (30.312944, 41.761375),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (34.485, 41.47625),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (36.59064, 41.748863),
+    ),
+    (
+      kind: Rug,
+      variant: 0,
+      at: (39.78292, 41.73243),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (52.485146, 41.559467),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (66.48136, 41.774555),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (75.76201, 41.61249),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (8.263256, 42.168427),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (9.232685, 42.763027),
+    ),
+    (
+      kind: Rug,
+      variant: 0,
+      at: (31.413136, 42.32195),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (32.75567, 42.707375),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (37.529514, 42.680317),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (55.370113, 42.53581),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (59.809643, 42.53945),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (73.40091, 42.734318),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (11.729149, 43.200092),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (16.192677, 43.733055),
+    ),
+    (
+      kind: Rug,
+      variant: 2,
+      at: (30.714167, 43.466103),
+    ),
+    (
+      kind: Rug,
+      variant: 0,
+      at: (32.4005, 43.516254),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (36.34559, 43.43906),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (38.57945, 43.175365),
+    ),
+    (
+      kind: Rug,
+      variant: 1,
+      at: (39.206665, 43.832508),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (54.155224, 43.187687),
+    ),
+    (
+      kind: Ash,
+      variant: 2,
+      at: (57.79952, 43.600662),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (63.80556, 43.358913),
+    ),
+    (
+      kind: Rug,
+      variant: 0,
+      at: (77.78226, 43.62303),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (9.684063, 44.754875),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (11.6772175, 44.229725),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (18.492052, 44.793972),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (32.635586, 44.223923),
+    ),
+    (
+      kind: Rug,
+      variant: 3,
+      at: (73.58807, 44.238438),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (34.45684, 45.527653),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (54.45806, 45.5793),
+    ),
+  ],
   layout: (
     rooms: [
       (

@@ -26,3 +26,4 @@ objc2 = "0.6"
 
 [dev-dependencies]
 basis-universal = "0.3"
+png = "0.17"

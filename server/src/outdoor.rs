@@ -285,6 +285,7 @@ pub fn outdoor_level(spec: &OutdoorSpec, seed: u64) -> LevelDef {
 
     LevelDef {
         style: Vec::new(),
+        decor: Vec::new(),
         format: LEVEL_FORMAT,
         name: spec.name.to_string(),
         region: spec.region,

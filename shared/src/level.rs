@@ -88,6 +88,9 @@ pub struct LevelDef {
     /// la carte garde la région du niveau. Permet à un niveau de changer d'aspect au fil de la progression.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub style: Vec<String>,
+    /// Décor posé sur le sol (herbes, cailloux, flaques...): voir `scatter_decor`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decor: Vec<crate::decor::Decor>,
     /// Salles, couloirs et portes (voir `Layout`).
     pub layout: Layout,
     /// Objectif du niveau: genre et nombre à atteindre.
@@ -126,6 +129,7 @@ impl LevelDef {
             size: UVec2::new(w, h),
             rows,
             style: Vec::new(),
+            decor: Vec::new(),
             layout: Layout {
                 rooms: vec![zone(2, RoomKind::Start), zone(w - 8, RoomKind::Exit)],
                 connections: Vec::<Connection>::new(),
@@ -162,6 +166,7 @@ impl LevelDef {
             size,
             rows,
             style: Vec::new(),
+            decor: Vec::new(),
             layout: dungeon.layout.clone(),
             quest,
             things,
@@ -236,6 +241,7 @@ impl LevelDef {
                 problems.push(format!("la ligne {} contient le caractère inconnu '{c}'", i + 1));
             }
         }
+        problems.extend(self.decor_problems());
         if !self.style.is_empty() {
             if self.style.len() != self.size.y as usize {
                 problems.push(format!("{} lignes de décor pour une hauteur de {}", self.style.len(), self.size.y));

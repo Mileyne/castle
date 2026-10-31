@@ -127,6 +127,888 @@
     "....................................................................................................................................",
     "....................................................................................................................................",
   ],
+  decor: [
+    (
+      kind: Rubble,
+      variant: 1,
+      at: (99.2751, 14.241527),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (100.51151, 15.389759),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (11.44813, 17.343342),
+    ),
+    (
+      kind: Rock,
+      variant: 1,
+      at: (52.73527, 17.658428),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (54.556633, 17.365965),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (101.53667, 17.514027),
+    ),
+    (
+      kind: Grass,
+      variant: 2,
+      at: (102.38012, 17.686167),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (97.40353, 18.357029),
+    ),
+    (
+      kind: Puddle,
+      variant: 1,
+      at: (7.8133397, 19.249752),
+    ),
+    (
+      kind: Roots,
+      variant: 2,
+      at: (11.772871, 19.188433),
+    ),
+    (
+      kind: Puddle,
+      variant: 1,
+      at: (12.295989, 19.782536),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (60.80092, 19.26353),
+    ),
+    (
+      kind: Puddle,
+      variant: 2,
+      at: (87.77124, 19.846224),
+    ),
+    (
+      kind: Grass,
+      variant: 3,
+      at: (93.252304, 19.66255),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (94.269394, 19.784826),
+    ),
+    (
+      kind: Rock,
+      variant: 3,
+      at: (101.437675, 19.595612),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (23.22854, 20.54127),
+    ),
+    (
+      kind: Leaves,
+      variant: 0,
+      at: (51.431118, 20.301098),
+    ),
+    (
+      kind: Rock,
+      variant: 1,
+      at: (87.80748, 20.254976),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (99.48251, 20.204594),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (42.717323, 21.27018),
+    ),
+    (
+      kind: Rock,
+      variant: 3,
+      at: (58.17434, 21.792423),
+    ),
+    (
+      kind: Grass,
+      variant: 2,
+      at: (60.5808, 21.6155),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (93.43437, 21.215717),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (99.67077, 21.537298),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (104.2845, 21.731596),
+    ),
+    (
+      kind: Puddle,
+      variant: 2,
+      at: (8.415455, 22.444674),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (41.59629, 22.686337),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (42.78703, 22.846836),
+    ),
+    (
+      kind: Grass,
+      variant: 2,
+      at: (44.46031, 22.7779),
+    ),
+    (
+      kind: Grass,
+      variant: 0,
+      at: (57.74052, 22.206526),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (93.746346, 22.292677),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (104.692245, 22.153103),
+    ),
+    (
+      kind: Leaves,
+      variant: 1,
+      at: (105.61287, 22.578588),
+    ),
+    (
+      kind: Grass,
+      variant: 0,
+      at: (48.746822, 23.417118),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (52.766235, 23.495033),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (54.21678, 23.477415),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (55.533825, 23.208029),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (65.42704, 23.534876),
+    ),
+    (
+      kind: Grass,
+      variant: 0,
+      at: (87.8017, 23.312153),
+    ),
+    (
+      kind: Puddle,
+      variant: 2,
+      at: (102.57836, 23.504171),
+    ),
+    (
+      kind: Roots,
+      variant: 1,
+      at: (17.248957, 24.772621),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (21.581907, 24.680199),
+    ),
+    (
+      kind: Rock,
+      variant: 2,
+      at: (45.315624, 24.29267),
+    ),
+    (
+      kind: Leaves,
+      variant: 2,
+      at: (47.30326, 24.708618),
+    ),
+    (
+      kind: Rock,
+      variant: 1,
+      at: (57.70101, 24.807817),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (62.551414, 24.796488),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (89.82119, 24.15609),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (90.19834, 24.520794),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (92.35701, 24.532084),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (94.63493, 24.21956),
+    ),
+    (
+      kind: Mushrooms,
+      variant: 0,
+      at: (13.647145, 25.37064),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (43.680866, 25.3472),
+    ),
+    (
+      kind: Rubble,
+      variant: 3,
+      at: (49.152294, 25.243622),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (51.65938, 25.21594),
+    ),
+    (
+      kind: Rock,
+      variant: 2,
+      at: (56.81234, 25.167255),
+    ),
+    (
+      kind: Rock,
+      variant: 2,
+      at: (64.657715, 25.598852),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (104.19017, 25.335468),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (8.383129, 26.272379),
+    ),
+    (
+      kind: Fern,
+      variant: 2,
+      at: (10.365704, 26.635324),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (12.660987, 26.325441),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (41.49071, 26.579203),
+    ),
+    (
+      kind: Grass,
+      variant: 0,
+      at: (43.849876, 26.649366),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (55.53234, 26.596035),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (57.341675, 26.703478),
+    ),
+    (
+      kind: Rock,
+      variant: 1,
+      at: (60.356056, 26.779955),
+    ),
+    (
+      kind: Rock,
+      variant: 0,
+      at: (62.15449, 26.570644),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (91.79215, 26.67171),
+    ),
+    (
+      kind: Rock,
+      variant: 2,
+      at: (98.60996, 26.804392),
+    ),
+    (
+      kind: Grass,
+      variant: 0,
+      at: (103.71508, 26.19474),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (9.3971405, 27.637123),
+    ),
+    (
+      kind: Puddle,
+      variant: 2,
+      at: (13.789936, 27.69609),
+    ),
+    (
+      kind: Fern,
+      variant: 3,
+      at: (21.320436, 27.247675),
+    ),
+    (
+      kind: Grass,
+      variant: 2,
+      at: (42.54109, 27.576197),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (55.826138, 27.351313),
+    ),
+    (
+      kind: Rock,
+      variant: 3,
+      at: (59.44327, 27.205334),
+    ),
+    (
+      kind: Puddle,
+      variant: 2,
+      at: (86.63824, 27.33388),
+    ),
+    (
+      kind: Grass,
+      variant: 2,
+      at: (95.838196, 27.519085),
+    ),
+    (
+      kind: Grass,
+      variant: 2,
+      at: (22.204512, 28.499424),
+    ),
+    (
+      kind: Grass,
+      variant: 3,
+      at: (39.633503, 28.531633),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (42.391014, 28.589058),
+    ),
+    (
+      kind: Bones,
+      variant: 3,
+      at: (57.494858, 28.563015),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (65.61122, 28.593763),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (90.166435, 28.160742),
+    ),
+    (
+      kind: Grass,
+      variant: 3,
+      at: (106.747116, 28.191696),
+    ),
+    (
+      kind: Puddle,
+      variant: 1,
+      at: (23.54122, 29.725618),
+    ),
+    (
+      kind: Grass,
+      variant: 0,
+      at: (41.526665, 29.391768),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (102.49593, 29.465694),
+    ),
+    (
+      kind: Grass,
+      variant: 0,
+      at: (105.75985, 29.223526),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (39.256767, 30.318926),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (41.19295, 30.567348),
+    ),
+    (
+      kind: Puddle,
+      variant: 3,
+      at: (87.24615, 30.379187),
+    ),
+    (
+      kind: Leaves,
+      variant: 2,
+      at: (40.73342, 31.196941),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (20.151333, 32.7354),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (23.544483, 32.29025),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (41.808643, 32.722305),
+    ),
+    (
+      kind: Grass,
+      variant: 2,
+      at: (67.507164, 32.25281),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (80.76036, 32.218243),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (21.171984, 33.320377),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (24.21379, 33.643814),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (29.62378, 33.72991),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (21.604225, 34.24612),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (24.74874, 34.461483),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (41.531746, 34.8006),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (42.670742, 34.55054),
+    ),
+    (
+      kind: Grass,
+      variant: 2,
+      at: (43.48741, 34.79251),
+    ),
+    (
+      kind: Grass,
+      variant: 2,
+      at: (71.21487, 34.33697),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (72.25172, 34.359726),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (78.39179, 34.554886),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (116.27847, 34.338882),
+    ),
+    (
+      kind: Rock,
+      variant: 0,
+      at: (118.31189, 34.625084),
+    ),
+    (
+      kind: Grass,
+      variant: 3,
+      at: (107.71207, 35.754677),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (115.71855, 35.339027),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (28.801815, 36.529865),
+    ),
+    (
+      kind: Rock,
+      variant: 1,
+      at: (37.417824, 36.464745),
+    ),
+    (
+      kind: Leaves,
+      variant: 0,
+      at: (69.21032, 36.428284),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (77.611725, 36.404182),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (85.40232, 36.183197),
+    ),
+    (
+      kind: Grass,
+      variant: 3,
+      at: (107.17966, 36.54527),
+    ),
+    (
+      kind: Puddle,
+      variant: 3,
+      at: (112.37435, 36.49313),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (114.755424, 36.359333),
+    ),
+    (
+      kind: Grass,
+      variant: 2,
+      at: (117.51978, 36.3638),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (20.336468, 37.16275),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (33.766926, 37.4619),
+    ),
+    (
+      kind: Grass,
+      variant: 2,
+      at: (34.2429, 37.5915),
+    ),
+    (
+      kind: Puddle,
+      variant: 1,
+      at: (42.84613, 37.17428),
+    ),
+    (
+      kind: Leaves,
+      variant: 2,
+      at: (43.16574, 37.695465),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (65.21131, 37.73156),
+    ),
+    (
+      kind: Grass,
+      variant: 3,
+      at: (74.7951, 37.732334),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (108.609474, 37.675236),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (119.15172, 37.49983),
+    ),
+    (
+      kind: Grass,
+      variant: 0,
+      at: (120.214554, 37.731678),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (29.607578, 38.730537),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (30.52308, 38.451046),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (38.262325, 38.652306),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (66.56808, 38.306866),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (87.274216, 38.530613),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (26.641518, 39.198273),
+    ),
+    (
+      kind: Rock,
+      variant: 1,
+      at: (86.74451, 39.220074),
+    ),
+    (
+      kind: Grass,
+      variant: 2,
+      at: (119.39309, 39.704044),
+    ),
+    (
+      kind: Puddle,
+      variant: 3,
+      at: (30.681507, 40.658287),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (37.664063, 40.483223),
+    ),
+    (
+      kind: Puddle,
+      variant: 0,
+      at: (68.43759, 40.236824),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (73.49301, 40.19194),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (81.45834, 40.29807),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (118.16899, 40.188732),
+    ),
+    (
+      kind: Rubble,
+      variant: 1,
+      at: (119.29549, 40.83122),
+    ),
+    (
+      kind: Rock,
+      variant: 0,
+      at: (30.439928, 41.266956),
+    ),
+    (
+      kind: Rock,
+      variant: 0,
+      at: (33.644547, 41.616142),
+    ),
+    (
+      kind: Leaves,
+      variant: 3,
+      at: (35.35626, 41.80905),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (37.652344, 41.291977),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (42.254078, 41.46125),
+    ),
+    (
+      kind: Leaves,
+      variant: 1,
+      at: (72.782295, 41.270256),
+    ),
+    (
+      kind: Bones,
+      variant: 2,
+      at: (76.60924, 41.268036),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (23.378426, 42.157192),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (27.215248, 42.54797),
+    ),
+    (
+      kind: Rock,
+      variant: 1,
+      at: (42.301086, 42.69047),
+    ),
+    (
+      kind: Grass,
+      variant: 2,
+      at: (67.46865, 42.76117),
+    ),
+    (
+      kind: Leaves,
+      variant: 0,
+      at: (68.779015, 42.313293),
+    ),
+    (
+      kind: Rock,
+      variant: 1,
+      at: (76.66875, 42.59703),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (79.216034, 42.27113),
+    ),
+    (
+      kind: Leaves,
+      variant: 2,
+      at: (21.723797, 43.458763),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (75.693924, 43.570087),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (84.670586, 43.53788),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (30.165916, 44.55984),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (73.61796, 44.62808),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (75.39361, 44.72558),
+    ),
+    (
+      kind: Rock,
+      variant: 3,
+      at: (77.54565, 44.803032),
+    ),
+    (
+      kind: Rock,
+      variant: 3,
+      at: (31.48979, 45.5147),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (73.29791, 45.34537),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (78.20121, 45.76464),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (79.74697, 45.615044),
+    ),
+    (
+      kind: Puddle,
+      variant: 0,
+      at: (32.33594, 46.394783),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (34.248226, 46.50536),
+    ),
+    (
+      kind: Bones,
+      variant: 1,
+      at: (35.848972, 47.59714),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (31.355068, 48.345684),
+    ),
+  ],
   layout: (
     rooms: [
       (

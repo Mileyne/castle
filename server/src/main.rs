@@ -16,6 +16,12 @@ fn main() {
         castle_server::export_levels(std::path::Path::new(dir), args.iter().any(|a| a == "--force"), only.as_deref()).expect("export des niveaux");
         return;
     }
+    // `castle_server --decorate <dossier> [--force]`: sème le décor au sol des niveaux de la campagne.
+    if let Some(i) = args.iter().position(|a| a == "--decorate") {
+        let dir = args.get(i + 1).expect("usage: castle_server --decorate <dossier> [--force]");
+        castle_server::decorate_levels(std::path::Path::new(dir), args.iter().any(|a| a == "--force")).expect("décor des niveaux");
+        return;
+    }
     // Lancé par le client: on s'arrête dès que son tube d'entrée se ferme (client fermé ou tué).
     if std::env::var_os("CASTLE_EMBEDDED").is_some() {
         std::thread::spawn(|| {

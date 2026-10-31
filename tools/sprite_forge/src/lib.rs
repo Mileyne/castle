@@ -6,6 +6,7 @@
 //! (`tuning`) et les retouches de tuiles (`overrides`).
 
 mod decals;
+mod decor;
 mod editor_api;
 mod effects;
 mod heroes;
@@ -452,6 +453,11 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
     // Marques d'usure du sol: masques blancs que le jeu teinte et étire.
     let decal_sheet = sheet_of_cells(1, decals::COLUMNS, decals::CELL, |_, col| decals::cells()[col].clone());
     write_png(&out_dir.join("decals.png"), decals::COLUMNS * decals::CELL, decals::CELL, &decal_sheet);
+
+    // Décor posé sur le sol: les sortes en colonnes, les variantes en lignes, à l'échelle des tuiles (le jeu les mêle au sol).
+    let decor_camera = Camera { yaw: 0.0, elevation: 1.15, scale: TILE_SCALE, size: decor::CELL, feet_y: decor::CELL as f32 / 2.0, outline: false, shadow: false };
+    let decor_sheet = sheet_of_cells(decor::VARIANTS, decor::KINDS, decor::CELL, |row, col| render(&decor::build(col, row), &decor_camera, SUPERSAMPLE));
+    write_png(&out_dir.join("decor.png"), decor::KINDS * decor::CELL, decor::VARIANTS * decor::CELL, &decor_sheet);
 
     if let Some(dir) = preview {
         std::fs::create_dir_all(dir).unwrap();

@@ -103,6 +103,1043 @@
     "........................................................................................",
     "........................................................................................",
   ],
+  decor: [
+    (
+      kind: Bones,
+      variant: 0,
+      at: (12.848354, 3.2186854),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (9.532573, 4.44414),
+    ),
+    (
+      kind: Grass,
+      variant: 3,
+      at: (38.360725, 4.3622556),
+    ),
+    (
+      kind: Flowers,
+      variant: 1,
+      at: (49.649914, 4.333733),
+    ),
+    (
+      kind: Bones,
+      variant: 2,
+      at: (74.81258, 4.5272956),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (36.391033, 5.57696),
+    ),
+    (
+      kind: Grass,
+      variant: 1,
+      at: (59.52845, 5.3008947),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (2.346633, 6.3240747),
+    ),
+    (
+      kind: Puddle,
+      variant: 1,
+      at: (9.798723, 6.781733),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (38.2429, 6.460022),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (57.486034, 6.6475096),
+    ),
+    (
+      kind: Moss,
+      variant: 3,
+      at: (72.480835, 6.7952495),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (81.43679, 6.561701),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (82.28584, 6.1678896),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (83.18272, 6.713688),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (7.763625, 7.733741),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (8.831486, 7.2821336),
+    ),
+    (
+      kind: Rock,
+      variant: 1,
+      at: (35.49095, 7.187694),
+    ),
+    (
+      kind: Grass,
+      variant: 0,
+      at: (38.339302, 7.2833557),
+    ),
+    (
+      kind: Flowers,
+      variant: 0,
+      at: (55.462765, 7.7180896),
+    ),
+    (
+      kind: Leaves,
+      variant: 0,
+      at: (61.79283, 7.3601713),
+    ),
+    (
+      kind: Flowers,
+      variant: 3,
+      at: (64.365, 7.5589447),
+    ),
+    (
+      kind: Rubble,
+      variant: 3,
+      at: (66.22269, 7.5255036),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (7.8112426, 8.761478),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (30.829374, 8.592031),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (34.690247, 8.597609),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (38.651142, 8.79665),
+    ),
+    (
+      kind: Flowers,
+      variant: 3,
+      at: (48.534595, 8.186446),
+    ),
+    (
+      kind: Leaves,
+      variant: 3,
+      at: (51.7539, 8.669149),
+    ),
+    (
+      kind: Flowers,
+      variant: 3,
+      at: (54.371307, 8.300157),
+    ),
+    (
+      kind: Fern,
+      variant: 2,
+      at: (57.50645, 8.512523),
+    ),
+    (
+      kind: Moss,
+      variant: 2,
+      at: (62.62448, 8.561613),
+    ),
+    (
+      kind: Bones,
+      variant: 3,
+      at: (74.33795, 8.773457),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (75.61596, 8.64906),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (81.47352, 8.48692),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (8.640134, 9.16411),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (10.289652, 9.321689),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (29.33237, 9.467961),
+    ),
+    (
+      kind: Fern,
+      variant: 2,
+      at: (50.383404, 9.260154),
+    ),
+    (
+      kind: Grass,
+      variant: 0,
+      at: (56.473625, 9.772146),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (70.38627, 9.444733),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (76.71513, 9.563476),
+    ),
+    (
+      kind: Moss,
+      variant: 1,
+      at: (13.302147, 10.759534),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (15.210845, 10.588999),
+    ),
+    (
+      kind: Flowers,
+      variant: 2,
+      at: (46.21547, 10.748738),
+    ),
+    (
+      kind: Leaves,
+      variant: 1,
+      at: (47.412548, 10.797473),
+    ),
+    (
+      kind: Flowers,
+      variant: 3,
+      at: (51.658894, 10.821466),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (79.486725, 10.704932),
+    ),
+    (
+      kind: Fern,
+      variant: 0,
+      at: (55.77974, 11.575647),
+    ),
+    (
+      kind: Leaves,
+      variant: 3,
+      at: (57.608715, 11.177146),
+    ),
+    (
+      kind: Grass,
+      variant: 0,
+      at: (58.29585, 11.712134),
+    ),
+    (
+      kind: Puddle,
+      variant: 0,
+      at: (73.756096, 11.700162),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (82.24793, 11.205973),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (11.557629, 12.801322),
+    ),
+    (
+      kind: Rubble,
+      variant: 3,
+      at: (12.262136, 12.159737),
+    ),
+    (
+      kind: Bones,
+      variant: 1,
+      at: (13.305713, 12.633545),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (39.415394, 12.361537),
+    ),
+    (
+      kind: Rock,
+      variant: 1,
+      at: (37.554134, 13.241373),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (77.79716, 13.152922),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (77.362114, 17.65596),
+    ),
+    (
+      kind: Bones,
+      variant: 2,
+      at: (5.6604013, 18.28952),
+    ),
+    (
+      kind: Moss,
+      variant: 2,
+      at: (7.7552347, 18.34269),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (27.624023, 18.822474),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (47.262074, 18.52237),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (48.83828, 18.535482),
+    ),
+    (
+      kind: Rubble,
+      variant: 1,
+      at: (27.578035, 19.170332),
+    ),
+    (
+      kind: Bones,
+      variant: 2,
+      at: (31.558268, 19.269547),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (41.716675, 19.583717),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (49.168747, 19.573114),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (32.436764, 20.288313),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (40.748116, 20.359203),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (51.404877, 20.343925),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (3.6182177, 21.736834),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (39.617214, 21.816507),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (49.74189, 21.26749),
+    ),
+    (
+      kind: Moss,
+      variant: 2,
+      at: (52.594997, 21.260891),
+    ),
+    (
+      kind: Rubble,
+      variant: 1,
+      at: (54.693283, 21.713995),
+    ),
+    (
+      kind: Rubble,
+      variant: 1,
+      at: (60.265537, 21.847143),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (64.313866, 21.592442),
+    ),
+    (
+      kind: Moss,
+      variant: 2,
+      at: (3.7943063, 22.284876),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (11.733308, 22.63705),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (16.619041, 22.62747),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (28.475058, 22.522272),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (40.816704, 22.285683),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (46.676918, 22.524323),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (49.406532, 22.528723),
+    ),
+    (
+      kind: Moss,
+      variant: 3,
+      at: (66.2026, 22.265703),
+    ),
+    (
+      kind: Moss,
+      variant: 0,
+      at: (77.612526, 22.488907),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (84.83597, 22.331064),
+    ),
+    (
+      kind: Moss,
+      variant: 0,
+      at: (3.4569693, 23.449276),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (5.2243237, 23.433817),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (27.81716, 23.406439),
+    ),
+    (
+      kind: Bones,
+      variant: 3,
+      at: (28.183744, 23.18787),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (32.727745, 23.339521),
+    ),
+    (
+      kind: Moss,
+      variant: 2,
+      at: (41.415134, 23.204823),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (52.43171, 23.198364),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (53.309223, 23.33446),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (83.270424, 23.70762),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (14.819555, 24.388773),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (17.404543, 24.387407),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (18.487057, 24.329319),
+    ),
+    (
+      kind: Bones,
+      variant: 3,
+      at: (29.333431, 24.381252),
+    ),
+    (
+      kind: Bones,
+      variant: 3,
+      at: (33.534317, 24.346365),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (47.449703, 24.845142),
+    ),
+    (
+      kind: Rubble,
+      variant: 1,
+      at: (52.439663, 24.466944),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (70.79428, 24.503544),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (71.33712, 24.501972),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (76.21274, 24.777237),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (78.19461, 24.622215),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (80.35918, 24.498367),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (81.47818, 24.733294),
+    ),
+    (
+      kind: Rubble,
+      variant: 3,
+      at: (11.4883175, 25.216913),
+    ),
+    (
+      kind: Rubble,
+      variant: 3,
+      at: (12.75826, 25.703634),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (18.57578, 25.4887),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (68.216644, 25.518513),
+    ),
+    (
+      kind: Rubble,
+      variant: 3,
+      at: (73.681046, 25.411642),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (24.38741, 26.444231),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (27.266407, 26.158318),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (34.319336, 26.771902),
+    ),
+    (
+      kind: Bones,
+      variant: 3,
+      at: (36.357204, 26.40788),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (37.449863, 26.244331),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (47.36867, 26.225346),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (75.43051, 26.833593),
+    ),
+    (
+      kind: Bones,
+      variant: 2,
+      at: (11.728374, 27.652464),
+    ),
+    (
+      kind: Puddle,
+      variant: 0,
+      at: (36.295506, 27.61406),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (41.345604, 27.62727),
+    ),
+    (
+      kind: Puddle,
+      variant: 3,
+      at: (73.75107, 27.297564),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (82.490654, 27.772976),
+    ),
+    (
+      kind: Bones,
+      variant: 1,
+      at: (84.26829, 27.749882),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (11.544875, 28.327616),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (33.520275, 28.381746),
+    ),
+    (
+      kind: Rubble,
+      variant: 3,
+      at: (38.638786, 28.610027),
+    ),
+    (
+      kind: Bones,
+      variant: 3,
+      at: (51.32775, 28.182383),
+    ),
+    (
+      kind: Bones,
+      variant: 3,
+      at: (81.4355, 28.376476),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (11.417518, 30.755383),
+    ),
+    (
+      kind: Rubble,
+      variant: 1,
+      at: (78.743935, 30.801392),
+    ),
+    (
+      kind: Pebbles,
+      variant: 0,
+      at: (32.15938, 32.760273),
+    ),
+    (
+      kind: Bones,
+      variant: 1,
+      at: (12.495227, 34.168594),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (16.569061, 34.24905),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (19.335762, 35.46974),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (47.509163, 35.17374),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (54.772804, 35.19509),
+    ),
+    (
+      kind: Bones,
+      variant: 2,
+      at: (75.3505, 35.557785),
+    ),
+    (
+      kind: Rubble,
+      variant: 1,
+      at: (78.77016, 35.824944),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (79.52887, 35.69068),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (80.22333, 35.705807),
+    ),
+    (
+      kind: Moss,
+      variant: 2,
+      at: (9.163006, 36.254333),
+    ),
+    (
+      kind: Bones,
+      variant: 1,
+      at: (14.784177, 36.438515),
+    ),
+    (
+      kind: Bones,
+      variant: 2,
+      at: (16.356876, 36.773922),
+    ),
+    (
+      kind: Rubble,
+      variant: 3,
+      at: (81.361534, 36.311943),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (19.834988, 37.375385),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (30.320478, 37.7259),
+    ),
+    (
+      kind: Bones,
+      variant: 1,
+      at: (37.715805, 37.380127),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (38.232834, 37.246357),
+    ),
+    (
+      kind: Rubble,
+      variant: 3,
+      at: (72.72628, 37.766533),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (73.7562, 37.27336),
+    ),
+    (
+      kind: Pebbles,
+      variant: 2,
+      at: (7.3604317, 38.22662),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (9.504363, 38.624294),
+    ),
+    (
+      kind: Puddle,
+      variant: 0,
+      at: (33.767498, 38.457607),
+    ),
+    (
+      kind: Bones,
+      variant: 1,
+      at: (35.16066, 38.617115),
+    ),
+    (
+      kind: Moss,
+      variant: 2,
+      at: (57.40365, 38.674675),
+    ),
+    (
+      kind: Moss,
+      variant: 2,
+      at: (83.404335, 38.575928),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (2.2582545, 39.696033),
+    ),
+    (
+      kind: Bones,
+      variant: 2,
+      at: (3.572901, 39.42169),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (15.319888, 39.251617),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (19.792349, 39.16098),
+    ),
+    (
+      kind: Bones,
+      variant: 3,
+      at: (26.44672, 39.273266),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (27.79695, 39.42778),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (28.719484, 39.782543),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (64.44292, 39.61129),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (69.64321, 39.435017),
+    ),
+    (
+      kind: Bones,
+      variant: 2,
+      at: (80.411766, 39.386086),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (2.4215138, 40.27196),
+    ),
+    (
+      kind: Bones,
+      variant: 1,
+      at: (11.472967, 40.429325),
+    ),
+    (
+      kind: Puddle,
+      variant: 0,
+      at: (14.559155, 40.7911),
+    ),
+    (
+      kind: Moss,
+      variant: 1,
+      at: (28.791403, 40.56596),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (35.667145, 40.83418),
+    ),
+    (
+      kind: Rubble,
+      variant: 2,
+      at: (59.57673, 40.421707),
+    ),
+    (
+      kind: Puddle,
+      variant: 2,
+      at: (60.59616, 40.807053),
+    ),
+    (
+      kind: Rubble,
+      variant: 1,
+      at: (80.15827, 40.723934),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (12.501897, 41.544876),
+    ),
+    (
+      kind: Bones,
+      variant: 2,
+      at: (27.295374, 41.573982),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (31.51601, 41.83795),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (6.5414405, 42.274643),
+    ),
+    (
+      kind: Rubble,
+      variant: 1,
+      at: (7.5505157, 42.36916),
+    ),
+    (
+      kind: Moss,
+      variant: 1,
+      at: (12.529904, 42.75396),
+    ),
+    (
+      kind: Crack,
+      variant: 3,
+      at: (29.846373, 42.49999),
+    ),
+    (
+      kind: Bones,
+      variant: 3,
+      at: (31.539925, 42.82212),
+    ),
+    (
+      kind: Moss,
+      variant: 1,
+      at: (32.734535, 42.839832),
+    ),
+    (
+      kind: Bones,
+      variant: 2,
+      at: (50.494278, 42.335842),
+    ),
+    (
+      kind: Moss,
+      variant: 0,
+      at: (10.154834, 43.539078),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (29.33457, 43.16608),
+    ),
+    (
+      kind: Pebbles,
+      variant: 1,
+      at: (50.721767, 43.62684),
+    ),
+    (
+      kind: Crack,
+      variant: 2,
+      at: (73.19218, 43.40186),
+    ),
+    (
+      kind: Moss,
+      variant: 3,
+      at: (77.31979, 43.17522),
+    ),
+    (
+      kind: Puddle,
+      variant: 3,
+      at: (5.474002, 44.383102),
+    ),
+    (
+      kind: Bones,
+      variant: 3,
+      at: (11.738716, 44.304916),
+    ),
+    (
+      kind: Bones,
+      variant: 3,
+      at: (16.496563, 44.45979),
+    ),
+    (
+      kind: Moss,
+      variant: 2,
+      at: (30.515461, 44.22987),
+    ),
+    (
+      kind: Pebbles,
+      variant: 3,
+      at: (38.514076, 44.75271),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (73.809395, 44.345108),
+    ),
+    (
+      kind: Crack,
+      variant: 1,
+      at: (77.389404, 44.448235),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (80.7376, 44.449062),
+    ),
+    (
+      kind: Moss,
+      variant: 3,
+      at: (34.508053, 45.157146),
+    ),
+    (
+      kind: Crack,
+      variant: 0,
+      at: (58.545914, 45.232147),
+    ),
+    (
+      kind: Rubble,
+      variant: 0,
+      at: (76.340805, 45.205517),
+    ),
+    (
+      kind: Bones,
+      variant: 0,
+      at: (80.21833, 45.339664),
+    ),
+  ],
   layout: (
     rooms: [
       (

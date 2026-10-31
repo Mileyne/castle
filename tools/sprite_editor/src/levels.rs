@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use bevy::math::{UVec2, Vec2 as V2};
 use castle_shared::{
+    Decor, DecorKind,
     DoorKind, ExitKind, LEVEL_COUNT, LevelDef, MonsterKind, PickupKind, QuestKind, Region,
     RoomInfo, RoomKind, Thing, level_file,
 };
@@ -21,6 +22,8 @@ enum Tool {
     Floor,
     /// Donne aux tuiles le décor (sol et murs) d'une autre région.
     Style,
+    /// Pose des éléments de décor au sol (herbes, cailloux, flaques...).
+    Decor,
     Place,
     Move,
     Erase,
@@ -230,6 +233,9 @@ pub struct LevelsTab {
     brush: i32,
     /// Région dont l'outil Décor emprunte l'aspect.
     style_region: Region,
+    /// Sorte de décor à poser, et dernière position où on en a posé pendant un trait.
+    decor_kind: DecorKind,
+    last_decor: Option<V2>,
     show_grid: bool,
     show_zones: bool,
     /// Dernière tuile peinte pendant un trait (pour relier les points sans trou).
@@ -239,6 +245,8 @@ pub struct LevelsTab {
     undo: Vec<LevelDef>,
     redo: Vec<LevelDef>,
     want_undo: bool,
+    want_scatter: bool,
+    want_clear_decor: bool,
     want_redo: bool,
     art: Option<LevelArt>,
     art_tried: bool,
@@ -265,6 +273,8 @@ impl LevelsTab {
             shape: Shape::Brush,
             brush: 1,
             style_region: Region::Crypts,
+            decor_kind: DecorKind::Grass,
+            last_decor: None,
             show_grid: true,
             show_zones: true,
             last_paint: None,
@@ -272,6 +282,8 @@ impl LevelsTab {
             undo: Vec::new(),
             redo: Vec::new(),
             want_undo: false,
+            want_scatter: false,
+            want_clear_decor: false,
             want_redo: false,
             art: None,
             art_tried: false,
@@ -410,7 +422,8 @@ impl LevelsTab {
             for (tool, label) in [
                 (Tool::Wall, "▮ Mur"),
                 (Tool::Floor, "▯ Sol"),
-                (Tool::Style, "Décor"),
+                (Tool::Style, "Matière"),
+                (Tool::Decor, "Décor"),
                 (Tool::Place, "Poser"),
                 (Tool::Move, "Déplacer"),
                 (Tool::Erase, "Effacer"),
@@ -463,9 +476,32 @@ impl LevelsTab {
                     }
                 });
             }
+            Tool::Decor => {
+                ui.horizontal_wrapped(|ui| {
+                    for kind in DecorKind::ALL {
+                        let selected = self.decor_kind == kind;
+                        let response = match art.as_ref() {
+                            Some(art) => {
+                                let (texture, uv) = art.decor(kind, 0);
+                                let image = egui::Image::new((texture.id(), Vec2::splat(40.0))).uv(uv);
+                                ui.add(egui::Button::image(image).selected(selected))
+                            }
+                            None => ui.selectable_label(selected, kind.label()),
+                        };
+                        if response.on_hover_text(kind.label()).clicked() {
+                            self.decor_kind = kind;
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label(format!("À poser: {}. Clic ou glisser pour poser; clic droit pour retirer.", self.decor_kind.label()));
+                    self.want_scatter |= ui.button("Semer selon la région").on_hover_text("Remplace tout le décor par un semis adapté au décor de chaque tuile").clicked();
+                    self.want_clear_decor |= ui.button("Tout retirer").clicked();
+                });
+            }
             Tool::Style => {
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Décor à peindre (sol et murs):");
+                    ui.label("Matière à peindre (sol et murs):");
                     for region in Region::ALL {
                         let selected = self.style_region == region;
                         let response = match art.as_ref() {
@@ -572,6 +608,16 @@ impl LevelsTab {
     fn canvas_ui(&mut self, ui: &mut egui::Ui, def: &mut LevelDef) {
         let art = self.art.take();
         let mut changed = self.apply_history(ui, def);
+        if std::mem::take(&mut self.want_scatter) {
+            self.checkpoint(def);
+            def.decor = def.scatter_decor(u64::from(self.selected) * 7919 + 13);
+            changed = true;
+        }
+        if std::mem::take(&mut self.want_clear_decor) && !def.decor.is_empty() {
+            self.checkpoint(def);
+            def.decor.clear();
+            changed = true;
+        }
         // Ctrl + molette (ou pincement): zoom.
         let pinch = ui.input(|i| i.zoom_delta());
         if pinch != 1.0 && ui.rect_contains_pointer(ui.max_rect()) {
@@ -679,6 +725,14 @@ impl LevelsTab {
                         ],
                         line,
                     );
+                }
+            }
+            // Décor au sol, sous les éléments.
+            if let Some(art) = art.as_ref() {
+                for decor in &def.decor {
+                    let (texture, uv) = art.decor(decor.kind, decor.variant);
+                    let r = Rect::from_center_size(screen(decor.at.x, decor.at.y), Vec2::splat(zoom * 2.0));
+                    painter.image(texture.id(), r, uv, Color32::WHITE);
                 }
             }
             // Zones, couloirs (portes).
@@ -961,6 +1015,26 @@ impl LevelsTab {
                 }
                 self.drag = None;
             }
+            // Décor: un clic en pose un; en glissant, on en sème un tous les trois quarts de tuile environ.
+            if self.tool == Tool::Decor {
+                if response.drag_started_by(egui::PointerButton::Primary) {
+                    self.checkpoint(def);
+                    self.last_decor = None;
+                }
+                let painting = primary && (response.dragged_by(egui::PointerButton::Primary) || response.clicked_by(egui::PointerButton::Primary));
+                if let (true, Some((px, py))) = (painting, precise) {
+                    if response.clicked_by(egui::PointerButton::Primary) {
+                        self.checkpoint(def);
+                    }
+                    let at = V2::new(px, py);
+                    if in_map(px.floor() as i32, py.floor() as i32) && self.last_decor.is_none_or(|last| last.distance(at) > 0.75) {
+                        let variant = ((at.x * 31.0 + at.y * 17.0).abs() as u32 % u32::from(castle_shared::DECOR_VARIANTS)) as u8;
+                        def.decor.push(Decor { kind: self.decor_kind, variant, at });
+                        self.last_decor = Some(at);
+                        changed = true;
+                    }
+                }
+            }
             let secondary = response.secondary_clicked();
             if response.clicked() || secondary {
                 if let (Some((x, y)), Some(precise)) = (cursor, precise) {
@@ -968,6 +1042,18 @@ impl LevelsTab {
                         if let Some(i) = nearest(def, precise) {
                             self.checkpoint(def);
                             def.things.remove(i);
+                            changed = true;
+                        } else if let Some(i) = def
+                            .decor
+                            .iter()
+                            .enumerate()
+                            .map(|(i, d)| (i, (d.at - V2::new(precise.0, precise.1)).length()))
+                            .filter(|(_, d)| *d < 0.8)
+                            .min_by(|a, b| a.1.total_cmp(&b.1))
+                            .map(|(i, _)| i)
+                        {
+                            self.checkpoint(def);
+                            def.decor.remove(i);
                             changed = true;
                         }
                     } else if self.tool == Tool::Place && in_map(x, y) {

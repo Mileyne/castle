@@ -124,6 +124,8 @@ pub struct Art {
     pub decals: Atlas,
     /// Vignettes des quatre héros (une case de 128 px par classe).
     pub portraits: Atlas,
+    /// Décor posé sur le sol (herbes, cailloux...): une image lue par le processeur, pour être assemblée au sol de chaque bloc.
+    pub decor: Handle<Image>,
     /// Une planche par personnage, par monstre et par objet, chargée à la première demande (un monstre absent du niveau ne
     /// prend pas de mémoire graphique).
     sheets: Sheets,
@@ -424,6 +426,7 @@ fn load_set(assets: &AssetServer, layouts: &mut Assets<TextureAtlasLayout>, them
         fx: atlas("fx.png", 2, 1, 96, true),
         decals: atlas("decals.png", 13, 1, 128, true),
         portraits: atlas("portraits.png", 4, 1, 128, true),
+        decor: assets.load(format!("art/{folder}/decor.png")),
         sheets,
     }
 }
@@ -598,6 +601,20 @@ fn run_transition(
     }
 }
 
+/// Largeur, en pixels, sur laquelle une tuile se fond dans celle d'un voisin d'une autre région.
+const TRANSITION_REACH: f32 = 14.0;
+/// Côté d'une case de la planche de décor (deux tuiles).
+const DECOR_CELL: usize = 96;
+
+/// Valeur pseudo-aléatoire stable entre 0 et 1 pour un bloc de pixels d'une tuile.
+fn edge_noise(x: u32, y: u32, bx: usize, by: usize) -> f32 {
+    let mut h = x.wrapping_mul(73856093) ^ y.wrapping_mul(19349663) ^ (bx as u32).wrapping_mul(83492791) ^ (by as u32).wrapping_mul(2654435761);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2c1b3c6d);
+    h ^= h >> 12;
+    (h & 0xffff) as f32 / 65536.0
+}
+
 /// Côté d'un bloc de décor, en tuiles, et débordement de chaque bloc sur ses voisins, en unités du monde.
 const CHUNK: u32 = 16;
 const TILE_OVERLAP: f32 = 0.35;
@@ -657,6 +674,133 @@ fn tint_tiles(
     }
 }
 
+/// Les pixels qui servent à assembler le sol: la planche des tuiles et celle du décor (RVBA, lignes à la suite).
+struct BakeSources<'a> {
+    tiles: &'a [u8],
+    tiles_width: usize,
+    decor: &'a [u8],
+    decor_width: usize,
+}
+
+fn rank(region: Region) -> usize {
+    Region::ALL.iter().position(|r| *r == region).unwrap_or(0)
+}
+
+/// Assemble en une image (RVBA, `TILE_CELL` pixels par tuile, première ligne en haut) le bloc de tuiles dont le coin bas-gauche est
+/// (`chunk_x`, `chunk_y`): les tuiles de chaque région, les fondus entre régions, les ombres le long des murs, puis le décor.
+fn bake_chunk(def: &LevelDef, room: &Room, sources: &BakeSources, chunk_x: u32, chunk_y: u32) -> Vec<u8> {
+    let size = room.size();
+    let (cols, rows) = ((size.x - chunk_x).min(CHUNK), (size.y - chunk_y).min(CHUNK));
+    let (source, source_width) = (sources.tiles, sources.tiles_width);
+    let (decor_source, decor_width) = (sources.decor, sources.decor_width);
+    let tile_px = TILE_CELL as usize;
+    let width = cols as usize * tile_px;
+    let mut pixels = vec![0u8; width * rows as usize * tile_px * 4];
+    for row in 0..rows {
+        // La première ligne de l'image est le haut du bloc.
+        let y = chunk_y + rows - 1 - row;
+        for col in 0..cols {
+            let x = chunk_x + col;
+            let (xi, yi) = (x as i32, y as i32);
+            let tile_row = rank(def.region_at(xi, yi));
+            let column = tile_column(x, y, tile_row, room.tile(xi, yi) == Tile::Wall, room.tile(xi, yi - 1) == Tile::Floor);
+            let origin = (row as usize * tile_px * width + col as usize * tile_px) * 4;
+            for line in 0..tile_px {
+                let from = ((tile_row * TILE_CELL as usize + line) * source_width + column * tile_px) * 4;
+                let to = origin + line * width * 4;
+                pixels[to..to + tile_px * 4].copy_from_slice(&source[from..from + tile_px * 4]);
+            }
+            // Fondu avec les voisins qui empruntent le décor d'une autre région: au bord, la tuile prend peu à peu l'aspect
+            // du voisin (le bord est irrégulier), au lieu d'une coupure nette.
+            let wall = room.tile(xi, yi) == Tile::Wall;
+            for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, 1), (0, -1)] {
+                let (nx, ny) = (xi + dx, yi + dy);
+                if nx < 0 || ny < 0 || nx >= size.x as i32 || ny >= size.y as i32 || (room.tile(nx, ny) == Tile::Wall) != wall {
+                    continue;
+                }
+                let neighbor_row = rank(def.region_at(nx, ny));
+                if neighbor_row == tile_row {
+                    continue;
+                }
+                let neighbor_column = tile_column(x, y, neighbor_row, wall, room.tile(xi, yi - 1) == Tile::Floor);
+                for py in 0..tile_px {
+                    for px in 0..tile_px {
+                        // Distance au bord partagé, en pixels, et irrégularité du fondu (par blocs de 2 pixels).
+                        let edge = match (dx, dy) {
+                            (-1, 0) => px,
+                            (1, 0) => tile_px - 1 - px,
+                            (0, 1) => py,
+                            _ => tile_px - 1 - py,
+                        } as f32;
+                        let noise = edge_noise(x, y, px / 2, py / 2);
+                        let reach = TRANSITION_REACH * (0.45 + 0.9 * noise);
+                        if edge >= reach {
+                            continue;
+                        }
+                        let weight = 0.5 * (1.0 - edge / reach);
+                        let from = ((neighbor_row * TILE_CELL as usize + py) * source_width + neighbor_column * tile_px + px) * 4;
+                        let to = origin + (py * width + px) * 4;
+                        for channel in 0..3 {
+                            let mixed = pixels[to + channel] as f32 * (1.0 - weight) + source[from + channel] as f32 * weight;
+                            pixels[to + channel] = (mixed + 0.5) as u8;
+                        }
+                    }
+                }
+            }
+            // Ombre portée sur le sol le long d'un mur: au-dessus (face du mur) et sur les côtés.
+            if room.tile(xi, yi) == Tile::Floor {
+                let mut shade = |top: usize, bottom: usize, left: usize, right: usize, alpha: f32| {
+                    shade_pixels(&mut pixels, origin, width, (top, bottom, left, right), alpha);
+                };
+                let unit = tile_px / 16;
+                if room.tile(xi, yi + 1) == Tile::Wall {
+                    shade(0, 6 * unit, 0, tile_px, 0.4);
+                    shade(6 * unit, 8 * unit, 0, tile_px, 0.2);
+                }
+                if room.tile(xi - 1, yi) == Tile::Wall {
+                    shade(0, tile_px, 0, 3 * unit, 0.3);
+                }
+                if room.tile(xi + 1, yi) == Tile::Wall {
+                    shade(0, tile_px, tile_px - 3 * unit, tile_px, 0.3);
+                }
+            }
+        }
+    }
+    // Le décor posé au sol (herbes, cailloux, flaques...) se mêle aux tuiles du bloc.
+    let chunk_origin = Vec2::new(chunk_x as f32, (chunk_y + rows) as f32);
+    for decor in def.decor.iter().filter(|d| {
+        d.at.x >= chunk_x as f32 - 1.0 && d.at.x < (chunk_x + cols) as f32 + 1.0 && d.at.y >= chunk_y as f32 - 1.0 && d.at.y < (chunk_y + rows) as f32 + 1.0
+    }) {
+        // Coin haut-gauche de la case de 96 px (deux tuiles), en pixels de l'image du bloc (y vers le bas).
+        let left = ((decor.at.x - chunk_origin.x) * tile_px as f32).round() as i32 - DECOR_CELL as i32 / 2;
+        let top = ((chunk_origin.y - decor.at.y) * tile_px as f32).round() as i32 - DECOR_CELL as i32 / 2;
+        let (column, row) = (decor.kind.column(), (decor.variant % DECOR_VARIANTS) as usize);
+        for py in 0..DECOR_CELL {
+            let y = top + py as i32;
+            if y < 0 || y >= (rows as usize * tile_px) as i32 {
+                continue;
+            }
+            for px in 0..DECOR_CELL {
+                let x = left + px as i32;
+                if x < 0 || x >= width as i32 {
+                    continue;
+                }
+                let from = ((row * DECOR_CELL + py) * decor_width + column * DECOR_CELL + px) * 4;
+                let alpha = decor_source[from + 3] as f32 / 255.0;
+                if alpha <= 0.0 {
+                    continue;
+                }
+                let to = (y as usize * width + x as usize) * 4;
+                for channel in 0..3 {
+                    let mixed = pixels[to + channel] as f32 * (1.0 - alpha) + decor_source[from + channel] as f32 * alpha;
+                    pixels[to + channel] = (mixed + 0.5) as u8;
+                }
+            }
+        }
+    }
+    pixels
+}
+
 /// Reconstruit la carte quand une expédition arrive du serveur: la graine suffit à la regénérer.
 /// Un mur dont la tuile du dessous est du sol montre sa face de briques.
 fn rebuild_world(
@@ -683,6 +827,11 @@ fn rebuild_world(
     };
     *waiting = false;
     let (source, source_width, format) = (sheet.data.clone().unwrap_or_default(), sheet.width() as usize, sheet.texture_descriptor.format);
+    let Some(decor_sheet) = images.get(&art.decor).filter(|image| image.data.is_some()) else {
+        *waiting = true;
+        return;
+    };
+    let (decor_source, decor_width) = (decor_sheet.data.clone().unwrap_or_default(), decor_sheet.width() as usize);
     info!("building level {} ({:?})", expedition.level, expedition.region);
     for entity in &old_tiles {
         commands.entity(entity).despawn();
@@ -690,53 +839,22 @@ fn rebuild_world(
     let def = castle_shared::level_def(expedition.level);
     let dungeon = def.to_dungeon().unwrap_or_else(|e| panic!("niveau {}: {e}", expedition.level));
     let room = &dungeon.room;
-    let rank = |region: Region| Region::ALL.iter().position(|r| *r == region).unwrap_or(0);
     // Le décor d'ensemble (décalques...) suit la région du niveau; chaque tuile peut emprunter les briques d'une autre.
     let region_row = rank(expedition.region);
     let size = room.size();
     // Le sol et les murs sont assemblés en grands blocs de `CHUNK` x `CHUNK` tuiles (une image et une entité par bloc, au lieu
     // d'une entité par tuile): c'est ce qui rend le jeu fluide sur les petits appareils.
+    let sources = BakeSources { tiles: &source, tiles_width: source_width, decor: &decor_source, decor_width };
     for chunk_y in (0..size.y).step_by(CHUNK as usize) {
         for chunk_x in (0..size.x).step_by(CHUNK as usize) {
             let (cols, rows) = ((size.x - chunk_x).min(CHUNK), (size.y - chunk_y).min(CHUNK));
-            let tile_px = TILE_CELL as usize;
-            let width = cols as usize * tile_px;
-            let mut pixels = vec![0u8; width * rows as usize * tile_px * 4];
-            for row in 0..rows {
-                // La première ligne de l'image est le haut du bloc.
-                let y = chunk_y + rows - 1 - row;
-                for col in 0..cols {
-                    let x = chunk_x + col;
-                    let (xi, yi) = (x as i32, y as i32);
-                    let tile_row = rank(def.region_at(xi, yi));
-                    let column = tile_column(x, y, tile_row, room.tile(xi, yi) == Tile::Wall, room.tile(xi, yi - 1) == Tile::Floor);
-                    let origin = (row as usize * tile_px * width + col as usize * tile_px) * 4;
-                    for line in 0..tile_px {
-                        let from = ((tile_row * TILE_CELL as usize + line) * source_width + column * tile_px) * 4;
-                        let to = origin + line * width * 4;
-                        pixels[to..to + tile_px * 4].copy_from_slice(&source[from..from + tile_px * 4]);
-                    }
-                    // Ombre portée sur le sol le long d'un mur: au-dessus (face du mur) et sur les côtés.
-                    if room.tile(xi, yi) == Tile::Floor {
-                        let mut shade = |top: usize, bottom: usize, left: usize, right: usize, alpha: f32| {
-                            shade_pixels(&mut pixels, origin, width, (top, bottom, left, right), alpha);
-                        };
-                        let unit = tile_px / 16;
-                        if room.tile(xi, yi + 1) == Tile::Wall {
-                            shade(0, 6 * unit, 0, tile_px, 0.4);
-                            shade(6 * unit, 8 * unit, 0, tile_px, 0.2);
-                        }
-                        if room.tile(xi - 1, yi) == Tile::Wall {
-                            shade(0, tile_px, 0, 3 * unit, 0.3);
-                        }
-                        if room.tile(xi + 1, yi) == Tile::Wall {
-                            shade(0, tile_px, tile_px - 3 * unit, tile_px, 0.3);
-                        }
-                    }
-                }
-            }
+            let pixels = bake_chunk(def, room, &sources, chunk_x, chunk_y);
             let image = Image::new(
-                bevy::render::render_resource::Extent3d { width: width as u32, height: (rows as usize * tile_px) as u32, depth_or_array_layers: 1 },
+                bevy::render::render_resource::Extent3d {
+                    width: cols * TILE_CELL,
+                    height: rows * TILE_CELL,
+                    depth_or_array_layers: 1,
+                },
                 bevy::render::render_resource::TextureDimension::D2,
                 pixels,
                 format,
@@ -991,5 +1109,61 @@ mod tests {
             }
         }
     }
-}
 
+    fn read_png(path: &std::path::Path) -> (Vec<u8>, usize) {
+        let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()));
+        let mut reader = decoder.read_info().unwrap();
+        let mut data = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut data).unwrap();
+        assert_eq!(info.color_type, png::ColorType::Rgba, "{}", path.display());
+        data.truncate(info.buffer_size());
+        (data, info.width as usize)
+    }
+
+    /// Assemble tout un niveau comme le jeu le fait; avec `CASTLE_BAKE_PNG=<dossier>`, l'image est écrite pour être regardée.
+    fn bake_level(def: &LevelDef, sources: &BakeSources) -> (Vec<u8>, usize, usize) {
+        let room = def.to_dungeon().unwrap().room;
+        let size = room.size();
+        let (width, height) = (size.x as usize * TILE_CELL as usize, size.y as usize * TILE_CELL as usize);
+        let mut whole = vec![0u8; width * height * 4];
+        for chunk_y in (0..size.y).step_by(CHUNK as usize) {
+            for chunk_x in (0..size.x).step_by(CHUNK as usize) {
+                let (cols, rows) = ((size.x - chunk_x).min(CHUNK) as usize, (size.y - chunk_y).min(CHUNK) as usize);
+                let pixels = bake_chunk(def, &room, sources, chunk_x, chunk_y);
+                let tile = TILE_CELL as usize;
+                for line in 0..rows * tile {
+                    // Le bloc part du bas de la carte; sa première ligne est son haut.
+                    let top = height - (chunk_y as usize + rows) * tile;
+                    let to = ((top + line) * width + chunk_x as usize * tile) * 4;
+                    whole[to..to + cols * tile * 4].copy_from_slice(&pixels[line * cols * tile * 4..(line + 1) * cols * tile * 4]);
+                }
+            }
+        }
+        (whole, width, height)
+    }
+
+    #[test]
+    fn baking_a_level_adds_decor_and_blends_regions() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/art/medieval");
+        let (tiles, tiles_width) = read_png(&root.join("tiles.png"));
+        let (decor, decor_width) = read_png(&root.join("decor.png"));
+        let sources = BakeSources { tiles: &tiles, tiles_width, decor: &decor, decor_width };
+        for level in [1, 4, 6] {
+            let def = castle_shared::level_def(level);
+            let (whole, width, height) = bake_level(def, &sources);
+            assert!(whole.chunks(4).all(|p| p[3] == 255), "niveau {level}: le sol est opaque");
+            if let Some(dir) = std::env::var_os("CASTLE_BAKE_PNG") {
+                let path = std::path::Path::new(&dir).join(format!("niveau_{level}.png"));
+                let mut encoder = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path).unwrap()), width as u32, height as u32);
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+                encoder.write_header().unwrap().write_image_data(&whole).unwrap();
+            }
+            // Sans décor, l'image est différente.
+            let mut bare = def.clone();
+            bare.decor.clear();
+            let (without, ..) = bake_level(&bare, &sources);
+            assert_ne!(whole, without, "niveau {level}: le décor se voit");
+        }
+    }
+}

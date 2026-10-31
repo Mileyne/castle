@@ -4,11 +4,13 @@ use bevy::{ecs::entity::MapEntities, prelude::*};
 
 mod dungeon;
 pub mod campaign;
+pub mod decor;
 pub mod level;
 pub mod save;
 pub mod tileart;
 pub use dungeon::*;
 pub use campaign::{BOSS_EVERY, LEVEL_COUNT, is_boss_level, level_def, level_file};
+pub use decor::{DECOR_VARIANTS, Decor, DecorKind};
 pub use level::{LEVEL_FORMAT, LevelDef, Thing};
 use bevy_replicon::prelude::*;
 use serde::{Deserialize, Serialize};

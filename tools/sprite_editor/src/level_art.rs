@@ -42,6 +42,8 @@ pub struct LevelArt {
     /// La première image de chaque objet (dans l'ordre des lignes `object::*` du client).
     objects: Vec<TextureHandle>,
     exits: TextureHandle,
+    /// La planche du décor au sol (sortes en colonnes, variantes en lignes, cases de deux tuiles).
+    decor: TextureHandle,
     /// Un monstre de face (repos), dans l'ordre de `MonsterKind`.
     monsters: Vec<(MonsterKind, TextureHandle)>,
 }
@@ -108,6 +110,7 @@ impl LevelArt {
     pub fn load(ctx: &egui::Context, repo: &Path) -> Option<Self> {
         let dir = repo.join("client/assets/art/medieval");
         let tiles = load(&dir.join("tiles.png"))?;
+        let decor = load(&dir.join("decor.png"))?;
         let exits = load_basis(&dir.join("exits.basis"))?;
         let monsters = [
             (MonsterKind::Skeleton, "skeleton"),
@@ -139,12 +142,21 @@ impl LevelArt {
         Some(Self {
             tiles: texture(ctx, "level_tiles", &tiles, TextureOptions::NEAREST),
             objects,
+            decor: texture(ctx, "level_decor", &decor, TextureOptions::NEAREST),
             exits: texture(ctx, "level_exits", &exits, TextureOptions::LINEAR),
             monsters,
         })
     }
 
-    /// Une tuile de la planche (`column` dans la ligne de la région).
+    /// Le dessin d'un élément de décor.
+    pub fn decor(&self, kind: castle_shared::DecorKind, variant: u8) -> (&TextureHandle, Rect) {
+        let (kinds, variants) = (castle_shared::DecorKind::ALL.len() as f32, castle_shared::DECOR_VARIANTS as f32);
+        let (column, row) = (kind.column() as f32, f32::from(variant % castle_shared::DECOR_VARIANTS));
+        let uv = Rect::from_min_max(pos2(column / kinds, row / variants), pos2((column + 1.0) / kinds, (row + 1.0) / variants));
+        (&self.decor, uv)
+    }
+
+    /// Une tuile de la planche (`column dans la ligne de la région).
     pub fn tile(&self, region: Region, column: usize) -> (&TextureHandle, Rect) {
         let row = Region::ALL.iter().position(|r| *r == region).unwrap_or(0) as u32;
         (

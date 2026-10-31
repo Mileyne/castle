@@ -1910,6 +1910,23 @@ pub fn export_levels(dir: &std::path::Path, force: bool, only: Option<&[u32]>) -
     Ok(())
 }
 
+/// Sème du décor (herbes, cailloux, flaques...) dans les niveaux de la campagne qui n'en ont pas encore, ou dans tous avec `force`.
+pub fn decorate_levels(dir: &std::path::Path, force: bool) -> std::io::Result<()> {
+    for level in 1..=LEVEL_COUNT {
+        let path = dir.join(level_file(level));
+        let text = std::fs::read_to_string(&path)?;
+        let mut def = LevelDef::parse(&text).map_err(std::io::Error::other)?;
+        if !def.decor.is_empty() && !force {
+            println!("niveau {level}: a déjà du décor, laissé tel quel");
+            continue;
+        }
+        def.decor = def.scatter_decor(0xDEC0 + u64::from(level));
+        std::fs::write(&path, def.to_ron())?;
+        println!("niveau {level}: {} éléments de décor", def.decor.len());
+    }
+    Ok(())
+}
+
 /// Remplit un nouveau château généré: tirage au sort puis pose (utilisé par les tests; la campagne lit des fichiers).
 #[cfg(test)]
 fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, first: bool, rng: &mut Rng) {
