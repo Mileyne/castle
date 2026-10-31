@@ -75,23 +75,14 @@ impl Plugin for CameraPlugin {
     }
 }
 
-fn setup_camera(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<crate::lighting::LightingMaterial>>,
-) {
-    let overlay = crate::lighting::overlay(&mut meshes, &mut materials);
-    commands
-        .spawn((
-            Camera2d,
-            Projection::from(OrthographicProjection {
-                scaling_mode: ScalingMode::WindowSize,
-                ..OrthographicProjection::default_2d()
-            }),
-        ))
-        .with_children(|camera| {
-            camera.spawn(overlay);
-        });
+fn setup_camera(mut commands: Commands) {
+    commands.spawn((
+        Camera2d,
+        Projection::from(OrthographicProjection {
+            scaling_mode: ScalingMode::WindowSize,
+            ..OrthographicProjection::default_2d()
+        }),
+    ));
 }
 
 fn follow_hero(

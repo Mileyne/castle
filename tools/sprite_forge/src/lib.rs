@@ -13,6 +13,7 @@ mod heroes_gore;
 mod heroes_medieval;
 mod monsters;
 mod photo;
+mod monsters_boss;
 mod monsters_gore;
 mod monsters_more;
 mod outdoor;
@@ -32,12 +33,18 @@ pub use editor_api::*;
 pub use shapes::Theme;
 use render::{Camera, render};
 
+/// Niveau de détail des sprites (héros, ennemis, objets, sorties): 1 = cases de 96 pixels, 3 = cases de 288. Tout ce qui est
+/// dessiné en pixels en dépend (`FORGE_DETAIL=2` à la compilation produit le jeu de planches « léger » pour les appareils à peu de mémoire); le jeu affiche les sprites à la même taille quel que soit ce niveau.
+const DETAIL: usize = match option_env!("FORGE_DETAIL") {
+    Some(digit) => (digit.as_bytes()[0] - b'0') as usize,
+    None => 3,
+};
 /// Côté d'une case, en pixels.
-const CELL: usize = 96;
+const CELL: usize = 96 * DETAIL;
 /// Côté d'une tuile du décor, en pixels.
 const TILE_CELL: usize = 48;
 /// Case d'une sortie de niveau, et nombre d'images de son animation.
-const EXIT_CELL: usize = 192;
+const EXIT_CELL: usize = 192 * DETAIL;
 const EXIT_FRAMES: usize = 10;
 /// Les cycles sont rendus pour une lecture à 25 images par seconde: repos d'une seconde, marche dont le cycle dure
 /// 16 images (25 images/s à 1,6 cycle/s), attaque de 0,4 s.
@@ -48,11 +55,15 @@ const ATTACK_FRAMES: usize = 10;
 /// Images de repos et de marche, puis images par direction pour les ennemis comme pour les héros (en plus, l'attaque).
 const MOVE_FRAMES: usize = IDLE_FRAMES + WALK_FRAMES;
 const FRAMES: usize = MOVE_FRAMES + ATTACK_FRAMES;
-const HERO_FRAMES: usize = FRAMES;
 /// Pixels par mètre du modèle, et inclinaison de la vue.
-const SCALE: f32 = 40.0;
+const SCALE: f32 = 40.0 * DETAIL as f32;
+/// Les tuiles du décor ne dépendent pas du niveau de détail des sprites.
+const TILE_SCALE: f32 = 40.0;
 const ELEVATION: f32 = 0.42;
-const FEET_Y: f32 = 88.0;
+const FEET_Y: f32 = 88.0 * DETAIL as f32;
+/// Colonnes des planches d'un personnage ou d'un monstre: une direction fait trois lignes (51 images), pour que les planches
+/// restent de taille raisonnable (un fichier par personnage, loin des limites de GitHub et des cartes graphiques).
+const SHEET_COLUMNS: usize = 17;
 const SUPERSAMPLE: usize = 3;
 
 /// Ordre des lignes: angle croissant depuis l'est, dans le sens trigonométrique (le haut de l'écran est le nord).
@@ -150,28 +161,121 @@ fn sheet_of_cells(rows: usize, cols: usize, cell: usize, draw: impl Fn(usize, us
     sheet
 }
 
-/// Rend toutes les images d'une classe: DIRECTIONS lignes de FRAMES colonnes.
-fn class_sheet(class: Class, theme: Theme) -> Vec<u8> {
-    let (w, h) = (HERO_FRAMES * CELL, DIRECTIONS * CELL);
-    let mut sheet = vec![0u8; w * h * 4];
-    for direction in 0..DIRECTIONS {
-        let cam = camera(direction);
-        for frame in 0..HERO_FRAMES {
-            let parts = build(class, frame_pose(frame), theme);
-            let image = to_rgba8(&render(&parts, &cam, SUPERSAMPLE));
-            for y in 0..CELL {
-                let dst = ((direction * CELL + y) * w + frame * CELL) * 4;
-                sheet[dst..dst + CELL * 4].copy_from_slice(&image[y * CELL * 4..(y + 1) * CELL * 4]);
+/// Les cases (RGBA, `CELL` x `CELL`) d'un personnage ou d'un monstre: les huit directions à la suite (direction * FRAMES +
+/// image). `build` donne les pièces d'une pose.
+fn character_cells(build: impl Fn(Pose) -> Vec<render::Part> + Sync) -> Vec<Vec<u8>> {
+    let total = DIRECTIONS * FRAMES;
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let per = total.div_ceil(threads);
+    let build = &build;
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..threads)
+            .map(|t| {
+                scope.spawn(move || {
+                    (t * per..((t + 1) * per).min(total))
+                        .map(|index| {
+                            let (direction, frame) = (index / FRAMES, index % FRAMES);
+                            to_rgba8(&render(&build(frame_pose(frame)), &camera(direction), SUPERSAMPLE))
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+    })
+}
+
+/// Zone de la case qui contient quelque chose dans au moins une image: le reste est transparent partout et n'est pas stocké.
+#[derive(Clone, Copy, Debug)]
+struct Crop {
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+}
+
+/// La plus petite zone qui contient tous les pixels non transparents de `cells`, arrondie au multiple de 4 le plus proche
+/// (les textures compressées sont faites de blocs de 4 x 4 pixels).
+fn union_crop(cells: &[Vec<u8>], cell: usize) -> Crop {
+    let (mut x0, mut y0, mut x1, mut y1) = (cell, cell, 0, 0);
+    for image in cells {
+        for y in 0..cell {
+            for x in 0..cell {
+                if image[(y * cell + x) * 4 + 3] != 0 {
+                    x0 = x0.min(x);
+                    y0 = y0.min(y);
+                    x1 = x1.max(x + 1);
+                    y1 = y1.max(y + 1);
+                }
             }
         }
     }
-    sheet
+    if x1 <= x0 || y1 <= y0 {
+        return Crop { x: 0, y: 0, w: 4, h: 4 };
+    }
+    // Une petite marge, puis des dimensions multiples de 4 (en gardant la zone dans la case).
+    let (x0, y0, x1, y1) = (x0.saturating_sub(2), y0.saturating_sub(2), (x1 + 2).min(cell), (y1 + 2).min(cell));
+    let round = |lo: usize, hi: usize| {
+        let size = (hi - lo).div_ceil(4) * 4;
+        let start = lo.min(cell.saturating_sub(size));
+        (start, size.min(cell))
+    };
+    let ((x, w), (y, h)) = (round(x0, x1), round(y0, y1));
+    Crop { x, y, w, h }
+}
+
+/// Assemble des cases rognées en une planche de `cols` colonnes, et la renvoie avec ses dimensions.
+fn pack_cells(cells: &[Vec<u8>], cell: usize, crop: Crop, cols: usize) -> (Vec<u8>, usize, usize) {
+    let rows = cells.len().div_ceil(cols);
+    let (w, h) = (cols * crop.w, rows * crop.h);
+    let mut sheet = vec![0u8; w * h * 4];
+    for (i, image) in cells.iter().enumerate() {
+        let (col, row) = (i % cols, i / cols);
+        for y in 0..crop.h {
+            let src = ((crop.y + y) * cell + crop.x) * 4;
+            let dst = ((row * crop.h + y) * w + col * crop.w) * 4;
+            sheet[dst..dst + crop.w * 4].copy_from_slice(&image[src..src + crop.w * 4]);
+        }
+    }
+    (sheet, w, h)
+}
+
+/// Écrit une image en texture compressée (Basis Universal, UASTC): le jeu la décompresse vers le format de la carte graphique
+/// (BC7, ASTC ou ETC2), où elle occupe 8 bits par pixel au lieu de 32.
+fn write_basis(path: &Path, width: usize, height: usize, rgba: &[u8]) {
+    use basis_universal::{BasisTextureFormat, ColorSpace, Compressor, CompressorParams, UASTC_QUALITY_DEFAULT};
+    let mut params = CompressorParams::new();
+    params.set_basis_format(BasisTextureFormat::UASTC4x4);
+    params.set_generate_mipmaps(false);
+    params.set_color_space(ColorSpace::Srgb);
+    params.set_uastc_quality_level(UASTC_QUALITY_DEFAULT);
+    params.source_image_mut(0).init(rgba, width as u32, height as u32, 4);
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get() as u32);
+    let mut compressor = Compressor::new(threads);
+    // SAFETY: les paramètres sont valides (une seule image RGBA, format UASTC); c'est le contrat des liaisons de basis-universal.
+    unsafe {
+        compressor.init(&params);
+        compressor.process().unwrap_or_else(|e| panic!("{}: compression impossible ({e:?})", path.display()));
+    }
+    std::fs::write(path, compressor.basis_file()).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+}
+
+/// Ce que le jeu doit savoir d'une planche rognée: la taille d'une case, et où cette zone se trouvait dans la case d'origine.
+struct SheetMeta {
+    dir: &'static str,
+    name: String,
+    crop: Crop,
+}
+
+/// Nom du fichier d'un personnage, d'un monstre ou d'un objet (le jeu applique la même règle).
+fn file_name(name: impl std::fmt::Debug) -> String {
+    format!("{name:?}").to_lowercase()
 }
 
 /// Caméra d'un grand motif de tuiles (`MACRO` x `MACRO` tuiles), vue de dessus (`FRAC_PI_2`) ou de face (0).
 fn macro_camera(elevation: f32) -> Camera {
     let size = tiles::MACRO * TILE_CELL;
-    Camera { yaw: 0.0, elevation, scale: SCALE, size, feet_y: size as f32 / 2.0, outline: false, shadow: false }
+    Camera { yaw: 0.0, elevation, scale: TILE_SCALE, size, feet_y: size as f32 / 2.0, outline: false, shadow: false }
 }
 
 /// Grands motifs d'une région, tels que la génération les rend (graines comprises): l'éditeur les montre à l'identique.
@@ -203,7 +307,7 @@ fn prop_camera(prop: props::Prop) -> Camera {
     if prop.is_wall_mounted() {
         return Camera { yaw: 0.0, elevation: 0.0, scale: SCALE, size: CELL, feet_y: CELL as f32 / 2.0, outline: true, shadow: false };
     }
-    let scale = if matches!(prop, props::Prop::Stairs | props::Prop::Rune) { 31.0 } else { SCALE };
+    let scale = if matches!(prop, props::Prop::Stairs | props::Prop::Rune) { 31.0 * DETAIL as f32 } else { SCALE };
     Camera { yaw: 0.0, elevation: ELEVATION, scale, size: CELL, feet_y: FEET_Y, outline: true, shadow: true }
 }
 
@@ -214,40 +318,40 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
     tuning::set_active(tuning::load(theme));
     let retouched = overrides::load_all(theme);
 
-    // Une classe par fil d'exécution.
-    let sheets: Vec<Vec<u8>> = std::thread::scope(|scope| {
-        let handles: Vec<_> = CLASSES.iter().map(|&class| scope.spawn(move || class_sheet(class, theme))).collect();
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
-    });
-
-    // Planche finale: les classes empilées (ligne = classe * 8 + direction).
-    let (w, class_h) = (HERO_FRAMES * CELL, DIRECTIONS * CELL);
-    let mut all = Vec::with_capacity(w * class_h * 4 * CLASSES.len());
-    for sheet in &sheets {
-        all.extend_from_slice(sheet);
+    // Héros, ennemis et objets: un fichier par personnage, monstre ou objet, rogné à ce qu'il dessine, et compressé. Les
+    // dimensions rognées sont écrites dans `sprite_meta.rs`, que le jeu compile.
+    for dir in ["heroes", "monsters", "objects"] {
+        std::fs::create_dir_all(out_dir.join(dir)).unwrap();
     }
-    write_png(&out_dir.join("heroes.png"), w, class_h * CLASSES.len(), &all);
-
-    // Ennemis: 8 directions par monstre, même découpage que les héros.
-    let monster_sheet = sheet_of_cells(
-        monsters::MONSTERS.len() * DIRECTIONS,
-        FRAMES,
-        CELL,
-        |row, col| {
-            let monster = monsters::MONSTERS[row / DIRECTIONS];
-            render(&monsters::build(monster, frame_pose(col), theme), &camera(row % DIRECTIONS), SUPERSAMPLE)
-        },
-    );
-    write_png(&out_dir.join("monsters.png"), FRAMES * CELL, monsters::MONSTERS.len() * DIRECTIONS * CELL, &monster_sheet);
-
-    // Objets: une ligne par objet, vingt images d'animation, vus de face comme les héros.
-    let object_sheet = sheet_of_cells(props::PROPS.len(), props::FRAMES, CELL, |row, col| {
-        let t = col as f32 / props::FRAMES as f32;
-        let prop = props::PROPS[row];
-        let cam = prop_camera(prop);
-        render(&props::build(prop, t, theme), &cam, SUPERSAMPLE)
-    });
-    write_png(&out_dir.join("objects.png"), props::FRAMES * CELL, props::PROPS.len() * CELL, &object_sheet);
+    let mut metas: Vec<SheetMeta> = Vec::new();
+    let mut save = |dir: &'static str, name: String, cells: Vec<Vec<u8>>, cols: usize| {
+        let crop = union_crop(&cells, CELL);
+        let (sheet, w, h) = pack_cells(&cells, CELL, crop, cols);
+        write_basis(&out_dir.join(dir).join(format!("{name}.basis")), w, h, &sheet);
+        println!("{dir}/{name}: cases de {}x{} px ({}x{} dans la case d'origine)", crop.w, crop.h, crop.x, crop.y);
+        metas.push(SheetMeta { dir, name, crop });
+    };
+    for &class in CLASSES.iter() {
+        save("heroes", file_name(class), character_cells(|pose| build(class, pose, theme)), SHEET_COLUMNS);
+    }
+    for &monster in monsters::MONSTERS.iter() {
+        save("monsters", file_name(monster), character_cells(|pose| monsters::build(monster, pose, theme)), SHEET_COLUMNS);
+    }
+    // Objets: une ligne de vingt images d'animation, vus de face comme les héros.
+    for &prop in props::PROPS.iter() {
+        let cells: Vec<Vec<u8>> = (0..props::FRAMES)
+            .map(|col| to_rgba8(&render(&props::build(prop, col as f32 / props::FRAMES as f32, theme), &prop_camera(prop), SUPERSAMPLE)))
+            .collect();
+        save("objects", file_name(prop), cells, props::FRAMES);
+    }
+    let mut source = String::from("//! Généré par `tools/sprite_forge` (ne pas modifier à la main): taille des cases rognées de chaque planche, et position de cette\n//! zone dans la case d'origine de CELL pixels.\n\n");
+    source += &format!("/// Côté de la case d'origine, en pixels.\npub const CELL: u32 = {CELL};\n\n");
+    source += "/// (dossier, nom, x, y, largeur, hauteur) de la zone conservée dans chaque planche.\npub const SHEETS: &[(&str, &str, u32, u32, u32, u32)] = &[\n";
+    for m in &metas {
+        source += &format!("    (\"{}\", \"{}\", {}, {}, {}, {}),\n", m.dir, m.name, m.crop.x, m.crop.y, m.crop.w, m.crop.h);
+    }
+    source += "];\n";
+    std::fs::write(out_dir.join("sprite_meta.rs"), source).unwrap();
 
     // Sorties de niveau: dessinées en grand (cases de 192 px, éléments agrandis), avec un cycle de vacillement plus court.
     let exit_cell = EXIT_CELL;
@@ -256,7 +360,7 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
         let t = col as f32 / EXIT_FRAMES as f32;
         render(&props::build_exit(props::EXITS[row], t, theme), &exit_camera, SUPERSAMPLE)
     });
-    write_png(&out_dir.join("exits.png"), EXIT_FRAMES * exit_cell, props::EXITS.len() * exit_cell, &exit_sheet);
+    write_basis(&out_dir.join("exits.basis"), EXIT_FRAMES * exit_cell, props::EXITS.len() * exit_cell, &exit_sheet);
 
     // Tuiles: le sol et les faces de mur sont rendus en grands motifs (4x4 tuiles, 4x1 tuiles) puis découpés,
     // pour que les dalles et les blocs traversent les bordures de tuiles. Une ligne par région.
@@ -403,17 +507,6 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
                 zoomed(&format!("{name}_{region}.png"), out_w, rows * TILE_CELL, &out, 2);
             }
         }
-        zoomed("objects_x1.png", props::FRAMES * CELL, props::PROPS.len() * CELL, &object_sheet, 1);
-        // Squelette (lignes 0 à 7) et chauve-souris (8 à 15): première image de repos de quatre directions.
-        let mut picks = vec![0u8; 8 * CELL * CELL * 4];
-        for (slot, row) in [6usize, 7, 0, 2, 14, 15, 8, 10].into_iter().enumerate() {
-            for y in 0..CELL {
-                let src = ((row * CELL + y) * FRAMES * CELL) * 4;
-                let dst = (y * 8 * CELL + slot * CELL) * 4;
-                picks[dst..dst + CELL * 4].copy_from_slice(&monster_sheet[src..src + CELL * 4]);
-            }
-        }
-        zoomed("monsters_x2.png", 8 * CELL, CELL, &picks, 2);
         // Séquence d'attaque de chaque classe, vue de face (sud) puis de profil droit (est).
         for (i, &class) in CLASSES.iter().enumerate() {
             let zoom = 2;
@@ -461,12 +554,9 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
             }
             write_png(&dir.join(format!("closeup_{i}.png")), cw, ch, &closeup);
         }
-        for (i, sheet) in sheets.iter().enumerate() {
-            write_png(&dir.join(format!("hero_{i}.png")), w, class_h, sheet);
-        }
     }
     let _ = (PI, TAU);
-    println!("{}: heroes.png {}x{} px, {} images par direction", theme.folder(), w, class_h * CLASSES.len(), HERO_FRAMES);
+    println!("{}: cases de {CELL} px, {FRAMES} images par direction", theme.folder());
 }
 
 pub fn cli() {
@@ -486,8 +576,10 @@ pub fn cli() {
     }
     let root = PathBuf::from(args.first().expect("usage: sprite_forge <dossier de sortie> [dossier d'aperçu]"));
     // Un sous-dossier par thème: manga/ et gore/.
-    for theme in Theme::ALL {
-        let preview = args.get(1).map(|p| PathBuf::from(p).join(theme.folder()));
+    // Le jeu n'utilise que le style médiéval; `--all` régénère aussi les anciens styles.
+    let themes: &[Theme] = if args.iter().any(|a| a == "--all") { &Theme::ALL } else { &[Theme::Medieval] };
+    for &theme in themes {
+        let preview = args.get(1).filter(|p| !p.starts_with("--")).map(|p| PathBuf::from(p).join(theme.folder()));
         generate(theme, &root.join(theme.folder()), preview.as_deref());
     }
 }

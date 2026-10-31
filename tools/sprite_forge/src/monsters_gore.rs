@@ -19,7 +19,12 @@ pub fn build(monster: Monster, pose: Pose) -> Vec<Part> {
         Monster::Bat => fleshbat(pose),
         Monster::Wolf => scaled(crate::monsters_more::wolf(pose, true), 1.7),
         // Les trois autres ne changent pas de style: leur allure est déjà brutale.
-        Monster::Goblin | Monster::Orc | Monster::Ghoul => crate::monsters::build_manga(monster, pose),
+        Monster::Goblin
+        | Monster::Orc
+        | Monster::Ghoul
+        | Monster::Warg
+        | Monster::Troll
+        | Monster::Lich => crate::monsters::build_manga(monster, pose),
     }
 }
 

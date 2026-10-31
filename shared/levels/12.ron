@@ -201,6 +201,10 @@
   ),
   quest: Some((Rescue, 2)),
   things: [
+    Monster(
+      kind: Lich,
+      at: (34.5, 7.5),
+    ),
     Generator(
       at: (56.5, 11.5),
     ),
@@ -620,6 +624,12 @@
     ),
     Captive(
       at: (10.5, 38.5),
+    ),
+    Trigger(
+      node: "boss_lich",
+      at: (45.5, 6.5),
+      radius: 60.0,
+      delay: 0.5,
     ),
   ],
 )

@@ -106,3 +106,25 @@ forgebraise: Une garde violette, un mécanisme grippé, une herse... Du travail 
 ranger: Et il faudra trouver de quoi les vaincre : des cristaux, une pièce de rechange, un disque de cible. #line:castle_04
 knight: Quand tout sera réglé, la porte, elle, est pour moi. Rassemblez ce qu'il faut. #line:castle_05
 ===
+===
+title: boss_warg
+---
+knight: Cette taille... Ce n'est plus un loup. C'est le chef de la meute. #line:bw_01
+ranger: Croc-Noir. Chaque fois qu'il hurle, d'autres loups accourent. Ne le laissez pas faire ! #line:bw_02
+sorcerer: Plus il est blessé, plus il en appelle. Abattons-le vite ! #line:bw_03
+forgebraise: Tous ensemble. On le met à terre. #line:bw_04
+===
+title: boss_troll
+---
+ranger: Le sol tremble... C'est Grogoth, le troll couronné des bibliothèques. #line:bt_01
+forgebraise: Il frappe le sol de ses poings. Quand le cercle rouge apparaît, sortez-en ! #line:bt_02
+sorcerer: À mi-vie, il entrera en rage et appellera ses gobelins. #line:bt_03
+knight: Je tiens son attention. Frappez-le dans le dos ! #line:bt_04
+===
+title: boss_lich
+---
+sorcerer: Mortemer, le roi-liche. Je sens sa magie d'ici. #line:bl_01
+ranger: Il garde ses distances et lâche une onde de mort. Quittez le cercle violet ! #line:bl_02
+knight: Il relèvera des squelettes. Ne vous laissez pas encercler. #line:bl_03
+forgebraise: Un dernier effort. Après lui, plus rien ne nous barre la route. #line:bl_04
+===

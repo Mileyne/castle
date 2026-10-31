@@ -230,9 +230,18 @@ pub fn outdoor_level(spec: &OutdoorSpec, seed: u64) -> LevelDef {
         for k in 0..goal as usize {
             let room = rooms[combat[(combat.len() - 1 - k % combat.len().max(1)).min(combat.len() - 1)]].clone();
             match kind {
-                QuestKind::Retrieve => things.push(Thing::Relic { at: free_point(&room, &grid, &mut rng) }),
-                QuestKind::Rescue => things.push(Thing::Captive { at: free_point(&room, &grid, &mut rng) }),
-                QuestKind::Hunt | QuestKind::Repair | QuestKind::Release | QuestKind::Unseal | QuestKind::Breach => {}
+                QuestKind::Retrieve => things.push(Thing::Relic {
+                    at: free_point(&room, &grid, &mut rng),
+                }),
+                QuestKind::Rescue => things.push(Thing::Captive {
+                    at: free_point(&room, &grid, &mut rng),
+                }),
+                QuestKind::Hunt
+                | QuestKind::Repair
+                | QuestKind::Release
+                | QuestKind::Unseal
+                | QuestKind::Breach
+                | QuestKind::Boss => {}
             }
         }
     }
@@ -275,6 +284,7 @@ pub fn outdoor_level(spec: &OutdoorSpec, seed: u64) -> LevelDef {
     }
 
     LevelDef {
+        style: Vec::new(),
         format: LEVEL_FORMAT,
         name: spec.name.to_string(),
         region: spec.region,

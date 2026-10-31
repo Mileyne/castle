@@ -19,35 +19,24 @@ pub const HERO_WALK_FRAMES: usize = 16;
 pub const HERO_ATTACK_FRAMES: usize = 10;
 /// Images par ligne, pour les héros comme pour les ennemis (repos, marche, attaque).
 const HERO_FRAMES: usize = HERO_IDLE_FRAMES + HERO_WALK_FRAMES + HERO_ATTACK_FRAMES;
-const MONSTER_FRAMES: usize = HERO_FRAMES;
 /// Cadence de toutes les animations lues à l'horloge: repos, battement d'ailes, objets (images par seconde).
 const ANIMATION_FPS: f32 = 25.0;
-/// Une ligne par monstre et par direction (six monstres, huit directions).
-const MONSTER_ROWS: u32 = 6 * 8;
 /// Durée du geste d'une attaque, en secondes (la frappe tombe vers 60 % du geste).
 const ATTACK_DURATION: f32 = 0.4;
 /// Durée du geste d'attaque d'un ennemi: plus court, il enchaîne les coups.
 const MONSTER_ATTACK_DURATION: f32 = 0.4;
-const HERO_CELL: u32 = 96;
+/// Côté d'une case d'un personnage, d'un monstre ou d'un objet dans sa planche (voir `DETAIL` dans `tools/sprite_forge`).
+
+/// Colonnes des planches de personnages et de monstres: une direction fait trois lignes (voir `tools/sprite_forge`).
+const SHEET_COLUMNS: u32 = 17;
+const SHEET_ROWS: u32 = 8 * HERO_FRAMES as u32 / SHEET_COLUMNS;
 /// Taille d'affichage d'un héros, d'un ennemi ou d'un objet, en unités du monde (la case fait 96 px d'art).
 pub const SPRITE_SIZE: f32 = 32.0;
 /// Les ennemis et les objets partagent le découpage de la planche des héros pour les ennemis (8 directions,
 /// 51 images), et 20 images d'animation par objet.
 const PROP_FRAMES: usize = 20;
-/// Colonnes d'une ligne de la planche des tuiles: 4 sols, 2 dessus de mur, 2 faces de mur (une ligne par région).
-const TILE_COLUMNS: usize = 90;
-/// Lignes de la planche des tuiles: une par région (six du château, trois extérieures).
-const TILE_ROWS: u32 = 9;
-/// Découpage d'une ligne de la planche des tuiles (identique à `tools/sprite_forge`): 3 motifs de sol de 4x4 tuiles,
-/// 2 dessus de mur de 4x4 tuiles, 2 motifs de face de mur de 4 tuiles, 2 faces décorées.
-const MACRO: u32 = 4;
-const FLOOR_PATTERNS: u32 = 3;
-const TOP_START: usize = 48;
-const TOP_PATTERNS: u32 = 2;
-const FACE_PATTERNS: u32 = 2;
-const FACE_START: usize = 80;
-const DECOR_START: usize = 88;
-const TILE_CELL: u32 = 48;
+use bevy::asset::RenderAssetUsages;
+use castle_shared::tileart::{TILE_CELL, TILE_COLUMNS, TILE_ROWS, tile_column};
 /// Distance parcourue pendant un cycle de marche complet (8 images), en unités du monde.
 const HERO_STRIDE: f32 = 44.0;
 
@@ -99,7 +88,7 @@ impl Plugin for ArtPlugin {
             .add_systems(Startup, (load_art, spawn_transition_overlay))
             .add_systems(
                 Update,
-                (start_transition, run_transition, rebuild_world, tint_tiles, animate_heroes, animate_monsters, animate_props).chain(),
+                (log_big_images, start_transition, run_transition, rebuild_world, tint_tiles, animate_heroes, animate_monsters, animate_props).chain(),
             );
     }
 }
@@ -128,19 +117,120 @@ impl Atlas {
 #[derive(Resource, Clone)]
 pub struct Art {
     pub tiles: Atlas,
-    pub heroes: Atlas,
-    pub monsters: Atlas,
-    pub objects: Atlas,
-    /// Sorties de niveau, dessinées en grand (cases de 192 px).
+    /// Sorties de niveau, dessinées en grand (cases de deux fois `CELL` pixels).
     pub exits: Atlas,
     pub projectiles: Atlas,
     pub fx: Atlas,
     pub decals: Atlas,
     /// Vignettes des quatre héros (une case de 128 px par classe).
     pub portraits: Atlas,
+    /// Une planche par personnage, par monstre et par objet, chargée à la première demande (un monstre absent du niveau ne
+    /// prend pas de mémoire graphique).
+    sheets: Sheets,
 }
 
-/// Lignes de la planche d'objets (même ordre que dans `tools/sprite_forge`).
+/// Les planches individuelles: dossier du thème, découpage de chacune, et planches déjà demandées.
+#[derive(Clone)]
+struct Sheets {
+    assets: AssetServer,
+    folder: String,
+    /// Côté de la case d'origine, en pixels (voir `sprite_meta`).
+    cell: u32,
+    /// Découpage de chaque planche (`dossier/nom`), et zone de la case d'origine qu'elle conserve.
+    layouts: std::collections::HashMap<String, (Handle<TextureAtlasLayout>, SheetCrop)>,
+    loaded: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Handle<Image>>>>,
+}
+
+/// Zone conservée dans les cases d'une planche: les images sont rognées à ce qu'elles dessinent (voir `sprite_meta`).
+#[derive(Clone, Copy)]
+struct SheetCrop {
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+}
+
+impl Sheets {
+    /// L'image de la planche `art/<thème>/<dossier>/<nom>.basis` (texture compressée, décompressée vers le format de la carte
+    /// graphique au chargement).
+    fn image(&self, dir: &str, name: &str) -> Handle<Image> {
+        let key = format!("{dir}/{name}");
+        let mut loaded = self.loaded.lock().unwrap();
+        loaded
+            .entry(key.clone())
+            .or_insert_with(|| {
+                self.assets
+                    .load_builder()
+                    .with_settings(|settings: &mut ImageLoaderSettings| {
+                        settings.sampler = ImageSampler::linear();
+                        // Les planches ne servent qu'à la carte graphique: on ne garde pas de copie en mémoire centrale.
+                        settings.asset_usage = RenderAssetUsages::RENDER_WORLD;
+                    })
+                    .load(format!("art/{}/{key}.basis", self.folder))
+            })
+            .clone()
+    }
+
+    /// Le sprite de la case `index` de la planche `dir/name`, affiché comme le serait la case entière à la taille `size`
+    /// (la zone rognée garde la même échelle), avec l'ancrage `base` d'une case entière transposé à la zone rognée.
+    fn sprite(&self, dir: &str, name: &str, index: usize, size: Vec2, base: Anchor) -> (Sprite, Anchor) {
+        let (layout, crop) = &self.layouts[&format!("{dir}/{name}")];
+        let cell = self.cell as f32;
+        let (w, h) = (crop.w as f32, crop.h as f32);
+        let anchor = crop_anchor(base, *crop, self.cell);
+        let sprite = Sprite {
+            image: self.image(dir, name),
+            texture_atlas: Some(TextureAtlas { layout: layout.clone(), index }),
+            custom_size: Some(Vec2::new(w * size.x / cell, h * size.y / cell)),
+            ..default()
+        };
+        (sprite, anchor)
+    }
+}
+
+/// L'ancrage, pour une zone rognée de la case, qui garde l'origine de l'entité au même point du dessin que `base` dans la
+/// case entière.
+fn crop_anchor(base: Anchor, crop: SheetCrop, cell: u32) -> Anchor {
+    let cell = cell as f32;
+    let (w, h) = (crop.w as f32, crop.h as f32);
+    // Le point d'origine de la case entière (en pixels, y vers le bas), puis par rapport au centre de la zone rognée.
+    let origin = Vec2::new(cell / 2.0 + base.0.x * cell, cell / 2.0 - base.0.y * cell);
+    let center = Vec2::new(crop.x as f32 + w / 2.0, crop.y as f32 + h / 2.0);
+    Anchor(Vec2::new((origin.x - center.x) / w, -(origin.y - center.y) / h))
+}
+
+/// L'ancrage d'un objet: posé au sol, sauf les panneaux de mur, vus de face et centrés sur leur tuile.
+fn prop_base_anchor(row: usize) -> Anchor {
+    if (object::WALL_RUNE..=object::WALL_TARGET_HIT).contains(&row) { WALL_ANCHOR } else { PROP_ANCHOR }
+}
+
+impl Art {
+    /// Sprite d'un héros (direction et image de sa planche), affiché à la taille donnée, et son ancrage.
+    pub fn hero_sprite(&self, class: HeroClass, direction: usize, frame: usize, size: Vec2) -> (Sprite, Anchor) {
+        self.sheets.sprite("heroes", &file_name(class), sheet_index(direction, frame), size, HERO_ANCHOR)
+    }
+
+    pub fn monster_sprite(&self, kind: MonsterKind, direction: usize, frame: usize, size: Vec2) -> (Sprite, Anchor) {
+        self.sheets.sprite("monsters", &file_name(kind), sheet_index(direction, frame), size, PROP_ANCHOR)
+    }
+
+    /// Sprite d'un objet (ligne `object::*`, image d'animation) et son ancrage.
+    pub fn prop_sprite(&self, row: usize, frame: usize, size: Vec2) -> (Sprite, Anchor) {
+        self.sheets.sprite("objects", object::FILES[row], frame, size, prop_base_anchor(row))
+    }
+}
+
+/// Nom du fichier d'une planche: le nom du personnage ou du monstre en minuscules (comme `tools/sprite_forge`).
+fn file_name(name: impl std::fmt::Debug) -> String {
+    format!("{name:?}").to_lowercase()
+}
+
+/// Case d'une direction et d'une image dans la planche d'un personnage ou d'un monstre.
+fn sheet_index(direction: usize, frame: usize) -> usize {
+    direction * HERO_FRAMES + frame
+}
+
+/// Objets: leur numéro est leur place dans `PROPS` (`tools/sprite_forge`); chacun a sa propre planche.
 pub mod object {
     pub const GENERATOR: usize = 0;
     pub const TURRET: usize = 1;
@@ -165,10 +255,40 @@ pub mod object {
     pub const GEAR_PART: usize = 23;
     pub const TARGET_DISC: usize = 24;
     pub const CAPTIVE: usize = 25;
+
+    /// Nom du fichier de planche de chaque objet (même ordre que `PROPS` dans `tools/sprite_forge`).
+    pub const FILES: [&str; 26] = [
+        "generator",
+        "turret",
+        "coin",
+        "food",
+        "key",
+        "lever",
+        "rune",
+        "mechanism",
+        "traparmed",
+        "trapoff",
+        "doorlocked",
+        "doorroyal",
+        "doorroyalemblem",
+        "stairs",
+        "potion",
+        "wallrune",
+        "wallgearsjammed",
+        "wallgearsfixed",
+        "walltargetempty",
+        "walltargetmounted",
+        "walltargethit",
+        "portcullis",
+        "ingredient",
+        "gearpart",
+        "targetdisc",
+        "captivecage",
+    ];
 }
 
-/// Les sorties se dessinent en grand sur leur propre planche: cases de 192 px, dix images d'animation, une ligne par état.
-pub const EXIT_CELL: u32 = 192;
+/// Les sorties se dessinent en grand sur leur propre planche: cases de deux fois la case d'un personnage, dix images d'animation,
+/// une ligne par état.
 pub const EXIT_FRAMES: usize = 10;
 /// Taille d'affichage d'une sortie, en unités du monde (quatre tuiles).
 pub const EXIT_SIZE: f32 = 64.0;
@@ -196,6 +316,10 @@ pub fn monster_scale(kind: MonsterKind) -> f32 {
     match kind {
         MonsterKind::Wolf => 1.1,
         MonsterKind::Orc => 1.15,
+        // Les boss dominent l'écran.
+        MonsterKind::Warg => 3.1,
+        MonsterKind::Troll => 3.0,
+        MonsterKind::Lich => 2.0,
         _ => 1.0,
     }
 }
@@ -222,33 +346,12 @@ pub fn class_row(class: HeroClass) -> usize {
 /// les pieds, situés vers le bas de la case, restent au bas de la boîte.
 pub const HERO_ANCHOR: Anchor = Anchor(Vec2::new(0.0, -0.228));
 
-/// Case de la planche des héros: ligne = classe * 8 + direction.
-pub fn hero_index(class: HeroClass, direction: usize, frame: usize) -> usize {
-    (class_row(class) * 8 + direction) * HERO_FRAMES + frame
-}
-
 /// Direction parmi les huit de la planche (0 = est, puis sens trigonométrique, 6 = sud).
 pub fn direction_index(facing: Vec2) -> usize {
     ((facing.to_angle() / FRAC_PI_4).round() as i32).rem_euclid(8) as usize
 }
 
-/// Case de la planche des ennemis: ligne = monstre * 8 + direction, comme pour les héros.
-pub fn monster_index(kind: MonsterKind, direction: usize, frame: usize) -> usize {
-    let row = match kind {
-        MonsterKind::Skeleton => 0,
-        MonsterKind::Bat => 1,
-        MonsterKind::Goblin => 2,
-        MonsterKind::Orc => 3,
-        MonsterKind::Ghoul => 4,
-        MonsterKind::Wolf => 5,
-    };
-    (row * 8 + direction) * MONSTER_FRAMES + frame
-}
 
-/// Case de la planche d'objets pour une ligne (`object::*`) et une image d'animation.
-pub fn object_index(row: usize, frame: usize) -> usize {
-    row * PROP_FRAMES + frame
-}
 
 /// Les objets et les ennemis posent leur point d'origine au sol, vers le bas de la case.
 pub const PROP_ANCHOR: Anchor = Anchor(Vec2::new(0.0, -0.417));
@@ -277,31 +380,65 @@ pub struct WalkCycle {
 
 fn load_set(assets: &AssetServer, layouts: &mut Assets<TextureAtlasLayout>, theme: ArtTheme) -> Art {
     let folder = theme.folder();
-    let mut atlas = |file: &str, columns: u32, rows: u32, cell: u32, smooth: bool| Atlas {
-        // Les tuiles et le pixel-art restent nets (filtrage au plus proche); les rendus détaillés (héros,
-        // ennemis, objets) sont réduits à l'écran et sont donc lissés.
+    // Les appareils à peu de mémoire (Apple TV HD...) ont des planches moins grandes, dans `lite/`.
+    let lite = crate::settings::low_memory();
+    let (cell, metas, sprite_folder) = if lite {
+        (crate::sprite_meta_lite::CELL, crate::sprite_meta_lite::SHEETS, format!("{folder}/lite"))
+    } else {
+        (crate::sprite_meta::CELL, crate::sprite_meta::SHEETS, folder.to_string())
+    };
+    info!("sprites: cases de {cell} px ({sprite_folder})");
+    let mut sheet_layouts = std::collections::HashMap::new();
+    for &(dir, name, x, y, w, h) in metas {
+        // Personnages et monstres: huit directions de `HERO_FRAMES` images sur `SHEET_COLUMNS` colonnes; objets: une ligne.
+        let (columns, rows) = if dir == "objects" { (PROP_FRAMES as u32, 1) } else { (SHEET_COLUMNS, SHEET_ROWS) };
+        let layout = layouts.add(TextureAtlasLayout::from_grid(UVec2::new(w, h), columns, rows, None, None));
+        sheet_layouts.insert(format!("{dir}/{name}"), (layout, SheetCrop { x, y, w, h }));
+    }
+    let sheets = Sheets {
+        assets: assets.clone(),
+        folder: sprite_folder.clone(),
+        cell,
+        layouts: sheet_layouts,
+        loaded: Default::default(),
+    };
+    let mut atlas = |file: &str, columns: u32, rows: u32, size: u32, smooth: bool| Atlas {
+        // Les tuiles restent nettes (filtrage au plus proche); les rendus détaillés sont réduits à l'écran et sont lissés.
         image: if smooth {
             assets
                 .load_builder()
                 .with_settings(|settings: &mut ImageLoaderSettings| {
                     settings.sampler = ImageSampler::linear();
+                    settings.asset_usage = RenderAssetUsages::RENDER_WORLD;
                 })
                 .load(format!("art/{folder}/{file}"))
         } else {
             assets.load(format!("art/{folder}/{file}"))
         },
-        layout: layouts.add(TextureAtlasLayout::from_grid(UVec2::splat(cell), columns, rows, None, None)),
+        layout: layouts.add(TextureAtlasLayout::from_grid(UVec2::splat(size), columns, rows, None, None)),
     };
     Art {
         tiles: atlas("tiles.png", TILE_COLUMNS as u32, TILE_ROWS, TILE_CELL, false),
-        heroes: atlas("heroes.png", HERO_FRAMES as u32, 32, HERO_CELL, true),
-        monsters: atlas("monsters.png", MONSTER_FRAMES as u32, MONSTER_ROWS, HERO_CELL, true),
-        objects: atlas("objects.png", PROP_FRAMES as u32, 26, HERO_CELL, true),
-        exits: atlas("exits.png", EXIT_FRAMES as u32, 7, EXIT_CELL, true),
+        exits: atlas(&format!("{}exits.basis", if lite { "lite/" } else { "" }), EXIT_FRAMES as u32, 7, cell * 2, true),
         projectiles: atlas("projectiles.png", 4, 1, 64, true),
         fx: atlas("fx.png", 2, 1, 96, true),
         decals: atlas("decals.png", 13, 1, 128, true),
         portraits: atlas("portraits.png", 4, 1, 128, true),
+        sheets,
+    }
+}
+
+/// Journal des grandes textures chargées (format et taille): utile pour comprendre la mémoire sur les petits appareils.
+fn log_big_images(mut events: MessageReader<AssetEvent<Image>>, images: Res<Assets<Image>>) {
+    for event in events.read() {
+        if let AssetEvent::LoadedWithDependencies { id } | AssetEvent::Added { id } = event {
+            if let Some(image) = images.get(*id) {
+                let size = image.texture_descriptor.size;
+                if size.width * size.height > 4_000_000 {
+                    info!("texture {}x{} {:?}", size.width, size.height, image.texture_descriptor.format);
+                }
+            }
+        }
     }
 }
 
@@ -411,9 +548,6 @@ fn run_transition(
         let new = &*art;
         let pairs: Vec<(&Atlas, &Atlas)> = vec![
             (&old.tiles, &new.tiles),
-            (&old.heroes, &new.heroes),
-            (&old.monsters, &new.monsters),
-            (&old.objects, &new.objects),
             (&old.exits, &new.exits),
             (&old.projectiles, &new.projectiles),
             (&old.fx, &new.fx),
@@ -464,6 +598,39 @@ fn run_transition(
     }
 }
 
+/// Côté d'un bloc de décor, en tuiles, et débordement de chaque bloc sur ses voisins, en unités du monde.
+const CHUNK: u32 = 16;
+const TILE_OVERLAP: f32 = 0.35;
+
+/// Assombrit un rectangle (haut, bas, gauche, droite, en pixels) d'une tuile de l'image d'un bloc, avec la teinte des ombres du
+/// décor, comme le ferait un voile translucide posé dessus (le mélange se fait en lumière linéaire, comme à l'écran).
+fn shade_pixels(pixels: &mut [u8], origin: usize, width: usize, (top, bottom, left, right): (usize, usize, usize, usize), alpha: f32) {
+    // Tables de conversion sRGB <-> lumière linéaire (calculées une fois): il y a des millions de pixels à mélanger.
+    static TABLES: std::sync::OnceLock<(Vec<f32>, Vec<u8>)> = std::sync::OnceLock::new();
+    const STEPS: usize = 4096;
+    let (to_linear, to_byte) = TABLES.get_or_init(|| {
+        let forward = (0..=255u8).map(|byte| Color::srgb_u8(byte, byte, byte).to_linear().red).collect();
+        let backward = (0..STEPS)
+            .map(|i| {
+                let linear = i as f32 / (STEPS - 1) as f32;
+                (Srgba::from(LinearRgba::new(linear, linear, linear, 1.0)).red * 255.0 + 0.5) as u8
+            })
+            .collect();
+        (forward, backward)
+    });
+    let shade = Color::srgb(0.02, 0.0, 0.06).to_linear();
+    let shade = [shade.red, shade.green, shade.blue];
+    for line in top..bottom {
+        for column in left..right {
+            let at = origin + (line * width + column) * 4;
+            for channel in 0..3 {
+                let mixed = to_linear[pixels[at + channel] as usize] * (1.0 - alpha) + shade[channel] * alpha;
+                pixels[at + channel] = to_byte[(mixed.clamp(0.0, 1.0) * (STEPS - 1) as f32 + 0.5) as usize];
+            }
+        }
+    }
+}
+
 /// Tuile du décor, effacée quand le château est regénéré.
 #[derive(Component)]
 struct WorldTile;
@@ -499,78 +666,95 @@ fn rebuild_world(
     expeditions: Query<&Expedition>,
     fresh: Query<(), Changed<Expedition>>,
     old_tiles: Query<Entity, With<WorldTile>>,
+    mut images: ResMut<Assets<Image>>,
+    mut waiting: Local<bool>,
 ) {
     // Le décor se reconstruit quand un nouveau château arrive, ou quand on change de mode.
-    if fresh.is_empty() && !theme.is_changed() {
+    if fresh.is_empty() && !theme.is_changed() && !*waiting {
         return;
     }
     let Some(expedition) = expeditions.iter().last() else {
         return;
     };
+    // Les tuiles sont assemblées à partir de leur planche: on attend qu'elle soit chargée.
+    let Some(sheet) = images.get(&art.tiles.image).filter(|image| image.data.is_some()) else {
+        *waiting = true;
+        return;
+    };
+    *waiting = false;
+    let (source, source_width, format) = (sheet.data.clone().unwrap_or_default(), sheet.width() as usize, sheet.texture_descriptor.format);
     info!("building level {} ({:?})", expedition.level, expedition.region);
     for entity in &old_tiles {
         commands.entity(entity).despawn();
     }
-    let dungeon = castle_shared::level_def(expedition.level)
-        .to_dungeon()
-        .unwrap_or_else(|e| panic!("niveau {}: {e}", expedition.level));
+    let def = castle_shared::level_def(expedition.level);
+    let dungeon = def.to_dungeon().unwrap_or_else(|e| panic!("niveau {}: {e}", expedition.level));
     let room = &dungeon.room;
-    let region_row = Region::ALL.iter().position(|r| *r == expedition.region).unwrap_or(0);
+    let rank = |region: Region| Region::ALL.iter().position(|r| *r == region).unwrap_or(0);
+    // Le décor d'ensemble (décalques...) suit la région du niveau; chaque tuile peut emprunter les briques d'une autre.
+    let region_row = rank(expedition.region);
     let size = room.size();
-    for y in 0..size.y {
-        for x in 0..size.x {
-            let (xi, yi) = (x as i32, y as i32);
-            // Le sol et les faces de mur sont de grands motifs (4x4 et 4x1 tuiles): on choisit un motif par bloc,
-            // et la tuile à sa place dans le bloc, pour que les dalles et les joints se prolongent d'une tuile à l'autre.
-            let block = (x / MACRO).wrapping_mul(73856093) ^ (y / MACRO).wrapping_mul(19349663) ^ (region_row as u32).wrapping_mul(83492791);
-            let face_block = (x / MACRO).wrapping_mul(73856093) ^ y.wrapping_mul(19349663) ^ (region_row as u32).wrapping_mul(83492791);
-            let noise = (x * 31 + y * 17 + x * y * 3) % 23;
-            let column = match room.tile(xi, yi) {
-                Tile::Floor => {
-                    let pattern = (block >> 5) % FLOOR_PATTERNS;
-                    // La ligne 0 du motif est en haut, alors que `y` croît vers le haut.
-                    (pattern * MACRO * MACRO + (MACRO - 1 - y % MACRO) * MACRO + x % MACRO) as usize
-                }
-                Tile::Wall if room.tile(xi, yi - 1) == Tile::Floor => {
-                    if noise % 9 == 0 {
-                        DECOR_START + (noise as usize / 9) % 2
-                    } else {
-                        FACE_START + (((face_block >> 5) % FACE_PATTERNS) * MACRO + x % MACRO) as usize
+    // Le sol et les murs sont assemblés en grands blocs de `CHUNK` x `CHUNK` tuiles (une image et une entité par bloc, au lieu
+    // d'une entité par tuile): c'est ce qui rend le jeu fluide sur les petits appareils.
+    for chunk_y in (0..size.y).step_by(CHUNK as usize) {
+        for chunk_x in (0..size.x).step_by(CHUNK as usize) {
+            let (cols, rows) = ((size.x - chunk_x).min(CHUNK), (size.y - chunk_y).min(CHUNK));
+            let tile_px = TILE_CELL as usize;
+            let width = cols as usize * tile_px;
+            let mut pixels = vec![0u8; width * rows as usize * tile_px * 4];
+            for row in 0..rows {
+                // La première ligne de l'image est le haut du bloc.
+                let y = chunk_y + rows - 1 - row;
+                for col in 0..cols {
+                    let x = chunk_x + col;
+                    let (xi, yi) = (x as i32, y as i32);
+                    let tile_row = rank(def.region_at(xi, yi));
+                    let column = tile_column(x, y, tile_row, room.tile(xi, yi) == Tile::Wall, room.tile(xi, yi - 1) == Tile::Floor);
+                    let origin = (row as usize * tile_px * width + col as usize * tile_px) * 4;
+                    for line in 0..tile_px {
+                        let from = ((tile_row * TILE_CELL as usize + line) * source_width + column * tile_px) * 4;
+                        let to = origin + line * width * 4;
+                        pixels[to..to + tile_px * 4].copy_from_slice(&source[from..from + tile_px * 4]);
+                    }
+                    // Ombre portée sur le sol le long d'un mur: au-dessus (face du mur) et sur les côtés.
+                    if room.tile(xi, yi) == Tile::Floor {
+                        let mut shade = |top: usize, bottom: usize, left: usize, right: usize, alpha: f32| {
+                            shade_pixels(&mut pixels, origin, width, (top, bottom, left, right), alpha);
+                        };
+                        let unit = tile_px / 16;
+                        if room.tile(xi, yi + 1) == Tile::Wall {
+                            shade(0, 6 * unit, 0, tile_px, 0.4);
+                            shade(6 * unit, 8 * unit, 0, tile_px, 0.2);
+                        }
+                        if room.tile(xi - 1, yi) == Tile::Wall {
+                            shade(0, tile_px, 0, 3 * unit, 0.3);
+                        }
+                        if room.tile(xi + 1, yi) == Tile::Wall {
+                            shade(0, tile_px, tile_px - 3 * unit, tile_px, 0.3);
+                        }
                     }
                 }
-                Tile::Wall => {
-                    let pattern = (block >> 7) % TOP_PATTERNS;
-                    (TOP_START as u32 + pattern * MACRO * MACRO + (MACRO - 1 - y % MACRO) * MACRO + x % MACRO) as usize
-                }
-            };
-            let center = room.tile_center(x, y);
+            }
+            let image = Image::new(
+                bevy::render::render_resource::Extent3d { width: width as u32, height: (rows as usize * tile_px) as u32, depth_or_array_layers: 1 },
+                bevy::render::render_resource::TextureDimension::D2,
+                pixels,
+                format,
+                RenderAssetUsages::RENDER_WORLD,
+            );
+            let center = (room.tile_center(chunk_x, chunk_y) + room.tile_center(chunk_x + cols - 1, chunk_y + rows - 1)) / 2.0;
             commands.spawn((
                 WorldTile,
                 TileMark,
-                art.tiles.sprite_sized(region_row * TILE_COLUMNS + column, Vec2::splat(TILE_SIZE)),
+                Sprite {
+                    image: images.add(image),
+                    // Les blocs se recouvrent un peu: sans cela, des fentes d'un pixel apparaissent entre eux quand la caméra est
+                    // à une échelle non entière ou à une position fractionnaire.
+                    custom_size: Some(Vec2::new(cols as f32, rows as f32) * TILE_SIZE + Vec2::splat(TILE_OVERLAP)),
+                    ..default()
+                },
                 Transform::from_translation(center.extend(0.0)),
             ));
-            // Ombre portée sur le sol le long d'un mur: au-dessus (face du mur) et sur les côtés.
-            if room.tile(xi, yi) == Tile::Floor {
-                let mut shade = |offset: Vec2, size: Vec2, alpha: f32| {
-                    commands.spawn((
-                        WorldTile,
-                        Sprite::from_color(Color::srgba(0.02, 0.0, 0.06, alpha), size),
-                        Transform::from_translation((center + offset).extend(0.05)),
-                    ));
-                };
-                let half = TILE_SIZE / 2.0;
-                if room.tile(xi, yi + 1) == Tile::Wall {
-                    shade(Vec2::new(0.0, half - 3.0), Vec2::new(TILE_SIZE, 6.0), 0.4);
-                    shade(Vec2::new(0.0, half - 7.0), Vec2::new(TILE_SIZE, 2.0), 0.2);
-                }
-                if room.tile(xi - 1, yi) == Tile::Wall {
-                    shade(Vec2::new(-half + 1.5, 0.0), Vec2::new(3.0, TILE_SIZE), 0.3);
-                }
-                if room.tile(xi + 1, yi) == Tile::Wall {
-                    shade(Vec2::new(half - 1.5, 0.0), Vec2::new(3.0, TILE_SIZE), 0.3);
-                }
-            }
         }
     }
     spawn_decals(&mut commands, &art, &dungeon, region_row, expedition.seed, *theme == ArtTheme::Gore);
@@ -582,10 +766,10 @@ fn rebuild_world(
 /// marche avance avec la distance parcourue; à l'arrêt, le héros respire.
 fn animate_heroes(
     time: Res<Time>,
-    mut heroes: Query<(&mut Sprite, &Transform, &HeroClass, &Facing, &Strikes, &mut WalkCycle)>,
+    mut heroes: Query<(&mut Sprite, &Transform, &Facing, &Strikes, &mut WalkCycle), With<HeroClass>>,
 ) {
     let dt = time.delta_secs();
-    for (mut sprite, transform, class, facing, strikes, mut cycle) in &mut heroes {
+    for (mut sprite, transform, facing, strikes, mut cycle) in &mut heroes {
         let here = transform.translation.truncate();
         let moved = cycle.last.map_or(0.0, |last| last.distance(here));
         cycle.last = Some(here);
@@ -609,7 +793,7 @@ fn animate_heroes(
         } else {
             (time.elapsed_secs() * ANIMATION_FPS) as usize % HERO_IDLE_FRAMES
         };
-        let index = hero_index(*class, direction_index(facing.0), frame);
+        let index = sheet_index(direction_index(facing.0), frame);
         if let Some(atlas) = sprite.texture_atlas.as_mut() {
             if atlas.index != index {
                 atlas.index = index;
@@ -655,7 +839,7 @@ fn animate_monsters(
             _ if cycle.moving_for > 0.0 => HERO_IDLE_FRAMES + (cycle.phase * HERO_WALK_FRAMES as f32) as usize % HERO_WALK_FRAMES,
             _ => (time.elapsed_secs() * ANIMATION_FPS) as usize % HERO_IDLE_FRAMES,
         };
-        let index = monster_index(monster.0, cycle.direction, frame);
+        let index = sheet_index(cycle.direction, frame);
         if let Some(atlas) = sprite.texture_atlas.as_mut() {
             if atlas.index != index {
                 atlas.index = index;
@@ -665,13 +849,20 @@ fn animate_monsters(
 }
 
 /// Animation des objets: vingt images (impulsion de lumière, pièce qui tourne, engrenages...).
-fn animate_props(time: Res<Time>, mut props: Query<(&mut Sprite, &Prop)>) {
+fn animate_props(time: Res<Time>, art: Res<Art>, mut props: Query<(&mut Sprite, &Prop, &mut Anchor)>) {
     let frame = (time.elapsed_secs() * ANIMATION_FPS) as usize % PROP_FRAMES;
-    for (mut sprite, prop) in &mut props {
-        let index = object_index(prop.0, frame);
+    for (mut sprite, prop, mut anchor) in &mut props {
+        // Chaque objet a sa planche (et sa zone rognée): un piège qui se désarme, un panneau qui s'active en change.
+        let current = art.sheets.image("objects", object::FILES[prop.0]);
+        if sprite.image != current {
+            let (fresh, fresh_anchor) = art.prop_sprite(prop.0, frame, Vec2::splat(SPRITE_SIZE));
+            let color = sprite.color;
+            *sprite = Sprite { color, ..fresh };
+            *anchor = fresh_anchor;
+        }
         if let Some(atlas) = sprite.texture_atlas.as_mut() {
-            if atlas.index != index {
-                atlas.index = index;
+            if atlas.index != frame {
+                atlas.index = frame;
             }
         }
     }
@@ -763,19 +954,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_monster_has_its_own_rows_inside_the_sheet() {
-        let kinds = [MonsterKind::Skeleton, MonsterKind::Bat, MonsterKind::Goblin, MonsterKind::Orc, MonsterKind::Ghoul, MonsterKind::Wolf];
-        let mut seen = std::collections::HashSet::new();
-        for kind in kinds {
-            for direction in 0..8 {
-                for frame in 0..MONSTER_FRAMES {
-                    let index = monster_index(kind, direction, frame);
-                    assert!(index < MONSTER_ROWS as usize * MONSTER_FRAMES, "{kind:?} hors de la planche");
-                    assert!(seen.insert(index), "case en double pour {kind:?}");
-                }
+    fn every_image_of_a_character_fits_in_its_sheet() {
+        let cells = (SHEET_COLUMNS * SHEET_ROWS) as usize;
+        assert_eq!(cells, 8 * HERO_FRAMES, "la planche contient huit directions de HERO_FRAMES images");
+        assert_eq!(sheet_index(7, HERO_FRAMES - 1), cells - 1);
+        assert_eq!(object::FILES.len(), 26);
+    }
+
+    #[test]
+    fn a_full_cell_keeps_its_anchor_and_a_crop_keeps_the_origin_in_place() {
+        let cell = crate::sprite_meta::CELL;
+        let full = crop_anchor(PROP_ANCHOR, SheetCrop { x: 0, y: 0, w: cell, h: cell }, cell);
+        assert!((full.0 - PROP_ANCHOR.0).length() < 1e-5);
+        // La moitié basse de la case: l'origine (aux pieds) reste au même endroit du dessin.
+        let half = crop_anchor(PROP_ANCHOR, SheetCrop { x: 0, y: cell / 2, w: cell, h: cell / 2 }, cell);
+        let origin_in_full = Vec2::new(0.5, 0.5 - PROP_ANCHOR.0.y);
+        let origin_in_crop = Vec2::new(0.5 - half.0.x, 0.5 - half.0.y);
+        assert!((origin_in_crop.x - origin_in_full.x).abs() < 1e-5);
+        // Dans la zone rognée (hauteur moitié), la position verticale vaut (y_complet - 0,5) * 2.
+        assert!((origin_in_crop.y - (origin_in_full.y - 0.5) * 2.0).abs() < 1e-4);
+    }
+
+    /// Chaque planche livrée (grande et légère) se lit, et sa taille est celle que le jeu attend (cases rognées x colonnes et lignes).
+    #[test]
+    fn every_shipped_sheet_decodes_to_the_size_the_layout_expects() {
+        use basis_universal::Transcoder;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/art/medieval");
+        for (folder, metas) in [("", crate::sprite_meta::SHEETS), ("lite", crate::sprite_meta_lite::SHEETS)] {
+            for &(dir, name, _, _, w, h) in metas {
+                let path = root.join(folder).join(dir).join(format!("{name}.basis"));
+                let data = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+                let mut transcoder = Transcoder::new();
+                let info = transcoder.image_info(&data, 0).unwrap_or_else(|| panic!("{}: en-tête illisible", path.display()));
+                let (columns, rows) = if dir == "objects" { (PROP_FRAMES as u32, 1) } else { (SHEET_COLUMNS, SHEET_ROWS) };
+                assert_eq!((info.m_orig_width, info.m_orig_height), (columns * w, rows * h), "{}", path.display());
             }
         }
-        // La planche est entièrement utilisée: autant de lignes que de monstres et de directions.
-        assert_eq!(seen.len(), MONSTER_ROWS as usize * MONSTER_FRAMES);
     }
 }
+

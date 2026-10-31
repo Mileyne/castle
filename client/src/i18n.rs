@@ -111,13 +111,18 @@ pub fn resolve_controls(text: String, localization: &Localization, mode: crate::
 fn refresh_texts(
     localization: Option<Res<Localization>>,
     mode: Res<crate::controls::InputMode>,
-    mut texts: Query<(&Tr, &mut Text)>,
+    mut texts: Query<(Ref<Tr>, &mut Text)>,
 ) {
     let Some(localization) = localization else {
         return;
     };
     let suffix = mode.suffix();
+    // Tout se recalcule quand la langue ou l'appareil de saisie change; sinon, seulement les textes nouveaux ou dont la clé change.
+    let everything = localization.is_changed() || mode.is_changed();
     for (tr, mut text) in &mut texts {
+        if !everything && !tr.is_changed() {
+            continue;
+        }
         // Une clé absente reste visible à l'écran: plus simple à repérer qu'un texte vide.
         // Une clé `<clé>-<mode>` (gamepad, touch) remplace le texte écrit pour le clavier, quand elle existe.
         let specific = (suffix != "keyboard").then(|| localization.content(format!("{}-{suffix}", tr.key).as_str())).flatten();

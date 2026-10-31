@@ -6,6 +6,7 @@ mod dungeon;
 pub mod campaign;
 pub mod level;
 pub mod save;
+pub mod tileart;
 pub use dungeon::*;
 pub use campaign::{BOSS_EVERY, LEVEL_COUNT, is_boss_level, level_def, level_file};
 pub use level::{LEVEL_FORMAT, LevelDef, Thing};
@@ -313,6 +314,12 @@ pub enum MonsterKind {
     Ghoul,
     /// Rapide et vorace, il chasse en meute (forêt, marais, abords du château).
     Wolf,
+    /// Boss du niveau 4: le chef de la meute, un loup énorme qui hurle pour rameuter des loups.
+    Warg,
+    /// Boss du niveau 8: un troll couronné, lent, qui frappe le sol de ses poings.
+    Troll,
+    /// Boss du niveau 12: un roi-liche qui garde ses distances, lance des ondes de mort et relève des squelettes.
+    Lich,
 }
 
 pub struct MonsterStats {
@@ -334,6 +341,25 @@ impl MonsterKind {
             Self::Orc => MonsterStats { max_hp: 70.0, speed: 33.0, damage: 14.0, cooldown: 1.1, half_size: 8.5, sight: 100.0 },
             Self::Ghoul => MonsterStats { max_hp: 40.0, speed: 52.0, damage: 9.0, cooldown: 0.7, half_size: 5.0, sight: 140.0 },
             Self::Wolf => MonsterStats { max_hp: 24.0, speed: 68.0, damage: 6.0, cooldown: 0.6, half_size: 6.0, sight: 150.0 },
+            // Les boss voient toute l'arène. Leurs points de vie sont réglés pour une équipe de quatre héros.
+            Self::Warg => MonsterStats { max_hp: 1300.0, speed: 72.0, damage: 16.0, cooldown: 0.9, half_size: 18.0, sight: 600.0 },
+            Self::Troll => MonsterStats { max_hp: 2200.0, speed: 34.0, damage: 26.0, cooldown: 1.3, half_size: 22.0, sight: 600.0 },
+            Self::Lich => MonsterStats { max_hp: 2800.0, speed: 38.0, damage: 10.0, cooldown: 1.0, half_size: 12.0, sight: 700.0 },
+        }
+    }
+
+    /// Un boss: personnage unique du niveau, qu'il faut vaincre en groupe pour libérer la sortie.
+    pub fn is_boss(self) -> bool {
+        matches!(self, Self::Warg | Self::Troll | Self::Lich)
+    }
+
+    /// Clé de traduction du nom d'un boss (barre de vie).
+    pub fn boss_name_key(self) -> Option<&'static str> {
+        match self {
+            Self::Warg => Some("boss-warg"),
+            Self::Troll => Some("boss-troll"),
+            Self::Lich => Some("boss-lich"),
+            _ => None,
         }
     }
 
@@ -429,6 +455,8 @@ pub enum QuestKind {
     Unseal,
     /// Forcer la porte royale: le Chevalier la pousse de toute sa force.
     Breach,
+    /// Vaincre le boss du niveau.
+    Boss,
 }
 
 impl QuestKind {
@@ -442,6 +470,7 @@ impl QuestKind {
             Self::Release => "quest-release",
             Self::Unseal => "quest-unseal",
             Self::Breach => "quest-breach",
+            Self::Boss => "quest-boss",
         }
     }
 
@@ -452,7 +481,7 @@ impl QuestKind {
             Self::Release => Some(InteractKind::Target),
             Self::Unseal => Some(InteractKind::Rune),
             Self::Breach => Some(InteractKind::Push),
-            Self::Hunt | Self::Retrieve | Self::Rescue => None,
+            Self::Hunt | Self::Retrieve | Self::Rescue | Self::Boss => None,
         }
     }
 
@@ -712,6 +741,26 @@ pub struct DialogueFinished;
 #[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct ScreenShake(pub f32);
 
+/// Le geste d'un boss que les héros doivent esquiver.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BossMove {
+    /// Coup de poing sur le sol: dégâts dans le cercle.
+    Slam,
+    /// Onde de mort autour du liche: dégâts dans le cercle.
+    Nova,
+    /// Cri qui appelle des renforts (pas de zone à éviter).
+    Howl,
+}
+
+/// Un boss prépare un geste: les clients dessinent la zone à éviter pendant `delay` secondes, jusqu'au coup.
+#[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct BossAlert {
+    pub kind: BossMove,
+    pub at: Vec2,
+    pub radius: f32,
+    pub delay: f32,
+}
+
 /// Bilan du niveau qui vient d'être terminé, envoyé quand l'équipe entre dans le portail: les clients l'affichent
 /// pendant que le serveur attend avant de générer le niveau suivant.
 #[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
@@ -804,6 +853,7 @@ impl Plugin for CastleSharedPlugin {
             .replicate::<Downed>()
             .add_server_event::<AttackFx>(Channel::Unordered)
             .add_server_event::<ScreenShake>(Channel::Unordered)
+            .add_server_event::<BossAlert>(Channel::Unordered)
             .add_server_event::<LevelSummary>(Channel::Ordered)
             .add_mapped_server_event::<YouAre>(Channel::Ordered)
             .add_server_event::<DialogueBegin>(Channel::Ordered)

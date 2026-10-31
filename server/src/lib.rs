@@ -17,6 +17,7 @@ use bevy_replicon_renet::{
     netcode::{NetcodeServerTransport, ServerAuthentication, ServerConfig},
     renet::ConnectionConfig,
 };
+mod boss;
 mod outdoor;
 
 use castle_shared::save::{self, GameMode, SaveGame};
@@ -397,6 +398,13 @@ pub fn run(options: Options, stop: Option<StopFlag>) {
             )
                 .chain()
                 .run_if(not_paused),
+        )
+        .add_systems(
+            Update,
+            boss::boss_ai
+                .run_if(not_in_transition)
+                .run_if(not_paused)
+                .after(monster_ai),
         )
         .add_observer(spawn_party)
         .add_observer(despawn_party)
@@ -965,8 +973,14 @@ fn monster_ai(
     generators: Query<(&Position, &Hurtbox), (With<Generator>, Without<Monster>, Without<Player>)>,
     mut monsters: Query<
         (Entity, &mut Position, &mut Cooldown, &Monster, &mut Strikes),
-        (Without<Player>, Without<Solid>, Without<Generator>),
+        (
+            Without<Player>,
+            Without<Solid>,
+            Without<Generator>,
+            Without<boss::BossBrain>,
+        ),
     >,
+    bosses: Query<(&Position, &Monster), With<boss::BossBrain>>,
     mut players: Query<
         (&Position, &mut Health, Has<Shielded>),
         (With<Player>, Without<Downed>, Without<Monster>),
@@ -979,7 +993,16 @@ fn monster_ai(
         .iter()
         .map(|(p, s)| (p.0, s.0))
         .chain(generators.iter().map(|(p, h)| (p.0, Vec2::splat(h.0))))
-        .chain(players.iter().map(|(p, ..)| (p.0, Vec2::splat(HERO_HALF_SIZE))))
+        .chain(
+            players
+                .iter()
+                .map(|(p, ..)| (p.0, Vec2::splat(HERO_HALF_SIZE))),
+        )
+        .chain(
+            bosses
+                .iter()
+                .map(|(p, m)| (p.0, Vec2::splat(m.0.stats().half_size))),
+        )
         .collect();
     let bodies: Vec<(Entity, Vec2, f32)> = monsters
         .iter()
@@ -1036,17 +1059,45 @@ fn reap_dead(
     mut commands: Commands,
     mut rng: ResMut<Rng>,
     dead: Query<
-        (Entity, &Health, &Position, Has<Generator>, Has<Monster>),
+        (
+            Entity,
+            &Health,
+            &Position,
+            Has<Generator>,
+            Has<Monster>,
+            Has<boss::BossBrain>,
+        ),
         (With<Hurtbox>, Without<Player>),
     >,
+    minions: Query<Entity, (With<Monster>, Without<boss::BossBrain>)>,
     mut quests: Query<&mut Quest>,
     mut stats: ResMut<LevelStats>,
 ) {
-    for (entity, health, pos, is_generator, is_monster) in &dead {
+    for (entity, health, pos, is_generator, is_monster, is_boss) in &dead {
         if health.current > 0.0 {
             continue;
         }
         commands.entity(entity).despawn();
+        if is_boss {
+            // La mort du boss met fin au combat: ses renforts s'effondrent avec lui, et il laisse un butin.
+            for minion in &minions {
+                commands.entity(minion).despawn();
+            }
+            for mut quest in &mut quests {
+                if quest.kind == QuestKind::Boss && !quest.is_done() {
+                    quest.progress += 1;
+                }
+            }
+            commands.server_trigger(ToClients {
+                targets: SendTargets::All,
+                message: ScreenShake(1.0),
+            });
+            for _ in 0..8 {
+                spawn_pickup(&mut commands, PickupKind::Coin, pos.0, &mut rng);
+            }
+            spawn_pickup(&mut commands, PickupKind::Potion, pos.0, &mut rng);
+            spawn_pickup(&mut commands, PickupKind::Food, pos.0, &mut rng);
+        }
         if is_generator {
             stats.generators += 1;
         } else if is_monster {
@@ -1153,14 +1204,14 @@ fn update_mechanism_quests(interactables: Query<&Interactable>, mut quests: Quer
 }
 
 /// La sortie s'ouvre quand l'objectif du niveau est rempli (ou, sans objectif, quand plus rien ne reste à combattre), que
-/// tous les mécanismes du niveau sont accomplis et, dans un combat de boss, que la meute est vaincue.
+/// tous les mécanismes du niveau sont accomplis et, dans un combat de boss, que le boss est vaincu.
 fn open_exit(
     mut commands: Commands,
-    level: Res<Level>,
     mut quests: Query<&mut Quest>,
     mut exits: Query<&mut LevelExit>,
     interactables: Query<&Interactable>,
     remaining: Query<(), Or<(With<Monster>, With<Generator>)>>,
+    bosses: Query<(), With<boss::BossBrain>>,
 ) {
     // Plus rien à combattre: la chasse est réputée accomplie, pour ne jamais bloquer la sortie.
     if remaining.is_empty() {
@@ -1172,7 +1223,8 @@ fn open_exit(
     }
     let quests_done = if quests.is_empty() { remaining.is_empty() } else { quests.iter().all(|quest| quest.is_done()) };
     let mechanisms_done = interactables.iter().all(|i| i.done);
-    let fight_done = !is_boss_level(level.0) || remaining.is_empty();
+    // Dans un combat de boss, la sortie reste fermée tant que le boss est debout.
+    let fight_done = bosses.is_empty();
     let done = quests_done && mechanisms_done && fight_done;
     for mut exit in &mut exits {
         if done && !exit.open {
@@ -1455,6 +1507,9 @@ fn dialogue_node(name: &str) -> Option<&'static str> {
         "castle_intro",
         "knight_intro",
         "knight_door",
+        "boss_warg",
+        "boss_troll",
+        "boss_lich",
     ]
     .into_iter()
     .find(|n| *n == name)
@@ -1563,7 +1618,12 @@ fn plan_level(dungeon: &Dungeon, name: &str, region: Region, level: u32, rng: &m
             match kind {
                 QuestKind::Retrieve => things.push(Thing::Relic { at: pos }),
                 QuestKind::Rescue => things.push(Thing::Captive { at: pos }),
-                QuestKind::Hunt | QuestKind::Repair | QuestKind::Release | QuestKind::Unseal | QuestKind::Breach => {}
+                QuestKind::Hunt
+                | QuestKind::Repair
+                | QuestKind::Release
+                | QuestKind::Unseal
+                | QuestKind::Breach
+                | QuestKind::Boss => {}
             }
         }
     }
@@ -1697,12 +1757,21 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
     }
 
     // L'objectif du niveau. La sortie reste fermée tant qu'il n'est pas rempli (voir `open_exit`).
-    // Dans un combat de boss, vaincre toute la meute est un objectif à part, affiché avant les autres.
-    if is_boss_level(level) && def.quest.is_none_or(|(kind, _)| kind != QuestKind::Hunt) {
-        let beasts = def.things.iter().filter(|t| matches!(t, Thing::Monster { .. })).count() as u32;
-        if beasts > 0 {
-            commands.spawn((Replicated, Quest { kind: QuestKind::Hunt, goal: beasts, progress: 0 }));
-        }
+    // Dans un combat de boss, vaincre le boss est un objectif à part, affiché avant les autres.
+    let bosses = def
+        .things
+        .iter()
+        .filter(|t| matches!(t, Thing::Monster { kind, .. } if kind.is_boss()))
+        .count() as u32;
+    if bosses > 0 {
+        commands.spawn((
+            Replicated,
+            Quest {
+                kind: QuestKind::Boss,
+                goal: bosses,
+                progress: 0,
+            },
+        ));
     }
     if let Some((kind, goal)) = def.quest {
         commands.spawn((Replicated, Quest { kind, goal, progress: 0 }));
@@ -2475,7 +2544,7 @@ fn dialogue_finished(
 
 fn spawn_monster(commands: &mut Commands, kind: MonsterKind, pos: Vec2) {
     let stats = kind.stats();
-    commands.spawn((
+    let mut monster = commands.spawn((
         Replicated,
         Monster(kind),
         Health::full(stats.max_hp),
@@ -2484,6 +2553,9 @@ fn spawn_monster(commands: &mut Commands, kind: MonsterKind, pos: Vec2) {
         Cooldown::default(),
         Strikes::default(),
     ));
+    if kind.is_boss() {
+        monster.insert(boss::BossBrain::new());
+    }
 }
 
 /// Direction à prendre pour aller de `pos` à `goal`: tout droit si la voie est libre, sinon en suivant
@@ -2889,6 +2961,22 @@ mod tests {
                 Controlled,
                 Interacting(true),
             ));
+            // Dans un combat de boss, le boss doit être vaincu aussi: ce test ne vérifie que le mécanisme.
+            {
+                let world = app.world_mut();
+                let bosses: Vec<Entity> = world
+                    .query_filtered::<Entity, With<boss::BossBrain>>()
+                    .iter(world)
+                    .collect();
+                for boss in bosses {
+                    world.entity_mut(boss).despawn();
+                }
+                for mut quest in world.query::<&mut Quest>().iter_mut(world) {
+                    if quest.kind == QuestKind::Boss {
+                        quest.progress = quest.goal;
+                    }
+                }
+            }
             for _ in 0..12 {
                 advance(&mut app, 0.5);
             }
@@ -2898,6 +2986,159 @@ mod tests {
                 query.iter(world).all(|e| e.open)
             };
             assert!(open, "niveau {level}: la sortie doit être ouverte une fois le mécanisme de {class:?} accompli");
+        }
+    }
+
+    /// Dans un combat de boss, la sortie reste fermée tant que le boss est debout; sa mort l'ouvre et emporte ses renforts.
+    #[test]
+    fn the_exit_of_a_boss_level_opens_only_when_the_boss_is_dead() {
+        for level in [4, 8, 12] {
+            let mut app = networked_app();
+            let mut save = SaveGame::new("test", GameMode::Solo, 77);
+            save.level = level;
+            save.intro_done = true;
+            app.insert_resource(Rng(5));
+            app.insert_resource(Campaign(save));
+            app.insert_resource(DialogueSession::default());
+            app.insert_resource(Level(level));
+            app.init_resource::<LevelStats>()
+                .init_resource::<Transition>();
+            app.add_systems(
+                Startup,
+                |mut commands: Commands,
+                 mut rng: ResMut<Rng>,
+                 campaign: Res<Campaign>,
+                 mut session: ResMut<DialogueSession>| {
+                    generate_level(&mut commands, &mut rng, &campaign, &mut session, []);
+                },
+            );
+            app.add_systems(Update, (reap_dead, open_exit).chain());
+            app.update();
+            let boss_count = app
+                .world_mut()
+                .query::<&boss::BossBrain>()
+                .iter(app.world())
+                .count();
+            assert_eq!(boss_count, 1, "niveau {level}: un boss");
+            // Tout le reste est accompli: générateurs et mécanismes ne comptent plus.
+            let world = app.world_mut();
+            let others: Vec<Entity> = world
+                .query_filtered::<Entity, (
+                    Or<(With<Monster>, With<Generator>)>,
+                    Without<boss::BossBrain>,
+                )>()
+                .iter(world)
+                .collect();
+            let minion = others.first().copied();
+            for mut interactable in world.query::<&mut Interactable>().iter_mut(world) {
+                interactable.done = true;
+            }
+            for mut quest in world.query::<&mut Quest>().iter_mut(world) {
+                if quest.kind != QuestKind::Boss {
+                    quest.progress = quest.goal;
+                }
+            }
+            for entity in others {
+                if Some(entity) != minion {
+                    world.despawn(entity);
+                }
+            }
+            advance(&mut app, 0.5);
+            let closed = app
+                .world_mut()
+                .query::<&LevelExit>()
+                .iter(app.world())
+                .all(|e| !e.open);
+            assert!(
+                closed,
+                "niveau {level}: la sortie reste fermée tant que le boss est debout"
+            );
+            let world = app.world_mut();
+            for mut health in world
+                .query_filtered::<&mut Health, With<boss::BossBrain>>()
+                .iter_mut(world)
+            {
+                health.current = 0.0;
+            }
+            advance(&mut app, 0.5);
+            advance(&mut app, 0.5);
+            let open = app
+                .world_mut()
+                .query::<&LevelExit>()
+                .iter(app.world())
+                .all(|e| e.open);
+            assert!(open, "niveau {level}: la mort du boss ouvre la sortie");
+            let left = app
+                .world_mut()
+                .query::<&Monster>()
+                .iter(app.world())
+                .count();
+            assert_eq!(
+                left, 0,
+                "niveau {level}: les renforts disparaissent avec le boss"
+            );
+        }
+    }
+
+    /// Chaque boss attaque l'équipe qui entre dans son arène: un héros qui reste devant lui finit par être touché.
+    #[test]
+    fn every_boss_hurts_a_hero_who_stays_in_the_arena() {
+        for level in [4, 8, 12] {
+            let mut app = networked_app();
+            let mut save = SaveGame::new("test", GameMode::Solo, 77);
+            save.level = level;
+            save.intro_done = true;
+            app.insert_resource(Rng(5));
+            app.insert_resource(Campaign(save));
+            app.insert_resource(DialogueSession::default());
+            app.insert_resource(Level(level));
+            app.init_resource::<LevelStats>()
+                .init_resource::<Transition>();
+            app.add_systems(
+                Startup,
+                |mut commands: Commands,
+                 mut rng: ResMut<Rng>,
+                 campaign: Res<Campaign>,
+                 mut session: ResMut<DialogueSession>| {
+                    let dungeon =
+                        generate_level(&mut commands, &mut rng, &campaign, &mut session, []);
+                    commands.insert_resource(dungeon.room);
+                    commands.insert_resource(dungeon.layout);
+                },
+            );
+            app.update();
+            app.add_systems(Update, boss::boss_ai);
+            let boss_at = app
+                .world_mut()
+                .query_filtered::<&Position, With<boss::BossBrain>>()
+                .single(app.world())
+                .unwrap()
+                .0;
+            let hero = app
+                .world_mut()
+                .spawn((
+                    Player,
+                    PartyId(0),
+                    HeroClass::Knight,
+                    Position(boss_at + Vec2::new(-60.0, 0.0)),
+                    Health {
+                        current: 100000.0,
+                        max: 100000.0,
+                    },
+                    Gold::default(),
+                    Keys::default(),
+                    Controlled,
+                ))
+                .id();
+            for _ in 0..200 {
+                advance(&mut app, 0.1);
+            }
+            let health = app.world().get::<Health>(hero).unwrap().current;
+            let after = app.world_mut().query_filtered::<&Position, With<boss::BossBrain>>().single(app.world()).unwrap().0;
+            assert!(
+                health < 100000.0,
+                "niveau {level}: le boss doit toucher le héros (vie {health}, boss {boss_at} -> {after})"
+            );
         }
     }
 

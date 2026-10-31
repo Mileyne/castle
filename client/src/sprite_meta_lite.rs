@@ -1,0 +1,48 @@
+//! Généré par `tools/sprite_forge` (ne pas modifier à la main): taille des cases rognées de chaque planche, et position de cette
+//! zone dans la case d'origine de CELL pixels.
+
+/// Côté de la case d'origine, en pixels.
+pub const CELL: u32 = 192;
+
+/// (dossier, nom, x, y, largeur, hauteur) de la zone conservée dans chaque planche.
+pub const SHEETS: &[(&str, &str, u32, u32, u32, u32)] = &[
+    ("heroes", "knight", 0, 0, 192, 192),
+    ("heroes", "sorcerer", 0, 0, 192, 192),
+    ("heroes", "ranger", 21, 0, 152, 192),
+    ("heroes", "forgebraise", 0, 0, 192, 192),
+    ("monsters", "skeleton", 0, 8, 192, 184),
+    ("monsters", "bat", 20, 96, 152, 96),
+    ("monsters", "goblin", 16, 76, 160, 116),
+    ("monsters", "orc", 0, 0, 192, 192),
+    ("monsters", "ghoul", 0, 24, 192, 168),
+    ("monsters", "wolf", 0, 32, 192, 160),
+    ("monsters", "warg", 0, 68, 192, 124),
+    ("monsters", "troll", 0, 20, 192, 172),
+    ("monsters", "lich", 0, 8, 192, 184),
+    ("objects", "generator", 9, 64, 176, 128),
+    ("objects", "turret", 43, 92, 108, 100),
+    ("objects", "coin", 54, 124, 84, 68),
+    ("objects", "food", 54, 128, 100, 64),
+    ("objects", "key", 54, 128, 84, 64),
+    ("objects", "lever", 54, 88, 84, 104),
+    ("objects", "rune", 31, 116, 132, 76),
+    ("objects", "mechanism", 41, 72, 112, 120),
+    ("objects", "traparmed", 43, 116, 108, 76),
+    ("objects", "trapoff", 43, 144, 108, 48),
+    ("objects", "doorlocked", 37, 16, 120, 176),
+    ("objects", "doorroyal", 43, 28, 108, 164),
+    ("objects", "doorroyalemblem", 43, 28, 108, 164),
+    ("objects", "stairs", 31, 72, 132, 120),
+    ("objects", "potion", 54, 100, 84, 92),
+    ("objects", "wallrune", 47, 47, 100, 100),
+    ("objects", "wallgearsjammed", 47, 47, 100, 100),
+    ("objects", "wallgearsfixed", 47, 47, 100, 100),
+    ("objects", "walltargetempty", 47, 47, 100, 100),
+    ("objects", "walltargetmounted", 47, 47, 100, 100),
+    ("objects", "walltargethit", 47, 47, 100, 100),
+    ("objects", "portcullis", 43, 24, 108, 168),
+    ("objects", "ingredient", 54, 128, 84, 64),
+    ("objects", "gearpart", 54, 120, 84, 72),
+    ("objects", "targetdisc", 54, 120, 84, 72),
+    ("objects", "captivecage", 47, 28, 100, 164),
+];

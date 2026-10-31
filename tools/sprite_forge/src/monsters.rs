@@ -23,10 +23,26 @@ pub enum Monster {
     Orc,
     Ghoul,
     Wolf,
+    /// Boss: le chef de meute.
+    Warg,
+    /// Boss: le roi-troll.
+    Troll,
+    /// Boss: le roi-liche.
+    Lich,
 }
 
 /// Ordre des lignes dans la planche (le client utilise les mêmes indices).
-pub const MONSTERS: [Monster; 6] = [Monster::Skeleton, Monster::Bat, Monster::Goblin, Monster::Orc, Monster::Ghoul, Monster::Wolf];
+pub const MONSTERS: [Monster; 9] = [
+    Monster::Skeleton,
+    Monster::Bat,
+    Monster::Goblin,
+    Monster::Orc,
+    Monster::Ghoul,
+    Monster::Wolf,
+    Monster::Warg,
+    Monster::Troll,
+    Monster::Lich,
+];
 
 pub(crate) fn skeleton_dims() -> Dims {
     let dims = Dims {
@@ -194,7 +210,7 @@ fn lunge(parts: &mut [Part], monster: Monster, t: f32) {
     // La chauve-souris pique du haut vers l'avant; les autres bondissent.
     let (back, forward, lean_back, lean_forward, hop) = match monster {
         Monster::Bat => (0.1, 0.55, 0.15, 0.55, 0.0),
-        Monster::Orc => (0.06, 0.28, 0.12, 0.38, 0.02),
+        Monster::Orc | Monster::Troll => (0.06, 0.28, 0.12, 0.38, 0.02),
         _ => (0.08, 0.38, 0.18, 0.5, 0.06),
     };
     let angle = lean_forward * strike - lean_back * windup;
@@ -215,5 +231,8 @@ pub(crate) fn build_manga(monster: Monster, pose: Pose) -> Vec<Part> {
         Monster::Ghoul => crate::monsters_more::ghoul(pose),
         // Les grosses bêtes sont agrandies: le loup remplit mieux sa case, l'orque reste dans la sienne.
         Monster::Wolf => scaled(crate::monsters_more::wolf(pose, false), 1.7),
+        Monster::Warg => crate::monsters_boss::warg(pose),
+        Monster::Troll => crate::monsters_boss::troll(pose),
+        Monster::Lich => crate::monsters_boss::lich(pose),
     }
 }

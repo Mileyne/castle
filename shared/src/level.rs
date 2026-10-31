@@ -55,6 +55,23 @@ impl Thing {
             | Self::Trigger { at, .. } => *at,
         }
     }
+
+    /// Déplace l'élément (l'éditeur de niveaux).
+    pub fn set_at(&mut self, to: Vec2) {
+        match self {
+            Self::Monster { at, .. }
+            | Self::Generator { at }
+            | Self::Pickup { at, .. }
+            | Self::Trap { at }
+            | Self::Relic { at }
+            | Self::Captive { at }
+            | Self::Ward { at }
+            | Self::Portcullis { at, .. }
+            | Self::Panel { at, .. }
+            | Self::Exit { at, .. }
+            | Self::Trigger { at, .. } => *at = to,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -66,6 +83,11 @@ pub struct LevelDef {
     pub size: UVec2,
     /// Les tuiles, une chaîne par ligne, de haut en bas: `#` mur, `.` sol.
     pub rows: Vec<String>,
+    /// Décor de chaque tuile, quand il change dans le niveau: une chaîne par ligne comme `rows`, où `.` garde la région du
+    /// niveau et un chiffre de `0` à `8` emprunte le sol ou les murs de la région de ce rang dans `Region::ALL`. Vide: toute
+    /// la carte garde la région du niveau. Permet à un niveau de changer d'aspect au fil de la progression.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub style: Vec<String>,
     /// Salles, couloirs et portes (voir `Layout`).
     pub layout: Layout,
     /// Objectif du niveau: genre et nombre à atteindre.
@@ -103,6 +125,7 @@ impl LevelDef {
             region,
             size: UVec2::new(w, h),
             rows,
+            style: Vec::new(),
             layout: Layout {
                 rooms: vec![zone(2, RoomKind::Start), zone(w - 8, RoomKind::Exit)],
                 connections: Vec::<Connection>::new(),
@@ -138,9 +161,45 @@ impl LevelDef {
             region,
             size,
             rows,
+            style: Vec::new(),
             layout: dungeon.layout.clone(),
             quest,
             things,
+        }
+    }
+
+    /// La région dont la tuile (`x`, `y` croissant vers le haut) emprunte ses briques: celle que le décor du niveau lui donne,
+    /// sinon la région du niveau.
+    pub fn region_at(&self, x: i32, y: i32) -> Region {
+        let row = self.size.y as i32 - 1 - y;
+        let style = usize::try_from(row).ok().and_then(|row| self.style.get(row));
+        style
+            .and_then(|line| line.chars().nth(usize::try_from(x).ok()?))
+            .and_then(|c| c.to_digit(10))
+            .and_then(|rank| Region::ALL.get(rank as usize).copied())
+            .unwrap_or(self.region)
+    }
+
+    /// Donne à une tuile le décor de `region` (ou la région du niveau si elle est identique, pour garder le fichier léger).
+    pub fn set_region_at(&mut self, x: i32, y: i32, region: Region) {
+        if x < 0 || y < 0 || x >= self.size.x as i32 || y >= self.size.y as i32 {
+            return;
+        }
+        let row = (self.size.y as i32 - 1 - y) as usize;
+        if self.style.is_empty() {
+            if region == self.region {
+                return;
+            }
+            self.style = vec![".".repeat(self.size.x as usize); self.size.y as usize];
+        }
+        let rank = Region::ALL.iter().position(|r| *r == region).unwrap_or(0);
+        let mark = if region == self.region { '.' } else { char::from_digit(rank as u32, 10).unwrap_or('.') };
+        let mut chars: Vec<char> = self.style[row].chars().collect();
+        chars[x as usize] = mark;
+        self.style[row] = chars.into_iter().collect();
+        // Plus aucun écart avec la région du niveau: on n'écrit rien dans le fichier.
+        if self.style.iter().all(|line| line.chars().all(|c| c == '.')) {
+            self.style.clear();
         }
     }
 
@@ -175,6 +234,19 @@ impl LevelDef {
             }
             if let Some(c) = line.chars().find(|c| !matches!(c, '#' | '.')) {
                 problems.push(format!("la ligne {} contient le caractère inconnu '{c}'", i + 1));
+            }
+        }
+        if !self.style.is_empty() {
+            if self.style.len() != self.size.y as usize {
+                problems.push(format!("{} lignes de décor pour une hauteur de {}", self.style.len(), self.size.y));
+            }
+            for (i, line) in self.style.iter().enumerate() {
+                if line.chars().count() != self.size.x as usize {
+                    problems.push(format!("la ligne de décor {} fait {} tuiles pour une largeur de {}", i + 1, line.chars().count(), self.size.x));
+                }
+                if let Some(c) = line.chars().find(|c| *c != '.' && !c.to_digit(10).is_some_and(|d| (d as usize) < Region::ALL.len())) {
+                    problems.push(format!("la ligne de décor {} contient le caractère inconnu '{c}'", i + 1));
+                }
             }
         }
         problems
@@ -252,6 +324,27 @@ impl LevelDef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tiles_can_borrow_the_look_of_another_region() {
+        let mut def = LevelDef::blank("essai", Region::Forest, UVec2::new(20, 12));
+        assert_eq!(def.region_at(3, 3), Region::Forest);
+        // Repeindre dans la région du niveau ne crée rien.
+        def.set_region_at(3, 3, Region::Forest);
+        assert!(def.style.is_empty());
+        def.set_region_at(3, 3, Region::Crypts);
+        def.set_region_at(19, 11, Region::Royal);
+        assert_eq!(def.region_at(3, 3), Region::Crypts);
+        assert_eq!(def.region_at(19, 11), Region::Royal);
+        assert_eq!(def.region_at(4, 3), Region::Forest);
+        assert!(def.validate().iter().all(|p| !p.contains("décor")));
+        // Le décor survit à l'écriture du fichier, et disparaît quand on le remet à la région du niveau.
+        let back = LevelDef::parse(&def.to_ron()).unwrap();
+        assert_eq!(back.region_at(3, 3), Region::Crypts);
+        def.set_region_at(3, 3, Region::Forest);
+        def.set_region_at(19, 11, Region::Forest);
+        assert!(def.style.is_empty());
+    }
 
     #[test]
     fn a_generated_castle_survives_the_level_file_round_trip() {

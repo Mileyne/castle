@@ -10,6 +10,7 @@
 //!
 //! « Appliquer au jeu » enregistre puis régénère les planches du thème dans `client/assets/art/`.
 
+mod level_art;
 mod levels;
 mod sprites;
 mod tiles;

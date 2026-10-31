@@ -199,3 +199,32 @@ fn apply_ui_scale(mut scale: ResMut<UiScale>) {
         scale.0 = wanted;
     }
 }
+
+/// Mémoire physique de l'appareil, en octets (0 si elle est inconnue).
+fn physical_memory() -> u64 {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        unsafe extern "C" {
+            fn sysctlbyname(name: *const std::ffi::c_char, old: *mut std::ffi::c_void, old_len: *mut usize, new: *mut std::ffi::c_void, new_len: usize) -> i32;
+        }
+        let mut bytes: u64 = 0;
+        let mut len = std::mem::size_of::<u64>();
+        // SAFETY: `hw.memsize` est un entier de 64 bits; `len` donne la taille du tampon.
+        let status = unsafe { sysctlbyname(c"hw.memsize".as_ptr(), (&raw mut bytes).cast(), &raw mut len, std::ptr::null_mut(), 0) };
+        if status == 0 { bytes } else { 0 }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    {
+        0
+    }
+}
+
+/// L'appareil a peu de mémoire (moins de 3 Go: Apple TV HD...): le jeu charge alors des planches de sprites moins grandes.
+/// `CASTLE_LITE=1` (ou `0`) force le choix, pour l'essayer sur ordinateur.
+pub fn low_memory() -> bool {
+    match std::env::var("CASTLE_LITE").as_deref() {
+        Ok("1") => true,
+        Ok("0") => false,
+        _ => (1..3 * 1024 * 1024 * 1024).contains(&physical_memory()),
+    }
+}

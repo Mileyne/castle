@@ -3,10 +3,15 @@ name = "castle_client"
 version = "0.4.0"
 edition = "2024"
 
+[features]
+# Trace des systèmes du moteur (fichier JSON pour chrome://tracing ou Perfetto): `cargo run --release -p castle_client --features profile`
+profile = ["bevy/trace_chrome"]
+
 [dependencies]
 castle_shared = { path = "../shared" }
 castle_server = { path = "../server" }
-bevy = { workspace = true, default-features = true }
+# Pas de rendu 3D (« 3d »): le jeu est en 2D, et le regroupement de lumières 3D de Bevy ne tient pas sur l'Apple TV HD (A8).
+bevy = { workspace = true, default-features = false, features = ["2d", "ui", "audio", "basis-universal"] }
 bevy_replicon.workspace = true
 bevy_replicon_renet.workspace = true
 bevy_fluent.workspace = true
@@ -18,3 +23,6 @@ sys-locale = "0.3"
 # Manettes sur iOS / tvOS (framework GameController): voir gamecontroller.rs.
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "0.6"
+
+[dev-dependencies]
+basis-universal = "0.3"

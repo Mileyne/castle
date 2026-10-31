@@ -14,9 +14,10 @@ use bevy_replicon_renet::{
 };
 use castle_shared::*;
 
-use art::{Art, HERO_ANCHOR, PROP_ANCHOR, Prop, SPRITE_SIZE, WALL_ANCHOR, WalkCycle, direction_index, hero_index, monster_index, monster_scale, object, object_index, projectile};
+use art::{Art, PROP_ANCHOR, Prop, SPRITE_SIZE, WalkCycle, direction_index, monster_scale, object, projectile};
 
 mod art;
+mod boss;
 mod camera;
 mod controls;
 mod dialogue;
@@ -29,6 +30,8 @@ mod lighting;
 mod pause;
 mod puzzle;
 mod settings;
+mod sprite_meta;
+mod sprite_meta_lite;
 mod level_intro;
 mod music;
 mod quest;
@@ -53,8 +56,101 @@ pub struct Lift(f32);
 #[derive(Component)]
 struct Launch(Vec2);
 
+/// Écrit dans le journal toute exception Objective-C au moment où elle est levée (Metal en lève quand il refuse une opération):
+/// sinon Rust ne voit qu'une « exception étrangère » et abandonne sans dire laquelle.
+#[cfg(target_os = "ios")]
+fn log_objc_exceptions() {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    unsafe extern "C" {
+        fn objc_setExceptionPreprocessor(
+            preprocessor: extern "C" fn(*mut AnyObject) -> *mut AnyObject,
+        ) -> *mut std::ffi::c_void;
+    }
+    extern "C" fn preprocess(exception: *mut AnyObject) -> *mut AnyObject {
+        // SAFETY: `exception` est l'objet que le runtime Objective-C vient de lever; on ne fait que lire son nom et sa raison.
+        unsafe {
+            let text = |object: *mut AnyObject| -> String {
+                if object.is_null() {
+                    return String::new();
+                }
+                let chars: *const std::ffi::c_char = msg_send![object, UTF8String];
+                if chars.is_null() { String::new() } else { std::ffi::CStr::from_ptr(chars).to_string_lossy().into_owned() }
+            };
+            let name: *mut AnyObject = msg_send![exception, name];
+            let reason: *mut AnyObject = msg_send![exception, reason];
+            eprintln!("EXCEPTION OBJC: {} - {}", text(name), text(reason));
+            // La pile au moment où l'exception est levée.
+            let symbols: *mut AnyObject = msg_send![objc2::class!(NSThread), callStackSymbols];
+            if !symbols.is_null() {
+                let count: usize = msg_send![symbols, count];
+                for i in 0..count.min(40) {
+                    let line: *mut AnyObject = msg_send![symbols, objectAtIndex: i];
+                    eprintln!("   {}", text(line));
+                }
+            }
+        }
+        exception
+    }
+    // SAFETY: `preprocess` a la signature attendue par le runtime Objective-C.
+    unsafe { objc_setExceptionPreprocessor(preprocess) };
+}
+
+/// Toutes les cinq secondes, écrit dans le journal la cadence d'affichage et le nombre d'entités (pour juger la fluidité sur
+/// les petits appareils).
+fn log_frame_rate(
+    time: Res<Time>,
+    diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
+    entities: Query<Entity>,
+    mut next: Local<f32>,
+) {
+    use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
+    if time.elapsed_secs() < *next {
+        return;
+    }
+    *next = time.elapsed_secs() + 5.0;
+    let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|d| d.smoothed()).unwrap_or(0.0);
+    let frame = diagnostics.get(&FrameTimeDiagnosticsPlugin::FRAME_TIME).and_then(|d| d.smoothed()).unwrap_or(0.0);
+    info!("cadence: {fps:.0} images/s ({frame:.1} ms), {} entités", entities.iter().count());
+}
+
+/// Journal du jeu. Sur iOS et tvOS, le journal système n'est pas lisible depuis le Mac sans outil tiers: on l'écrit aussi dans
+/// `tmp/castle.log` du conteneur de l'app (à récupérer avec `devicectl device copy from`), avec les paniques.
+fn log_plugin() -> bevy::log::LogPlugin {
+    #[cfg(target_os = "ios")]
+    {
+        fn file_layer(_app: &mut App) -> Option<bevy::log::BoxedLayer> {
+            use bevy::log::tracing_subscriber::{self, Layer};
+            let path = std::env::temp_dir().join("castle.log");
+            let file = std::fs::File::create(&path).ok()?;
+            // Les messages d'arrêt de Rust (exceptions étrangères, abandon) vont à la sortie d'erreur: on la redirige aussi.
+            {
+                use std::os::fd::AsRawFd;
+                unsafe extern "C" {
+                    fn dup2(from: i32, to: i32) -> i32;
+                }
+                // SAFETY: `file` est un descripteur ouvert; 2 est la sortie d'erreur du processus.
+                unsafe { dup2(file.as_raw_fd(), 2) };
+            }
+            let panics = path.clone();
+            std::panic::set_hook(Box::new(move |info| {
+                use std::io::Write;
+                if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&panics) {
+                    let _ = writeln!(file, "PANIC: {info}");
+                }
+            }));
+            Some(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(std::sync::Mutex::new(file)).boxed())
+        }
+        return bevy::log::LogPlugin { custom_layer: file_layer, ..default() };
+    }
+    #[cfg(not(target_os = "ios"))]
+    bevy::log::LogPlugin::default()
+}
+
 /// Lance le jeu (ne revient qu'à la fermeture).
 pub fn run() {
+    #[cfg(target_os = "ios")]
+    log_objc_exceptions();
     // Assets du dépôt si on lance depuis une compilation du dépôt, sinon à côté du programme.
     // Un dossier `assets` à côté du programme (version livrée) passe avant celui du dépôt.
     // Dans un paquet macOS (`Castle.app/Contents/MacOS/castle_client`), ils sont dans `Contents/Resources`.
@@ -73,6 +169,7 @@ pub fn run() {
         .add_plugins((
             // `nearest` garde les pixels nets.
             DefaultPlugins
+                .set(log_plugin())
                 .set(ImagePlugin::default_nearest())
                 .set(AssetPlugin {
                     file_path: assets_path.into(),
@@ -97,7 +194,15 @@ pub fn run() {
             gore::GorePlugin,
             dialogue::DialoguePlugin,
         ))
-        .add_plugins((settings::SettingsPlugin, controls::ControlsPlugin, puzzle::PuzzlePlugin, touch::TouchPlugin, music::MusicPlugin, weather::WeatherPlugin))
+        .add_plugins((
+            settings::SettingsPlugin,
+            controls::ControlsPlugin,
+            puzzle::PuzzlePlugin,
+            boss::BossPlugin,
+            touch::TouchPlugin,
+            music::MusicPlugin,
+            weather::WeatherPlugin,
+        ))
         .add_plugins({
             #[cfg(target_os = "ios")]
             {
@@ -112,6 +217,8 @@ pub fn run() {
         // Fenêtre au premier plan: rendu continu. En arrière-plan: le jeu se met presque au repos.
         .insert_resource(bevy::winit::WinitSettings::game())
         .add_systems(Startup, connect_from_command_line)
+        .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
+        .add_systems(Update, log_frame_rate)
         .add_systems(Update, begin_connection.run_if(resource_exists::<host::ConnectAt>))
         .add_observer(mark_local_player)
         .add_systems(
@@ -154,6 +261,8 @@ fn window() -> Window {
 fn window() -> Window {
     Window {
         title: "Castle".into(),
+        // `CASTLE_NOVSYNC=1`: pas de synchronisation verticale, pour mesurer ce que le moteur peut vraiment faire.
+        present_mode: if std::env::var_os("CASTLE_NOVSYNC").is_some() { bevy::window::PresentMode::AutoNoVsync } else { default() },
         ..default()
     }
 }
@@ -348,26 +457,25 @@ fn dress_new_entities(
 ) {
     // Un objet animé: sprite de la ligne `row` de la planche, ancré au sol.
     let prop = |row: usize| {
-        (
-            art.objects.sprite_sized(object_index(row, 0), Vec2::splat(SPRITE_SIZE)),
-            Prop(row),
-            PROP_ANCHOR,
-        )
+        let (sprite, anchor) = art.prop_sprite(row, 0, Vec2::splat(SPRITE_SIZE));
+        (sprite, Prop(row), anchor)
     };
     for (entity, pos, class) in &players {
         // Au départ le héros regarde vers le sud (vers le spectateur).
-        let index = hero_index(class.copied().unwrap_or_default(), direction_index(Vec2::NEG_Y), 0);
+        let class = class.copied().unwrap_or_default();
+        let (sprite, anchor) = art.hero_sprite(class, direction_index(Vec2::NEG_Y), 0, Vec2::splat(SPRITE_SIZE));
         commands.entity(entity).insert((
-            art.heroes.sprite_sized(index, Vec2::splat(SPRITE_SIZE)),
-            HERO_ANCHOR,
+            sprite,
+            anchor,
             WalkCycle::default(),
             Transform::from_translation(pos.0.extend(1.0)),
         ));
     }
     for (entity, pos, monster) in &monsters {
+        let (sprite, anchor) = art.monster_sprite(monster.0, direction_index(Vec2::NEG_Y), 0, Vec2::splat(SPRITE_SIZE * monster_scale(monster.0)));
         commands.entity(entity).insert((
-            art.monsters.sprite_sized(monster_index(monster.0, direction_index(Vec2::NEG_Y), 0), Vec2::splat(SPRITE_SIZE * monster_scale(monster.0))),
-            PROP_ANCHOR,
+            sprite,
+            anchor,
             WalkCycle::default(),
             Transform::from_translation(pos.0.extend(0.9)),
         ));
@@ -408,10 +516,11 @@ fn dress_new_entities(
             InteractKind::Mechanism => object::WALL_GEARS_JAMMED,
             InteractKind::Push => continue,
         };
+        let (sprite, anchor) = art.prop_sprite(row, 0, Vec2::splat(SPRITE_SIZE));
         commands.entity(entity).insert((
-            art.objects.sprite_sized(object_index(row, 0), Vec2::splat(SPRITE_SIZE)),
+            sprite,
             Prop(row),
-            WALL_ANCHOR,
+            anchor,
             Transform::from_translation(pos.0.extend(0.4)),
         ));
     }

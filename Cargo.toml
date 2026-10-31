@@ -17,3 +17,5 @@ opt-level = 3
 
 [patch.crates-io]
 winit = { path = "vendor/winit" }
+# Dessin des sprites sans instance de départ (Apple TV HD): voir vendor/bevy_sprite_render/src/render/mod.rs.
+bevy_sprite_render = { path = "vendor/bevy_sprite_render" }

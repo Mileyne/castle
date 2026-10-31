@@ -3,7 +3,7 @@
 use bevy::{color::palettes::css, prelude::*};
 use castle_shared::{Captive, Position, Quest, Relic};
 
-use crate::art::{Art, PROP_ANCHOR, Prop, SPRITE_SIZE, object, object_index};
+use crate::art::{Art, Prop, SPRITE_SIZE, object};
 use crate::i18n::Tr;
 use crate::ui::ui_font;
 
@@ -45,11 +45,18 @@ fn spawn_quest_hud(mut commands: Commands, assets: Res<AssetServer>) {
         });
 }
 
-/// L'objectif à montrer: le premier à accomplir (la chasse avant les autres), ou le dernier une fois tous remplis.
+/// L'objectif à montrer: le premier à accomplir (le boss, puis la chasse, avant les autres), ou le dernier une fois tous remplis.
 fn current_quest<'a>(quests: impl Iterator<Item = &'a Quest>) -> Option<&'a Quest> {
     let mut all: Vec<&Quest> = quests.collect();
-    all.sort_by_key(|quest| quest.kind != castle_shared::QuestKind::Hunt);
-    all.iter().copied().find(|quest| !quest.is_done()).or_else(|| all.last().copied())
+    all.sort_by_key(|quest| match quest.kind {
+        castle_shared::QuestKind::Boss => 0,
+        castle_shared::QuestKind::Hunt => 1,
+        _ => 2,
+    });
+    all.iter()
+        .copied()
+        .find(|quest| !quest.is_done())
+        .or_else(|| all.last().copied())
 }
 
 fn update_quest_hud(
@@ -91,12 +98,12 @@ fn dress_quest_entities(
 ) {
     let size = Vec2::splat(SPRITE_SIZE);
     for (entity, pos) in &relics {
-        let mut sprite = art.objects.sprite_sized(object_index(object::KEY, 0), size);
+        let (mut sprite, anchor) = art.prop_sprite(object::KEY, 0, size);
         sprite.color = Color::srgb(0.55, 1.0, 1.0);
-        commands.entity(entity).insert((sprite, Prop(object::KEY), PROP_ANCHOR, Transform::from_translation(pos.0.extend(0.6))));
+        commands.entity(entity).insert((sprite, Prop(object::KEY), anchor, Transform::from_translation(pos.0.extend(0.6))));
     }
     for (entity, pos) in &captives {
-        let sprite = art.objects.sprite_sized(object_index(object::CAPTIVE, 0), size);
-        commands.entity(entity).insert((sprite, Prop(object::CAPTIVE), PROP_ANCHOR, Transform::from_translation(pos.0.extend(0.6))));
+        let (sprite, anchor) = art.prop_sprite(object::CAPTIVE, 0, size);
+        commands.entity(entity).insert((sprite, Prop(object::CAPTIVE), anchor, Transform::from_translation(pos.0.extend(0.6))));
     }
 }

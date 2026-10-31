@@ -9,3 +9,4 @@ glam = "0.32"
 png = "0.17"
 serde = { version = "1", features = ["derive"] }
 ron = "0.12"
+basis-universal = "0.3"
