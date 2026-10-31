@@ -2419,6 +2419,7 @@ dependencies = [
  "fluent_content",
  "objc2 0.6.5",
  "png 0.17.16",
+ "sprite_forge",
  "sys-locale",
  "unic-langid",
 ]

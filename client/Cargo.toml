@@ -6,6 +6,8 @@ edition = "2024"
 [features]
 # Trace des systèmes du moteur (fichier JSON pour chrome://tracing ou Perfetto): `cargo run --release -p castle_client --features profile`
 profile = ["bevy/trace_chrome"]
+# Les héros et les monstres dessinés en 3D par la carte graphique (essai, ordinateur seulement): `CASTLE_LIVE3D=1` pour l'activer.
+live3d = ["bevy/3d", "dep:sprite_forge"]
 
 [dependencies]
 castle_shared = { path = "../shared" }
@@ -19,6 +21,7 @@ bevy_yarnspinner.workspace = true
 fluent_content = "0.0.5"
 unic-langid = { version = "0.9", features = ["macros"] }
 sys-locale = "0.3"
+sprite_forge = { path = "../tools/sprite_forge", optional = true }
 
 # Manettes sur iOS / tvOS (framework GameController): voir gamecontroller.rs.
 [target.'cfg(target_os = "ios")'.dependencies]

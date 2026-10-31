@@ -27,6 +27,8 @@ mod gore;
 mod host;
 mod i18n;
 mod lighting;
+#[cfg(feature = "live3d")]
+mod live3d;
 mod pause;
 mod puzzle;
 mod settings;
@@ -199,6 +201,8 @@ pub fn run() {
             controls::ControlsPlugin,
             puzzle::PuzzlePlugin,
             boss::BossPlugin,
+            #[cfg(feature = "live3d")]
+            live3d::Live3dPlugin,
             touch::TouchPlugin,
             music::MusicPlugin,
             weather::WeatherPlugin,

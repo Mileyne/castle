@@ -80,6 +80,10 @@ pub struct ArtLibrary(Vec<(ArtTheme, Art)>);
 #[derive(Component)]
 pub struct Stain;
 
+/// Les systèmes qui animent les héros et les monstres (pose et image): l'essai de rendu 3D s'exécute après.
+#[derive(SystemSet, Hash, Eq, PartialEq, Clone, Debug)]
+pub struct AnimateCharacters;
+
 pub struct ArtPlugin;
 
 impl Plugin for ArtPlugin {
@@ -88,7 +92,7 @@ impl Plugin for ArtPlugin {
             .add_systems(Startup, (load_art, spawn_transition_overlay))
             .add_systems(
                 Update,
-                (log_big_images, start_transition, run_transition, rebuild_world, tint_tiles, animate_heroes, animate_monsters, animate_props).chain(),
+                (log_big_images, start_transition, run_transition, rebuild_world, tint_tiles, (animate_heroes, animate_monsters).in_set(AnimateCharacters), animate_props).chain(),
             );
     }
 }
@@ -394,15 +398,26 @@ pub struct Prop(pub usize);
 /// collent au déplacement.
 #[derive(Component, Default)]
 pub struct WalkCycle {
-    phase: f32,
+    pub(crate) phase: f32,
     /// Dernière direction de marche (pour les monstres, qui n'ont pas de regard répliqué).
-    direction: usize,
+    pub(crate) direction: usize,
     last: Option<Vec2>,
     /// Temps restant pendant lequel on considère le héros en marche (évite de clignoter entre deux images du réseau).
     moving_for: f32,
     /// Dernier compteur de coups vu, et temps écoulé depuis le début du geste en cours.
     last_strikes: Option<u8>,
     attack_elapsed: Option<f32>,
+    /// Ce que le personnage fait en ce moment (repos, marche, coup) et où il en est de 0 à 1, pour le dessiner en 3D.
+    pub(crate) pose: (PoseKind, f32),
+}
+
+/// Ce que fait un personnage (voir `WalkCycle::pose`).
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub enum PoseKind {
+    #[default]
+    Idle,
+    Walk,
+    Attack,
 }
 
 fn load_set(assets: &AssetServer, layouts: &mut Assets<TextureAtlasLayout>, theme: ArtTheme) -> Art {
@@ -1055,6 +1070,13 @@ fn animate_heroes(
         } else {
             (time.elapsed_secs() * ANIMATION_FPS) as usize % HERO_IDLE_FRAMES
         };
+        cycle.pose = if let Some(progress) = attack_frame {
+            (PoseKind::Attack, progress)
+        } else if cycle.moving_for > 0.0 {
+            (PoseKind::Walk, cycle.phase)
+        } else {
+            (PoseKind::Idle, time.elapsed_secs().fract())
+        };
         let index = sheet_index(direction_index(facing.0), frame);
         if let Some(atlas) = sprite.texture_atlas.as_mut() {
             if atlas.index != index {
@@ -1100,6 +1122,15 @@ fn animate_monsters(
             MonsterKind::Bat => HERO_IDLE_FRAMES + (time.elapsed_secs() * ANIMATION_FPS) as usize % HERO_WALK_FRAMES,
             _ if cycle.moving_for > 0.0 => HERO_IDLE_FRAMES + (cycle.phase * HERO_WALK_FRAMES as f32) as usize % HERO_WALK_FRAMES,
             _ => (time.elapsed_secs() * ANIMATION_FPS) as usize % HERO_IDLE_FRAMES,
+        };
+        cycle.pose = if let Some(progress) = attack_progress {
+            (PoseKind::Attack, progress)
+        } else if monster.0 == MonsterKind::Bat {
+            (PoseKind::Walk, (time.elapsed_secs() * 1.6).fract())
+        } else if cycle.moving_for > 0.0 {
+            (PoseKind::Walk, cycle.phase)
+        } else {
+            (PoseKind::Idle, time.elapsed_secs().fract())
         };
         let index = sheet_index(cycle.direction, frame);
         if let Some(atlas) = sprite.texture_atlas.as_mut() {
