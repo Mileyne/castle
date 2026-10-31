@@ -18,6 +18,7 @@ use art::{Art, HERO_ANCHOR, PROP_ANCHOR, Prop, SPRITE_SIZE, WALL_ANCHOR, WalkCyc
 
 mod art;
 mod camera;
+mod controls;
 mod dialogue;
 #[cfg(target_os = "ios")]
 mod gamecontroller;
@@ -27,6 +28,7 @@ mod i18n;
 mod lighting;
 mod pause;
 mod puzzle;
+mod settings;
 mod level_intro;
 mod music;
 mod quest;
@@ -90,7 +92,7 @@ pub fn run() {
             gore::GorePlugin,
             dialogue::DialoguePlugin,
         ))
-        .add_plugins((puzzle::PuzzlePlugin, touch::TouchPlugin, music::MusicPlugin, weather::WeatherPlugin))
+        .add_plugins((settings::SettingsPlugin, controls::ControlsPlugin, puzzle::PuzzlePlugin, touch::TouchPlugin, music::MusicPlugin, weather::WeatherPlugin))
         .add_plugins({
             #[cfg(target_os = "ios")]
             {
@@ -214,14 +216,30 @@ fn begin_connection(mut commands: Commands, channels: Res<RepliconChannels>, req
     Ok(())
 }
 
-/// Envoie direction, attaque et pouvoir quand ils changent, et le héros choisi (touches 1 à 4).
+/// Le tir maintenu: depuis combien de temps, et si le pouvoir spécial a déjà été lancé pendant cette pression.
+#[derive(Default)]
+struct FireHold {
+    held: f32,
+    special_sent: bool,
+}
+
+/// Envoie direction, tir, pouvoir et action quand ils changent, et le héros choisi.
+///
+/// Les commandes sont les mêmes partout (voir `controls.rs`): Espace / B tire, et maintenu assez longtemps lance le pouvoir
+/// spécial à la place (à la manette, A le lance directement); Maj / X agit; Ctrl / Y passe au héros suivant. La manette et les boutons à l'écran « appuient » sur ces
+/// mêmes touches (`touch.rs`). 1 à 4 restent un raccourci discret au clavier pour choisir directement un héros.
 fn send_input(
     mut commands: Commands,
+    time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     mut last: Local<(Vec2, bool, bool, bool)>,
+    mut fire: Local<FireHold>,
     dialogue: Res<dialogue::DialogueState>,
     pause: Res<pause::PauseMenu>,
     stick: Res<touch::Stick>,
+    party: Option<Res<LocalParty>>,
+    active: Option<Single<&HeroClass, With<LocalPlayer>>>,
+    heroes: Query<(&HeroClass, &PartyId, Has<Downed>), With<Player>>,
 ) {
     let mut dir = Vec2::ZERO;
     if keys.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]) {
@@ -237,7 +255,7 @@ fn send_input(
         dir.x += 1.0;
     }
     // Menu de pause ouvert: on lâche tout, et on ne change pas de héros.
-    let held = |key| !pause.open && keys.pressed(key);
+    let held = |key: KeyCode| !pause.open && keys.pressed(key);
     // Sans touche de direction, le joystick tactile ou la manette: on garde sa direction, arrondie à 1/32 de tour
     // pour ne pas envoyer un message au serveur à chaque frémissement du pouce.
     if dir == Vec2::ZERO && stick.0 != Vec2::ZERO {
@@ -245,9 +263,19 @@ fn send_input(
         dir = Vec2::from_angle((stick.0.to_angle() / step).round() * step);
     }
     let dir = if pause.open { Vec2::ZERO } else { dir.normalize_or_zero() };
-    let attack = held(KeyCode::Space);
-    let special = held(KeyCode::KeyE);
-    let interact = held(KeyCode::KeyF);
+    // Le tir: une pression brève frappe; maintenue, elle lance le pouvoir (une fois) à la place de frapper.
+    let fire_down = held(KeyCode::Space);
+    if fire_down {
+        fire.held += time.delta_secs();
+    } else {
+        *fire = FireHold::default();
+    }
+    let long_press = fire_down && fire.held >= controls::SPECIAL_HOLD;
+    let attack = fire_down && !long_press;
+    let special_pulse = long_press && !std::mem::replace(&mut fire.special_sent, true);
+    // E (la manette: A) lance aussi le pouvoir, mais pas pendant un dialogue (A sert alors à continuer).
+    let special = special_pulse || (held(KeyCode::KeyE) && !dialogue.showing());
+    let interact = held(KeyCode::ShiftLeft) || held(KeyCode::ShiftRight);
     if (dir, attack, special, interact) != *last {
         *last = (dir, attack, special, interact);
         commands.client_trigger(PlayerInput {
@@ -261,6 +289,19 @@ fn send_input(
     // Pendant un vote de dialogue, 1 à 4 servent à voter et non à changer de héros.
     if dialogue.is_voting() || pause.open {
         return;
+    }
+    // Ctrl (Y à la manette): le héros vivant suivant de l'équipe.
+    if keys.just_pressed(KeyCode::ControlLeft) || keys.just_pressed(KeyCode::ControlRight) {
+        if let (Some(party), Some(active)) = (&party, &active) {
+            let order = HeroClass::ALL;
+            let at = order.iter().position(|class| class == **active).unwrap_or(0);
+            let next = (1..order.len())
+                .map(|step| order[(at + step) % order.len()])
+                .find(|class| heroes.iter().any(|(c, id, downed)| c == class && id.0 == party.0 && !downed));
+            if let Some(class) = next {
+                commands.client_trigger(SwitchHero(class));
+            }
+        }
     }
     for (key, class) in [
         (KeyCode::Digit1, HeroClass::Knight),

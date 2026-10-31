@@ -71,9 +71,13 @@ fn build_localization(
 
 /// F1 passe à la langue suivante.
 fn cycle_language(keys: Res<ButtonInput<KeyCode>>, mut locale: ResMut<Locale>) {
-    if !keys.just_pressed(KeyCode::F1) {
-        return;
+    if keys.just_pressed(KeyCode::F1) {
+        next_language(&mut locale);
     }
+}
+
+/// Passe à la langue suivante (F1, ou l'option des réglages).
+pub fn next_language(locale: &mut Locale) {
     let langs = supported();
     let current = langs
         .iter()
@@ -82,20 +86,43 @@ fn cycle_language(keys: Res<ButtonInput<KeyCode>>, mut locale: ResMut<Locale>) {
     locale.requested = langs[(current + 1) % langs.len()].clone();
 }
 
-fn refresh_texts(localization: Option<Res<Localization>>, mut texts: Query<(&Tr, &mut Text)>) {
+/// Marques de commandes des textes (`%attack%`...): chacune devient le nom de la commande dans le mode de saisie en cours,
+/// lu dans la clé `ctl-<nom>-<mode>` (voir `controls.rs`).
+const CONTROL_TOKENS: [&str; 11] =
+    ["move", "nav", "attack", "special", "action", "switch", "confirm", "continue", "back", "delete", "language"];
+
+/// Remplace les marques de commandes d'un texte (`%attack%`...) par le nom de la commande dans le mode de saisie donné.
+pub fn resolve_controls(text: String, localization: &Localization, mode: crate::controls::InputMode) -> String {
+    if !text.contains('%') {
+        return text;
+    }
+    let suffix = mode.suffix();
+    let mut full = text;
+    for token in CONTROL_TOKENS {
+        let mark = format!("%{token}%");
+        if full.contains(&mark) {
+            let label = localization.content(format!("ctl-{token}-{suffix}").as_str()).unwrap_or_else(|| mark.clone());
+            full = full.replace(&mark, &label);
+        }
+    }
+    full
+}
+
+fn refresh_texts(
+    localization: Option<Res<Localization>>,
+    mode: Res<crate::controls::InputMode>,
+    mut texts: Query<(&Tr, &mut Text)>,
+) {
     let Some(localization) = localization else {
         return;
     };
+    let suffix = mode.suffix();
     for (tr, mut text) in &mut texts {
         // Une clé absente reste visible à l'écran: plus simple à repérer qu'un texte vide.
-        // Sur écran tactile, une clé `<clé>-touch` remplace l'aide écrite pour le clavier, quand elle existe.
-        let touch = crate::touch::enabled()
-            .then(|| localization.content(format!("{}-touch", tr.key).as_str()))
-            .flatten();
-        let translated = touch
-            .or_else(|| localization.content(tr.key))
-            .unwrap_or_else(|| tr.key.to_string());
-        let full = format!("{}{translated}", tr.prefix);
+        // Une clé `<clé>-<mode>` (gamepad, touch) remplace le texte écrit pour le clavier, quand elle existe.
+        let specific = (suffix != "keyboard").then(|| localization.content(format!("{}-{suffix}", tr.key).as_str())).flatten();
+        let translated = specific.or_else(|| localization.content(tr.key)).unwrap_or_else(|| tr.key.to_string());
+        let full = resolve_controls(format!("{}{translated}", tr.prefix), &localization, *mode);
         if text.0 != full {
             text.0 = full;
         }

@@ -269,6 +269,7 @@ fn dialogue_input(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     localization: Option<Res<Localization>>,
+    mode: Res<crate::controls::InputMode>,
     mut state: ResMut<DialogueState>,
 ) {
     if state.line.is_none() {
@@ -293,7 +294,7 @@ fn dialogue_input(
         let length = state
             .line
             .as_ref()
-            .map(|l| line_text(localization.as_deref(), l).chars().count())
+            .map(|l| line_text(localization.as_deref(), l, *mode).chars().count())
             .unwrap_or(0) as f32;
         if state.revealed < length {
             state.revealed = length;
@@ -303,10 +304,15 @@ fn dialogue_input(
     }
 }
 
-fn line_text(localization: Option<&Localization>, line: &ShownLine) -> String {
-    localization
+fn line_text(localization: Option<&Localization>, line: &ShownLine, mode: crate::controls::InputMode) -> String {
+    let text = localization
         .and_then(|l| l.content(line.key.as_str()))
-        .unwrap_or_else(|| line.fallback.clone())
+        .unwrap_or_else(|| line.fallback.clone());
+    // Les noms de commandes (`%action%`...) sont ceux de l'appareil utilisé.
+    match localization {
+        Some(l) => crate::i18n::resolve_controls(text, l, mode),
+        None => text,
+    }
 }
 
 fn speaker_color(speaker: &str) -> Color {
@@ -373,6 +379,7 @@ fn update_panel(
     art: Res<crate::art::Art>,
     mut portrait: Single<(&mut ImageNode, &mut Visibility), (With<DialoguePortrait>, Without<DialoguePanel>)>,
     skip: Res<SkipHold>,
+    mode: Res<crate::controls::InputMode>,
 ) {
     let loc = localization.as_deref();
     let Some(line) = state.line.as_ref() else {
@@ -418,7 +425,7 @@ fn update_panel(
         speaker_color.0 = color;
     }
 
-    let full = line_text(loc, line);
+    let full = line_text(loc, line, *mode);
     let length = full.chars().count() as f32;
     let mut revealed = (state.revealed + TYPEWRITER_SPEED * time.delta_secs()).min(length);
     if state.is_voting() {
@@ -430,6 +437,10 @@ fn update_panel(
             let text = loc
                 .and_then(|l| l.content(option.key.as_str()))
                 .unwrap_or_else(|| option.fallback.clone());
+            let text = match loc {
+                Some(l) => crate::i18n::resolve_controls(text, l, *mode),
+                None => text,
+            };
             shown.push_str(&format!("\n\n{}  {text}", i + 1));
         }
     }

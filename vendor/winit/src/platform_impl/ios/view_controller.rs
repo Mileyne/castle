@@ -1,6 +1,7 @@
 use std::cell::Cell;
 
 use objc2::rc::Retained;
+use objc2::runtime::AnyObject;
 use objc2::{declare_class, msg_send_id, mutability, ClassType, DeclaredClass};
 use objc2_foundation::{MainThreadMarker, NSObject};
 use objc2_ui_kit::{
@@ -59,6 +60,21 @@ declare_class!(
         fn supported_orientations(&self) -> UIInterfaceOrientationMask {
             self.ivars().supported_orientations.get()
         }
+
+        // Sur Apple TV, les boutons de la manette (B, menu...) arrivent aussi comme « pressions » que le système prend pour
+        // « retour » et traite en quittant l'app, si personne ne les traite. Le jeu lit la manette lui-même (GameController):
+        // on absorbe ces pressions, sans appeler `super`, pour que l'app ne quitte plus toute seule.
+        #[method(pressesBegan:withEvent:)]
+        fn presses_began(&self, _presses: &AnyObject, _event: Option<&AnyObject>) {}
+
+        #[method(pressesChanged:withEvent:)]
+        fn presses_changed(&self, _presses: &AnyObject, _event: Option<&AnyObject>) {}
+
+        #[method(pressesEnded:withEvent:)]
+        fn presses_ended(&self, _presses: &AnyObject, _event: Option<&AnyObject>) {}
+
+        #[method(pressesCancelled:withEvent:)]
+        fn presses_cancelled(&self, _presses: &AnyObject, _event: Option<&AnyObject>) {}
 
         #[method(preferredScreenEdgesDeferringSystemGestures)]
         fn preferred_screen_edges_deferring_system_gestures(&self) -> UIRectEdge {

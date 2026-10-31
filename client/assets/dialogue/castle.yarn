@@ -5,6 +5,9 @@ sorcerer: Silencieuse ? Écoute... au loin, le château murmure. Tu ne l'entends
 ranger: Je n'entends que du vent et des ennuis. Gardez les yeux ouverts. #line:intro_03
 forgebraise: Des ennuis ? Parfait ! J'ai apporté de quoi tout faire sauter ! #line:intro_04
 knight: Pas dans mon dos. Et pas sans mon ordre. #line:intro_05
+knight: Quelques consignes. Pour avancer : %move%. Pour frapper : %attack%. #line:intro_06
+ranger: Pour le pouvoir spécial du héros que vous dirigez : %special%. #line:intro_07
+forgebraise: %action% pour agir sur ce qui nous entoure, et %switch% pour passer au héros suivant. #line:intro_08
 ===
 title: royal_door
 ---
@@ -88,7 +91,7 @@ knight: Les cryptes. Au fond, la porte royale : une masse d'acier que personne n
 sorcerer: Aucun sort ne la fera céder. Ce n'est pas une affaire de magie. #line:knight_02
 forgebraise: Ni de bombes, à ce qu'on dit. Quel dommage. #line:knight_03
 ranger: Alors c'est à toi, Chevalier. Prends la tête : touche 1. #line:knight_04
-knight: Ma lame et mon bouclier. Quand les morts se lèvent, appuyez sur E : mon Rempart protège toute l'équipe. #line:knight_05
+knight: Ma lame et mon bouclier. Quand les morts se lèvent, mon Rempart (%special%) protège toute l'équipe. #line:knight_05
 ===
 title: knight_door
 ---

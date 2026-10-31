@@ -4,15 +4,15 @@
 //! système, les boutons à l'écran et la manette « appuient » sur les touches correspondantes (Entrée, Échap, Espace,
 //! E, F, 1 à 4...). Seul le déplacement passe à part, par `Stick`, pour garder la direction fine du joystick.
 //!
-//! Les boutons affichés dépendent du moment: menus (flèches, OK, Retour), jeu (joystick à gauche, actions à droite,
-//! héros, pause), dialogue (bouton OK en plus; pendant un vote, les boutons 1 à 4 votent, comme au clavier). Le pavé
-//! d'adresse remplace le clavier pour rejoindre une partie.
+//! Les boutons affichés dépendent du moment: jeu (joystick à gauche, Frapper / Agir / Héros à droite, pause), dialogue
+//! (bouton OK en plus; pendant un vote, les boutons 1 à 4 votent, comme au clavier), bilan (OK). Les menus n'ont pas de
+//! boutons à part: leurs options sont elles-mêmes des boutons (voir `title.rs` et `pause.rs`). Le pavé d'adresse remplace le
+//! clavier pour rejoindre une partie.
 //!
-//! Les boutons tactiles s'affichent sur iOS et Android, ou sur ordinateur avec `CASTLE_TOUCH=1` (pour les essayer à la
-//! souris, il faut un écran tactile). La manette marche partout.
+//! Les boutons tactiles s'affichent sur iPhone et iPad, pas sur Apple TV, sauf si le joueur les demande dans les
+//! réglages (`settings.rs`). La manette marche partout: Y change de héros, B frappe (maintenu: pouvoir), X agit, A valide.
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use bevy::{
     input::{
@@ -31,12 +31,9 @@ use crate::pause::PauseMenu;
 use crate::title::{MenuMode, TitleActive};
 use crate::ui::ui_font;
 
-/// Vrai si les commandes tactiles sont affichées (et si les textes d'aide parlent de boutons plutôt que de touches).
+/// Vrai si les commandes tactiles sont affichées (voir les réglages).
 pub fn enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        cfg!(any(target_os = "ios", target_os = "android")) || std::env::var_os("CASTLE_TOUCH").is_some()
-    })
+    crate::settings::touch_ui()
 }
 
 /// Direction demandée par le joystick tactile ou le stick gauche de la manette (zéro au repos). `send_input` la prend
@@ -63,10 +60,8 @@ impl Plugin for TouchPlugin {
         app.init_resource::<Stick>()
             .init_resource::<Controls>()
             // Juste après la lecture du clavier: les touches simulées sont vues par tous les systèmes de la frame.
-            .add_systems(PreUpdate, read_controls.after(InputSystems));
-        if enabled() {
-            app.add_systems(Update, draw_controls);
-        }
+            .add_systems(PreUpdate, read_controls.after(InputSystems))
+            .add_systems(Update, draw_controls);
     }
 }
 
@@ -85,6 +80,8 @@ enum Context {
     Summary,
     Game {
         dialogue: bool,
+        /// Le dialogue demande un vote: les boutons 1 à 4 votent.
+        voting: bool,
     },
 }
 
@@ -151,6 +148,8 @@ struct Controls {
     pressed: Vec<KeyCode>,
     /// La disposition a changé: l'affichage doit être reconstruit.
     rebuild: bool,
+    /// Les commandes tactiles étaient affichées à la frame précédente.
+    was_enabled: bool,
 }
 
 fn context(
@@ -170,7 +169,7 @@ fn context(
     } else if pause.open {
         Context::Pause
     } else {
-        Context::Game { dialogue: dialogue.showing() }
+        Context::Game { dialogue: dialogue.showing(), voting: dialogue.is_voting() }
     }
 }
 
@@ -184,42 +183,14 @@ fn layout(context: Context, size: Vec2) -> Vec<Button> {
     let white = Color::WHITE;
     // Bouton principal, en bas à droite sous le pouce.
     let main = Vec2::new(w - side - 58.0, h - bottom - 58.0);
-    let up = Vec2::new(side + 44.0, h - bottom - 124.0);
-    let down = Vec2::new(side + 44.0, h - bottom - 44.0);
     let hold = Action::Hold;
     let mut out = Vec::new();
 
-    let menu_arrows = |out: &mut Vec<Button>| {
-        out.push(Button::round(hold(KeyCode::ArrowUp), Label::Text("^"), up, 34.0, white));
-        out.push(Button::round(hold(KeyCode::ArrowDown), Label::Text("v"), down, 34.0, white));
-    };
-    let ok_back = |out: &mut Vec<Button>| {
-        out.push(Button::round(hold(KeyCode::Enter), Label::Key("touch-ok"), main, 42.0, Color::srgb(0.9, 0.75, 0.2)));
-        out.push(Button::round(hold(KeyCode::Escape), Label::Key("touch-back"), main + Vec2::new(-100.0, 12.0), 32.0, white));
-    };
-
     match context {
-        Context::Nothing => {}
-        Context::Title { address, saves } => {
-            ok_back(&mut out);
-            out.push(Button::rect(
-                hold(KeyCode::F1),
-                Label::Key("touch-language"),
-                Vec2::new(w - side - 56.0, top + 18.0),
-                Vec2::new(56.0, 18.0),
-                white,
-            ));
-            if saves {
-                out.push(Button::round(
-                    hold(KeyCode::Delete),
-                    Label::Key("touch-delete"),
-                    main + Vec2::new(-28.0, -100.0),
-                    32.0,
-                    Color::srgb(0.9, 0.3, 0.25),
-                ));
-            }
+        Context::Nothing | Context::Pause => {}
+        Context::Title { address, .. } => {
             if address {
-                // Pavé pour l'adresse de l'hôte, à la place des flèches (inutiles sur cet écran).
+                // Pavé pour l'adresse de l'hôte, à la place du clavier.
                 const KEYS: [&str; 13] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", ".", ":", "<-"];
                 let (key, gap) = (40.0, 6.0);
                 let origin = Vec2::new(side + key / 2.0, h - bottom - 3.0 * (key + gap) + key / 2.0);
@@ -231,55 +202,52 @@ fn layout(context: Context, size: Vec2) -> Vec<Button> {
                     };
                     out.push(Button::rect(action, Label::Text(text), center, Vec2::splat(key / 2.0), white));
                 }
-            } else {
-                menu_arrows(&mut out);
             }
-        }
-        Context::Pause => {
-            menu_arrows(&mut out);
-            ok_back(&mut out);
         }
         Context::Summary => {
             out.push(Button::round(hold(KeyCode::Enter), Label::Key("touch-ok"), main, 42.0, Color::srgb(0.9, 0.75, 0.2)));
         }
-        Context::Game { dialogue } => {
-            out.push(Button::round(hold(KeyCode::Space), Label::Key("touch-attack"), main, 44.0, Color::srgb(0.85, 0.25, 0.2)));
+        Context::Game { dialogue, voting } => {
+            // Frapper (maintenu: pouvoir), Agir et Héros: les mêmes commandes que la manette.
+            out.push(Button::round(hold(KeyCode::Space), Label::Key("touch-attack"), main, 46.0, Color::srgb(0.85, 0.25, 0.2)));
             out.push(Button::round(
-                hold(KeyCode::KeyE),
-                Label::Key("touch-special"),
-                main + Vec2::new(-100.0, 14.0),
-                34.0,
-                Color::srgb(0.65, 0.35, 0.85),
-            ));
-            out.push(Button::round(
-                hold(KeyCode::KeyF),
+                hold(KeyCode::ShiftLeft),
                 Label::Key("touch-use"),
-                main + Vec2::new(-22.0, -100.0),
+                main + Vec2::new(-104.0, 14.0),
                 34.0,
                 Color::srgb(0.3, 0.7, 0.35),
+            ));
+            out.push(Button::round(
+                hold(KeyCode::ControlLeft),
+                Label::Key("touch-switch"),
+                main + Vec2::new(-24.0, -104.0),
+                34.0,
+                Color::srgb(0.65, 0.35, 0.85),
             ));
             if dialogue {
                 // Entrée: continuer (maintenir: tout passer).
                 out.push(Button::round(
                     hold(KeyCode::Enter),
                     Label::Key("touch-ok"),
-                    main + Vec2::new(-112.0, -96.0),
+                    main + Vec2::new(-122.0, -96.0),
                     30.0,
                     Color::srgb(0.9, 0.75, 0.2),
                 ));
             }
             let pause = Vec2::new(w - side - 34.0, top + 18.0);
             out.push(Button::rect(hold(KeyCode::Escape), Label::Key("touch-pause"), pause, Vec2::new(34.0, 18.0), white));
-            // Héros (ou votes pendant un dialogue à choix): 1 à 4, de gauche à droite sous le bouton pause.
-            let heroes = [
-                (KeyCode::Digit1, "1", HeroClass::Knight),
-                (KeyCode::Digit2, "2", HeroClass::Sorcerer),
-                (KeyCode::Digit3, "3", HeroClass::Ranger),
-                (KeyCode::Digit4, "4", HeroClass::Forgebraise),
-            ];
-            for (i, (key, text, class)) in heroes.into_iter().enumerate() {
-                let center = Vec2::new(w - side - 21.0 - (3 - i) as f32 * 50.0, top + 69.0);
-                out.push(Button::rect(hold(key), Label::Text(text), center, Vec2::splat(21.0), crate::class_color(class)));
+            if voting {
+                // Pendant un vote, 1 à 4 votent: de gauche à droite sous le bouton pause.
+                let heroes = [
+                    (KeyCode::Digit1, "1", HeroClass::Knight),
+                    (KeyCode::Digit2, "2", HeroClass::Sorcerer),
+                    (KeyCode::Digit3, "3", HeroClass::Ranger),
+                    (KeyCode::Digit4, "4", HeroClass::Forgebraise),
+                ];
+                for (i, (key, text, class)) in heroes.into_iter().enumerate() {
+                    let center = Vec2::new(w - side - 21.0 - (3 - i) as f32 * 50.0, top + 69.0);
+                    out.push(Button::rect(hold(key), Label::Text(text), center, Vec2::splat(21.0), crate::class_color(class)));
+                }
             }
         }
     }
@@ -316,6 +284,11 @@ fn read_controls(
     let context = context(&title, &mode, state.get(), &pause, &dialogue, intro.summary_active());
     let controls = &mut *controls;
 
+    // Les commandes tactiles viennent d'être activées dans les réglages: on les construit même si rien d'autre n'a changé.
+    let touch_on = enabled();
+    if touch_on != std::mem::replace(&mut controls.was_enabled, touch_on) {
+        controls.size = Vec2::ZERO;
+    }
     if enabled() && (context != controls.context || size != controls.size) {
         controls.context = context;
         controls.size = size;
@@ -372,6 +345,11 @@ fn read_controls(
         if left.length() > pad_stick.length() {
             pad_stick = left;
         }
+        // En jeu la croix déplace le héros comme le stick.
+        let dpad = dpad_direction(gamepad);
+        if matches!(context, Context::Game { .. }) && dpad.length() > pad_stick.length() {
+            pad_stick = dpad;
+        }
         gamepad_keys(gamepad, context, left, &mut wanted);
     }
     wanted.sort_unstable();
@@ -426,9 +404,36 @@ fn type_key(typed: &mut MessageWriter<KeyboardInput>, window: Entity, logical_ke
     }
 }
 
+/// Les boutons de la manette qui font chaque chose, selon la disposition (voir `settings::PadLayout`). Chaque manette garde les
+/// mêmes noms (A valide, B frappe, X agit, Y change de héros) mais ils ne sont pas aux mêmes places sur une manette Nintendo.
+struct PadMap {
+    confirm: GamepadButton,
+    back: GamepadButton,
+    fire: GamepadButton,
+    action: GamepadButton,
+    switch: GamepadButton,
+    delete: GamepadButton,
+}
+
+fn pad_map() -> PadMap {
+    use GamepadButton as B;
+    match crate::settings::pad_layout() {
+        crate::settings::PadLayout::Xbox => {
+            PadMap { confirm: B::South, back: B::East, fire: B::East, action: B::West, switch: B::North, delete: B::North }
+        }
+        crate::settings::PadLayout::Nintendo => {
+            PadMap { confirm: B::East, back: B::South, fire: B::South, action: B::North, switch: B::West, delete: B::West }
+        }
+    }
+}
+
 /// Boutons de la manette → touches du jeu, selon le moment.
+///
+/// En jeu: B frappe (et continue les dialogues), A lance le pouvoir, X agit, Y change de héros, Menu met en pause; la croix et le
+/// stick déplacent le héros. Dans les menus: croix ou stick pour choisir, A valide, B revient.
 fn gamepad_keys(gamepad: &Gamepad, context: Context, left: Vec2, wanted: &mut Vec<KeyCode>) {
     use GamepadButton as B;
+    let pad = pad_map();
     let mut map = |button: B, key: KeyCode| {
         if gamepad.pressed(button) {
             wanted.push(key);
@@ -436,13 +441,16 @@ fn gamepad_keys(gamepad: &Gamepad, context: Context, left: Vec2, wanted: &mut Ve
     };
     match context {
         Context::Nothing => {}
-        Context::Summary => map(B::South, KeyCode::Enter),
+        // B continue (comme pour les dialogues), pour ne pas lancer un pouvoir en passant.
+        Context::Summary => map(pad.fire, KeyCode::Enter),
         Context::Title { .. } | Context::Pause => {
             map(B::DPadUp, KeyCode::ArrowUp);
             map(B::DPadDown, KeyCode::ArrowDown);
-            map(B::South, KeyCode::Enter);
-            map(B::East, KeyCode::Escape);
-            map(B::North, KeyCode::Delete);
+            map(B::DPadLeft, KeyCode::ArrowLeft);
+            map(B::DPadRight, KeyCode::ArrowRight);
+            map(pad.confirm, KeyCode::Enter);
+            map(pad.back, KeyCode::Escape);
+            map(pad.delete, KeyCode::Delete);
             map(B::Select, KeyCode::F1);
             map(B::Start, KeyCode::Escape);
             // Le stick sert aussi de flèches.
@@ -451,22 +459,39 @@ fn gamepad_keys(gamepad: &Gamepad, context: Context, left: Vec2, wanted: &mut Ve
             } else if left.y < -PAD_MENU_THRESHOLD {
                 wanted.push(KeyCode::ArrowDown);
             }
-        }
-        Context::Game { dialogue } => {
-            map(B::South, KeyCode::Space);
-            map(B::West, KeyCode::KeyE);
-            map(B::North, KeyCode::KeyF);
-            map(B::East, KeyCode::Enter);
-            if dialogue {
-                map(B::South, KeyCode::Enter);
+            if left.x < -PAD_MENU_THRESHOLD {
+                wanted.push(KeyCode::ArrowLeft);
+            } else if left.x > PAD_MENU_THRESHOLD {
+                wanted.push(KeyCode::ArrowRight);
             }
+        }
+        Context::Game { dialogue, voting } => {
+            map(pad.fire, KeyCode::Space);
+            // Pendant un dialogue, B continue (maintenu: tout passer), comme à la fin d'un niveau.
+            if dialogue {
+                map(pad.fire, KeyCode::Enter);
+            }
+            map(pad.action, KeyCode::ShiftLeft);
+            map(pad.switch, KeyCode::ControlLeft);
+            // A lance le pouvoir spécial (E); le client ne l'envoie pas pendant un dialogue.
+            map(pad.confirm, KeyCode::KeyE);
             map(B::Start, KeyCode::Escape);
-            map(B::DPadUp, KeyCode::Digit1);
-            map(B::DPadRight, KeyCode::Digit2);
-            map(B::DPadDown, KeyCode::Digit3);
-            map(B::DPadLeft, KeyCode::Digit4);
+            // Les votes de dialogue: la croix, comme les touches 1 à 4.
+            if voting {
+                map(B::DPadUp, KeyCode::Digit1);
+                map(B::DPadRight, KeyCode::Digit2);
+                map(B::DPadDown, KeyCode::Digit3);
+                map(B::DPadLeft, KeyCode::Digit4);
+            }
         }
     }
+}
+
+/// La croix directionnelle d'une manette, comme une direction (zéro au repos).
+fn dpad_direction(gamepad: &Gamepad) -> Vec2 {
+    let axis = |plus: GamepadButton, minus: GamepadButton| f32::from(gamepad.pressed(plus)) - f32::from(gamepad.pressed(minus));
+    Vec2::new(axis(GamepadButton::DPadRight, GamepadButton::DPadLeft), axis(GamepadButton::DPadUp, GamepadButton::DPadDown))
+        .normalize_or_zero()
 }
 
 #[derive(Component)]
@@ -486,15 +511,18 @@ fn button_fill(color: Color, held: bool) -> Color {
     color.with_alpha(if held { 0.6 } else { 0.25 })
 }
 
+/// Un cercle posé à `center` (coordonnées de la fenêtre) de rayon `radius`. La taille d'interface choisie agrandit ou réduit
+/// tout l'affichage: on divise ici pour que les boutons restent sous les doigts, là où `read_controls` les attend.
 fn circle(center: Vec2, radius: f32) -> Node {
+    let k = crate::settings::ui_scale();
     Node {
         position_type: PositionType::Absolute,
-        left: Val::Px(center.x - radius),
-        top: Val::Px(center.y - radius),
-        width: Val::Px(radius * 2.0),
-        height: Val::Px(radius * 2.0),
+        left: Val::Px((center.x - radius) / k),
+        top: Val::Px((center.y - radius) / k),
+        width: Val::Px(radius * 2.0 / k),
+        height: Val::Px(radius * 2.0 / k),
         border: UiRect::all(Val::Px(2.0)),
-        border_radius: BorderRadius::all(Val::Px(radius)),
+        border_radius: BorderRadius::all(Val::Px(radius / k)),
         ..default()
     }
 }
@@ -508,6 +536,16 @@ fn draw_controls(
     mut base: Query<&mut Node, (With<StickBase>, Without<StickKnob>)>,
     mut knob: Query<&mut Node, (With<StickKnob>, Without<StickBase>)>,
 ) {
+    if !enabled() {
+        // Commandes tactiles désactivées (réglages): rien à l'écran.
+        for root in &roots {
+            commands.entity(root).despawn();
+        }
+        controls.rebuild = false;
+        controls.held_buttons.clear();
+        controls.stick = None;
+        return;
+    }
     if std::mem::take(&mut controls.rebuild) {
         for root in &roots {
             commands.entity(root).despawn();
@@ -542,14 +580,15 @@ fn draw_controls(
                     ));
                 }
                 for (index, button) in controls.buttons.iter().enumerate() {
+                    let k = crate::settings::ui_scale();
                     let node = Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(button.center.x - button.half.x),
-                        top: Val::Px(button.center.y - button.half.y),
-                        width: Val::Px(button.half.x * 2.0),
-                        height: Val::Px(button.half.y * 2.0),
+                        left: Val::Px((button.center.x - button.half.x) / k),
+                        top: Val::Px((button.center.y - button.half.y) / k),
+                        width: Val::Px(button.half.x * 2.0 / k),
+                        height: Val::Px(button.half.y * 2.0 / k),
                         border: UiRect::all(Val::Px(2.0)),
-                        border_radius: BorderRadius::all(Val::Px(if button.round { button.half.x } else { 6.0 })),
+                        border_radius: BorderRadius::all(Val::Px((if button.round { button.half.x } else { 6.0 }) / k)),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         ..default()
@@ -591,8 +630,9 @@ fn draw_controls(
         Some(s) => (s.origin, s.offset),
         None => (stick_home(controls.size), Vec2::ZERO),
     };
+    let k = crate::settings::ui_scale();
     let place = |node: &mut Node, at: Vec2, radius: f32| {
-        let (left, top) = (Val::Px(at.x - radius), Val::Px(at.y - radius));
+        let (left, top) = (Val::Px((at.x - radius) / k), Val::Px((at.y - radius) / k));
         if node.left != left || node.top != top {
             node.left = left;
             node.top = top;

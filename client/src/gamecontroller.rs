@@ -74,6 +74,19 @@ fn read(pad: &AnyObject, path: &[&str]) -> f32 {
     }
 }
 
+/// Le nom que la manette donne d'elle-même (« 8BitDo SN30 Pro », « Xbox Wireless Controller »...).
+fn vendor_name(controller: &AnyObject) -> String {
+    let name: Option<Retained<AnyObject>> = unsafe { msg_send![controller, vendorName] };
+    let Some(name) = name else {
+        return "GameController".to_string();
+    };
+    let chars: *const std::ffi::c_char = unsafe { msg_send![&*name, UTF8String] };
+    if chars.is_null() {
+        return "GameController".to_string();
+    }
+    unsafe { std::ffi::CStr::from_ptr(chars) }.to_string_lossy().into_owned()
+}
+
 fn poll_controllers(
     mut known: Local<HashMap<usize, Known>>,
     mut commands: Commands,
@@ -98,9 +111,12 @@ fn poll_controllers(
 
         let entry = known.entry(key).or_insert_with(|| {
             let entity = commands.spawn_empty().id();
+            // Le nom de la manette dit si ses boutons sont disposés à la façon de Nintendo (voir `settings::PadLayout`).
+            let vendor = vendor_name(&controller);
+            crate::settings::note_controller(&vendor);
             let event = GamepadConnectionEvent::new(
                 entity,
-                GamepadConnection::Connected { name: "GameController".into(), vendor_id: None, product_id: None },
+                GamepadConnection::Connected { name: vendor, vendor_id: None, product_id: None },
             );
             events.write(event.clone().into());
             connection_events.write(event);

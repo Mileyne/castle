@@ -135,7 +135,7 @@ fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
         .with_children(|parent| {
             parent.spawn((
                 Text::default(),
-                Tr::with_prefix("special-knight", "E  "),
+                Tr::with_prefix("special-knight", "%special%  "),
                 SpecialLabel,
                 ui_font(&assets, 16.0),
                 TextColor(css::DEEP_SKY_BLUE.into()),

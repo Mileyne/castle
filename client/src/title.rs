@@ -55,7 +55,7 @@ impl Plugin for TitlePlugin {
             .add_systems(
                 Update,
                 (
-                    (menu_input, rebuild_menu, publish_mode).chain().run_if(|t: Res<TitleActive>| t.0),
+                    (menu_pointer, menu_input, rebuild_menu, publish_mode).chain().run_if(|t: Res<TitleActive>| t.0),
                     watch_connection,
                     show_host_address,
                 ),
@@ -85,6 +85,61 @@ struct RowMarker(usize);
 #[derive(Component)]
 struct InputLine;
 
+/// Une entrée du menu, qui se clique ou se touche (en plus du clavier et de la manette).
+#[derive(Component)]
+struct RowButton(usize);
+
+/// Petit bouton « effacer » d'une partie (index dans la liste des parties).
+#[derive(Component)]
+struct DeleteButton(usize);
+
+/// Touche du clavier à l'écran: pour taper un nom de partie ou une adresse sans clavier (Apple TV, manette).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum VKey {
+    Char(char),
+    Backspace,
+    Validate,
+    Back,
+}
+
+/// Une touche du clavier à l'écran, avec sa place (ligne, colonne).
+#[derive(Component)]
+struct KeyButton(usize, usize);
+
+/// Le texte d'une touche du clavier à l'écran (il change de couleur avec la sélection).
+#[derive(Component)]
+struct KeyLabel(usize, usize);
+
+/// Les rangées du clavier à l'écran de cet écran: lettres et chiffres pour un nom, chiffres pour une adresse.
+fn vkb_rows(screen: Screen) -> Vec<Vec<VKey>> {
+    let chars = |text: &str| text.chars().map(VKey::Char).collect::<Vec<_>>();
+    match screen {
+        Screen::JoinAddress => vec![
+            chars("12345"),
+            chars("67890"),
+            vec![VKey::Char('.'), VKey::Char(':'), VKey::Backspace],
+            vec![VKey::Validate, VKey::Back],
+        ],
+        _ => vec![
+            chars("ABCDEFGHIJ"),
+            chars("KLMNOPQRST"),
+            chars("UVWXYZ0123"),
+            chars("456789 -_."),
+            vec![VKey::Backspace, VKey::Validate, VKey::Back],
+        ],
+    }
+}
+
+/// Le clavier à l'écran remplace le clavier physique sur Apple TV (nom de partie et adresse) et sur les écrans tactiles (nom
+/// de partie).
+fn vkb_enabled(screen: Screen) -> bool {
+    match screen {
+        Screen::NewName(_) => crate::settings::is_tv() || crate::touch::enabled(),
+        Screen::JoinAddress => crate::settings::is_tv(),
+        _ => false,
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Screen {
     Main,
@@ -92,6 +147,8 @@ enum Screen {
     Saves(GameMode),
     NewName(GameMode),
     JoinAddress,
+    /// Réglages: commandes tactiles, langue.
+    Settings,
     Connecting,
 }
 
@@ -113,6 +170,15 @@ struct Menu {
     input_dirty: bool,
     /// Depuis combien de temps on attend la connexion.
     waiting: f32,
+    /// Une entrée vient d'être cliquée ou touchée (équivaut à la sélectionner puis valider).
+    click: Option<usize>,
+    /// Le bouton « effacer » d'une partie vient d'être touché.
+    delete_click: Option<usize>,
+    /// Clavier à l'écran: la touche sélectionnée (ligne, colonne), et celle qu'on vient de cliquer.
+    kb: (usize, usize),
+    key_click: Option<(usize, usize)>,
+    /// Seule la touche sélectionnée du clavier à l'écran a changé: on recolore sans rien reconstruire.
+    kb_dirty: bool,
 }
 
 impl Default for Menu {
@@ -128,6 +194,11 @@ impl Default for Menu {
             cursor_dirty: false,
             input_dirty: false,
             waiting: 0.0,
+            click: None,
+            delete_click: None,
+            kb: (0, 0),
+            key_click: None,
+            kb_dirty: false,
         }
     }
 }
@@ -136,12 +207,11 @@ impl Menu {
     fn go(&mut self, screen: Screen) {
         self.screen = screen;
         self.cursor = 0;
+        self.kb = (0, 0);
         self.input.clear();
-        // Sans clavier (écran tactile), une nouvelle partie reçoit d'office un nom libre: il suffit de valider.
-        if let Screen::NewName(_) = screen {
-            if crate::touch::enabled() {
-                self.input = free_name();
-            }
+        // Avec le clavier à l'écran, un nom libre est proposé d'office: il suffit de valider, ou de l'effacer pour en taper un autre.
+        if vkb_enabled(screen) && matches!(screen, Screen::NewName(_)) {
+            self.input = free_name();
         }
         self.confirm_delete = false;
         self.dirty = true;
@@ -152,9 +222,14 @@ impl Menu {
 
     fn item_count(&self) -> usize {
         match self.screen {
-            Screen::Main => 4,
-            Screen::Saves(_) => 1 + self.saves.len(),
-            _ => 0,
+            Screen::Main => 5,
+            // Nouvelle partie, les parties, Retour.
+            Screen::Saves(_) => 2 + self.saves.len(),
+            // Valider, Retour.
+            Screen::NewName(_) | Screen::JoinAddress => 2,
+            // Commandes tactiles, langue, disposition de la manette, taille de l'interface, Retour.
+            Screen::Settings => 5,
+            Screen::Connecting => 0,
         }
     }
 }
@@ -211,7 +286,8 @@ fn menu_text(assets: &AssetServer, size: f32, color: Color) -> impl Bundle {
     (Text::default(), menu_style(assets, size, color))
 }
 
-/// Une entrée du menu: un marqueur de sélection, puis son contenu. Les textes à recolorer portent `RowText(index)`.
+/// Une entrée du menu: un bouton (clic, toucher) fait d'un marqueur de sélection puis de son contenu. Les textes à recolorer
+/// portent `RowText(index)`.
 fn spawn_row(
     menu: &mut ChildSpawnerCommands,
     assets: &AssetServer,
@@ -220,16 +296,28 @@ fn spawn_row(
     content: impl FnOnce(&mut ChildSpawnerCommands, Color, RowText),
 ) {
     let color = row_color(selected);
-    menu.spawn(Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: Val::Px(8.0), ..default() })
-        .with_children(|row| {
-            row.spawn((
-                menu_style(assets, 14.0, color),
-                Text::new(if selected { ">" } else { " " }),
-                RowMarker(index),
-                RowText(index),
-            ));
-            content(row, color, RowText(index));
-        });
+    menu.spawn((
+        Button,
+        RowButton(index),
+        Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(8.0),
+            padding: UiRect::axes(Val::Px(18.0), Val::Px(6.0)),
+            border_radius: BorderRadius::all(Val::Px(6.0)),
+            ..default()
+        },
+        BackgroundColor(Color::BLACK.with_alpha(0.42)),
+    ))
+    .with_children(|row| {
+        row.spawn((
+            menu_style(assets, 14.0, color),
+            Text::new(if selected { ">" } else { " " }),
+            RowMarker(index),
+            RowText(index),
+        ));
+        content(row, color, RowText(index));
+    });
 }
 
 fn row_color(selected: bool) -> Color {
@@ -245,8 +333,20 @@ fn rebuild_menu(
     mut markers: Query<(&RowMarker, &mut Text), Without<InputLine>>,
     mut colors: Query<(&RowText, &mut TextColor)>,
     mut input_lines: Query<&mut Text, With<InputLine>>,
+    mut key_fills: Query<(&KeyButton, &mut BackgroundColor)>,
+    mut key_labels: Query<(&KeyLabel, &mut TextColor), Without<RowText>>,
 ) {
     if !menu.dirty {
+        if menu.kb_dirty {
+            menu.kb_dirty = false;
+            let selected = menu.kb;
+            for (key, mut fill) in &mut key_fills {
+                fill.0 = if (key.0, key.1) == selected { css::GOLD.with_alpha(0.85).into() } else { Color::BLACK.with_alpha(0.5) };
+            }
+            for (label, mut color) in &mut key_labels {
+                color.0 = if (label.0, label.1) == selected { Color::BLACK } else { css::WHITE.into() };
+            }
+        }
         // Mises à jour légères: les textes existent déjà, on ne touche qu'à ce qui a changé.
         if menu.cursor_dirty {
             menu.cursor_dirty = false;
@@ -279,7 +379,7 @@ fn rebuild_menu(
         };
         match menu.screen {
             Screen::Main => {
-                for (i, key) in ["menu-solo", "menu-host", "menu-join", "menu-quit"].into_iter().enumerate() {
+                for (i, key) in ["menu-solo", "menu-host", "menu-join", "menu-settings", "menu-quit"].into_iter().enumerate() {
                     spawn_row(ui, &assets, i, i == menu.cursor, |row, color, tag| {
                         row.spawn((menu_text(&assets, 16.0, color), Tr::new(key), tag));
                     });
@@ -297,8 +397,27 @@ fn rebuild_menu(
                         row.spawn((menu_style(&assets, 14.0, color), Text::new(save.name.clone()), tag));
                         row.spawn((menu_text(&assets, 10.0, css::LIGHT_GRAY.into()), Tr::with_prefix("level-word", "- ")));
                         row.spawn((menu_style(&assets, 10.0, css::LIGHT_GRAY.into()), Text::new(save.level.to_string())));
+                        // Un petit bouton pour effacer la partie (deux touchers: le premier demande confirmation).
+                        let armed = menu.confirm_delete && menu.cursor == i + 1;
+                        row.spawn((
+                            Button,
+                            DeleteButton(i),
+                            Node {
+                                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                                margin: UiRect::left(Val::Px(10.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
+                                ..default()
+                            },
+                            BackgroundColor(if armed { css::TOMATO.with_alpha(0.8).into() } else { Color::WHITE.with_alpha(0.12) }),
+                        ))
+                        .with_children(|button| {
+                            button.spawn((menu_style(&assets, 10.0, css::WHITE.into()), Text::new("x")));
+                        });
                     });
                 }
+                spawn_row(ui, &assets, menu.saves.len() + 1, menu.cursor == menu.saves.len() + 1, |row, color, tag| {
+                    row.spawn((menu_text(&assets, 14.0, color), Tr::new("menu-back"), tag));
+                });
                 if menu.saves.is_empty() {
                     line(ui, "menu-no-saves", 10.0, css::LIGHT_GRAY.into());
                 }
@@ -309,7 +428,93 @@ fn rebuild_menu(
                 let prompt = if menu.screen == Screen::JoinAddress { "menu-enter-address" } else { "menu-enter-name" };
                 line(ui, prompt, 14.0, css::LIGHT_SKY_BLUE.into());
                 ui.spawn((menu_style(&assets, 16.0, css::GOLD.into()), Text::new(format!("{}_", menu.input)), InputLine));
+                if vkb_enabled(menu.screen) {
+                    // Clavier à l'écran: la croix ou le stick déplacent la sélection, A tape la touche (ou on la touche).
+                    ui.spawn(Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: Val::Px(4.0), ..default() })
+                        .with_children(|grid| {
+                            for (r, keys) in vkb_rows(menu.screen).into_iter().enumerate() {
+                                grid.spawn(Node { flex_direction: FlexDirection::Row, column_gap: Val::Px(4.0), ..default() }).with_children(|row| {
+                                    for (c, key) in keys.into_iter().enumerate() {
+                                        let selected = menu.kb == (r, c);
+                                        let wide = !matches!(key, VKey::Char(_));
+                                        row.spawn((
+                                            Button,
+                                            KeyButton(r, c),
+                                            Node {
+                                                width: Val::Px(if wide { 118.0 } else { 34.0 }),
+                                                height: Val::Px(30.0),
+                                                justify_content: JustifyContent::Center,
+                                                align_items: AlignItems::Center,
+                                                border_radius: BorderRadius::all(Val::Px(4.0)),
+                                                ..default()
+                                            },
+                                            BackgroundColor(if selected { css::GOLD.with_alpha(0.85).into() } else { Color::BLACK.with_alpha(0.5) }),
+                                        ))
+                                        .with_children(|button| {
+                                            let color: Color = if selected { Color::BLACK } else { css::WHITE.into() };
+                                            match key {
+                                                VKey::Char(ch) => {
+                                                    let shown = if ch == ' ' { "_".to_string() } else { ch.to_string() };
+                                                    button.spawn((menu_style(&assets, 12.0, color), Text::new(shown), KeyLabel(r, c)));
+                                                }
+                                                VKey::Backspace => {
+                                                    button.spawn((menu_text(&assets, 10.0, color), Tr::new("menu-erase"), KeyLabel(r, c)));
+                                                }
+                                                VKey::Validate => {
+                                                    button.spawn((menu_text(&assets, 10.0, color), Tr::new("menu-validate"), KeyLabel(r, c)));
+                                                }
+                                                VKey::Back => {
+                                                    button.spawn((menu_text(&assets, 10.0, color), Tr::new("menu-back"), KeyLabel(r, c)));
+                                                }
+                                            }
+                                        });
+                                    }
+                                });
+                            }
+                        });
+                } else {
+                    for (i, key) in ["menu-validate", "menu-back"].into_iter().enumerate() {
+                        spawn_row(ui, &assets, i, menu.cursor == i, |row, color, tag| {
+                            row.spawn((menu_text(&assets, 14.0, color), Tr::new(key), tag));
+                        });
+                    }
+                }
                 line(ui, "menu-input-hint", 8.0, css::LIGHT_GRAY.into());
+            }
+            Screen::Settings => {
+                line(ui, "menu-settings", 16.0, css::LIGHT_SKY_BLUE.into());
+                spawn_row(ui, &assets, 0, menu.cursor == 0, |row, color, tag| {
+                    row.spawn((menu_text(&assets, 14.0, color), Tr::new("settings-touch"), tag));
+                    let value = if crate::settings::touch_ui() { "settings-on" } else { "settings-off" };
+                    row.spawn((menu_text(&assets, 14.0, css::LIGHT_GRAY.into()), Tr::new(value)));
+                });
+                spawn_row(ui, &assets, 1, menu.cursor == 1, |row, color, tag| {
+                    row.spawn((menu_text(&assets, 14.0, color), Tr::new("settings-language"), tag));
+                    row.spawn((menu_text(&assets, 14.0, css::LIGHT_GRAY.into()), Tr::new("settings-language-name")));
+                });
+                spawn_row(ui, &assets, 2, menu.cursor == 2, |row, color, tag| {
+                    row.spawn((menu_text(&assets, 14.0, color), Tr::new("settings-pad"), tag));
+                    let value = match crate::settings::pad_choice() {
+                        1 => "settings-pad-xbox",
+                        2 => "settings-pad-nintendo",
+                        _ => "settings-pad-auto",
+                    };
+                    row.spawn((menu_text(&assets, 14.0, css::LIGHT_GRAY.into()), Tr::new(value)));
+                });
+                spawn_row(ui, &assets, 3, menu.cursor == 3, |row, color, tag| {
+                    row.spawn((menu_text(&assets, 14.0, color), Tr::new("settings-size"), tag));
+                    let value = match crate::settings::ui_size_choice() {
+                        1 => "settings-size-small",
+                        2 => "settings-size-normal",
+                        3 => "settings-size-large",
+                        _ => "settings-size-auto",
+                    };
+                    row.spawn((menu_text(&assets, 14.0, css::LIGHT_GRAY.into()), Tr::new(value)));
+                });
+                spawn_row(ui, &assets, 4, menu.cursor == 4, |row, color, tag| {
+                    row.spawn((menu_text(&assets, 14.0, color), Tr::new("menu-back"), tag));
+                });
+                line(ui, "settings-touch-hint", 8.0, css::LIGHT_GRAY.into());
             }
             Screen::Connecting => {
                 line(ui, "menu-connecting", 16.0, css::WHITE.into());
@@ -346,8 +551,38 @@ fn parse_address(text: &str) -> Option<SocketAddr> {
         .or_else(|| text.parse::<IpAddr>().ok().map(|ip| SocketAddr::new(ip, DEFAULT_PORT)))
 }
 
+/// Un clic ou un toucher sur une entrée la sélectionne et la valide; le survol (souris) déplace la sélection.
+fn menu_pointer(
+    mut menu: ResMut<Menu>,
+    rows: Query<(&Interaction, &RowButton), Changed<Interaction>>,
+    deletes: Query<(&Interaction, &DeleteButton), Changed<Interaction>>,
+    keys: Query<(&Interaction, &KeyButton), Changed<Interaction>>,
+) {
+    for (interaction, key) in &keys {
+        if *interaction == Interaction::Pressed {
+            menu.key_click = Some((key.0, key.1));
+        }
+    }
+    for (interaction, row) in &rows {
+        match interaction {
+            Interaction::Pressed => menu.click = Some(row.0),
+            Interaction::Hovered if menu.cursor != row.0 => {
+                menu.cursor = row.0;
+                menu.cursor_dirty = true;
+            }
+            _ => {}
+        }
+    }
+    for (interaction, button) in &deletes {
+        if *interaction == Interaction::Pressed {
+            menu.delete_click = Some(button.0);
+        }
+    }
+}
+
 fn menu_input(
     mut commands: Commands,
+    mut locale: ResMut<bevy_fluent::prelude::Locale>,
     keys: Res<ButtonInput<KeyCode>>,
     mut typed: MessageReader<KeyboardInput>,
     state: Res<State<ClientState>>,
@@ -361,9 +596,88 @@ fn menu_input(
     }
     let up = keys.just_pressed(KeyCode::ArrowUp);
     let down = keys.just_pressed(KeyCode::ArrowDown);
-    let enter = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter);
+    let mut enter = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter);
     let escape = keys.just_pressed(KeyCode::Escape);
-    let delete = keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace);
+    let mut delete = keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace);
+    // Clic ou toucher: comme si l'entrée était sélectionnée puis validée (ou, pour la croix d'une partie, effacée).
+    if let Some(index) = menu.click.take() {
+        menu.cursor = index;
+        menu.cursor_dirty = true;
+        enter = true;
+    }
+    if let Some(save) = menu.delete_click.take() {
+        menu.cursor = save + 1;
+        menu.cursor_dirty = true;
+        delete = true;
+    }
+    // Clavier à l'écran: la croix déplace la sélection sur la grille; A ou un toucher tape la touche.
+    let mut up = up;
+    let mut down = down;
+    if vkb_enabled(menu.screen) {
+        let rows = vkb_rows(menu.screen);
+        let (mut row, mut col) = menu.kb;
+        row = row.min(rows.len() - 1);
+        let moved = up || down || keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::ArrowRight);
+        if up {
+            row = (row + rows.len() - 1) % rows.len();
+        }
+        if down {
+            row = (row + 1) % rows.len();
+        }
+        col = col.min(rows[row].len() - 1);
+        if keys.just_pressed(KeyCode::ArrowLeft) {
+            col = (col + rows[row].len() - 1) % rows[row].len();
+        }
+        if keys.just_pressed(KeyCode::ArrowRight) {
+            col = (col + 1) % rows[row].len();
+        }
+        if moved {
+            menu.kb = (row, col);
+            menu.kb_dirty = true;
+        }
+        up = false;
+        down = false;
+        let pressed = match menu.key_click.take() {
+            Some((r, c)) if r < rows.len() && c < rows[r].len() => {
+                menu.kb = (r, c);
+                menu.kb_dirty = true;
+                Some(rows[r][c])
+            }
+            _ if enter => Some(rows[row][col]),
+            _ => None,
+        };
+        if pressed.is_some() {
+            enter = false;
+        }
+        let join = menu.screen == Screen::JoinAddress;
+        match pressed {
+            Some(VKey::Char(c)) => {
+                let limit = if join { 21 } else { SAVE_NAME_MAX };
+                if menu.input.chars().count() < limit {
+                    menu.input.push(c);
+                }
+                // Seul le texte tapé change (sauf si un message d'erreur disparaît: la disposition change).
+                if menu.error.take().is_some() {
+                    menu.dirty = true;
+                } else {
+                    menu.input_dirty = true;
+                }
+            }
+            Some(VKey::Backspace) => {
+                menu.input.pop();
+                menu.input_dirty = true;
+            }
+            Some(VKey::Validate) => {
+                menu.cursor = 0;
+                enter = true;
+            }
+            Some(VKey::Back) => {
+                menu.cursor = 1;
+                enter = true;
+            }
+            None => {}
+        }
+    }
 
     // Saisie de texte.
     if matches!(menu.screen, Screen::NewName(_) | Screen::JoinAddress) {
@@ -424,12 +738,30 @@ fn menu_input(
             0 => menu.go(Screen::Saves(GameMode::Solo)),
             1 => menu.go(Screen::Saves(GameMode::Coop)),
             2 => menu.go(Screen::JoinAddress),
+            3 => menu.go(Screen::Settings),
             _ => {
                 exit.write(AppExit::Success);
+                // Sur iPhone, iPad et Apple TV la boucle d'événements ne rend jamais la main: on quitte directement.
+                #[cfg(target_os = "ios")]
+                std::process::exit(0);
             }
         },
+        Screen::Settings if enter => {
+            match menu.cursor {
+                0 => crate::settings::set_touch_ui(!crate::settings::touch_ui()),
+                1 => crate::i18n::next_language(&mut locale),
+                2 => crate::settings::cycle_pad_choice(),
+                3 => crate::settings::cycle_ui_size(),
+                _ => {
+                    menu.go(Screen::Main);
+                    return;
+                }
+            }
+            menu.dirty = true;
+        }
         Screen::Saves(mode) => {
-            if delete && menu.cursor > 0 {
+            let saves = menu.saves.len();
+            if delete && menu.cursor > 0 && menu.cursor <= saves {
                 if menu.confirm_delete {
                     let name = menu.saves[menu.cursor - 1].name.clone();
                     save::delete(&name);
@@ -441,14 +773,23 @@ fn menu_input(
             } else if enter {
                 if menu.cursor == 0 {
                     menu.go(Screen::NewName(mode));
-                } else {
+                } else if menu.cursor <= saves {
                     let name = menu.saves[menu.cursor - 1].name.clone();
                     launch(&mut commands, &mut menu, mode, &name);
+                } else {
+                    menu.go(Screen::Main);
                 }
             }
         }
+        // « Retour » est la deuxième entrée de ces deux écrans.
+        Screen::NewName(mode) if enter && menu.cursor == 1 => menu.go(Screen::Saves(mode)),
+        Screen::JoinAddress if enter && menu.cursor == 1 => menu.go(Screen::Main),
         Screen::NewName(mode) if enter => {
-            let name = save::clean_name(&menu.input);
+            let mut name = save::clean_name(&menu.input);
+            // Sans rien taper, la partie reçoit un nom libre (« Castle 1 »...).
+            if name.is_empty() && vkb_enabled(menu.screen) {
+                name = free_name();
+            }
             match save::load(&name) {
                 _ if name.is_empty() => {}
                 // Même nom, même mode: c'est la partie existante qui est reprise.
