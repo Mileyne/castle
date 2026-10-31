@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use crate::heroes::{CLASSES, Class, Pose};
 use crate::monsters::{MONSTERS, Monster};
 use crate::props::{PROPS, Prop};
-use crate::render::{Part, render};
+use crate::render::{Part, Shape, render};
 use crate::shapes::Theme;
 use crate::tuning::{self, Tuning, hex_of};
 use crate::{CELL, SUPERSAMPLE, TILE_CELL, tiles, to_rgba8};
@@ -406,4 +406,58 @@ mod tests {
             assert!(art.rgba.chunks(4).any(|p| p[3] > 0), "{group:?} vide");
         }
     }
+}
+
+/// Forme d'une pièce d'un modèle (voir `live_parts`): mêmes volumes que le rendu des planches.
+#[derive(Clone, Copy, Debug)]
+pub enum LiveShape {
+    /// Sphère de rayon 1, déformée par l'échelle.
+    Sphere,
+    /// Cube de demi-côté 1.
+    Cube,
+    /// Capsule le long de Y: rayon 1 et demi-longueur de cylindre donnée.
+    Capsule(f32),
+    /// Tronc de cône le long de Y, de y = -1 (rayon r0) à y = 1 (rayon r1).
+    Frustum(f32, f32),
+}
+
+/// Une pièce d'un modèle en 3D: sa forme, sa place (centre, rotation en colonnes, échelle) et son matériau, dans le repère du modèle
+/// (en mètres, les pieds en 0, de face vers +Z, y vers le haut). Sert au rendu en direct (`tools/live3d`).
+#[derive(Clone, Debug)]
+pub struct LivePart {
+    pub shape: LiveShape,
+    pub center: [f32; 3],
+    pub rot: [[f32; 3]; 3],
+    pub scale: [f32; 3],
+    /// Couleur RVB (sRGB, de 0 à 1).
+    pub color: [f32; 3],
+    pub glow: bool,
+    pub shine: f32,
+}
+
+/// Les pièces du modèle `key` (voir `models()`) dans la pose donnée, avec les proportions d'origine.
+pub fn live_parts(key: &str, theme: Theme, anim: Anim) -> Vec<LivePart> {
+    let Some(model) = parse(key) else {
+        return Vec::new();
+    };
+    tuning::set_active(tuning::load(theme));
+    let parts = build_parts(&model, anim, theme);
+    tuning::set_active(Tuning::default());
+    parts
+        .into_iter()
+        .map(|part| LivePart {
+            shape: match part.shape {
+                Shape::Sphere => LiveShape::Sphere,
+                Shape::Cube => LiveShape::Cube,
+                Shape::Capsule(h) => LiveShape::Capsule(h),
+                Shape::Frustum(a, b) => LiveShape::Frustum(a, b),
+            },
+            center: part.center.to_array(),
+            rot: part.rot.to_cols_array_2d(),
+            scale: part.scale.to_array(),
+            color: part.color,
+            glow: part.glow,
+            shine: part.shine,
+        })
+        .collect()
 }

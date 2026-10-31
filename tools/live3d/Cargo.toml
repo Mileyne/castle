@@ -1,0 +1,9 @@
+[package]
+name = "live3d"
+version = "0.1.0"
+edition = "2024"
+description = "Essai de rendu en direct des personnages en 3D (sans planche de sprites), avec les modèles de sprite_forge"
+
+[dependencies]
+bevy = { workspace = true, default-features = true }
+sprite_forge = { path = "../sprite_forge" }
