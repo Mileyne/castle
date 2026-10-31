@@ -57,7 +57,12 @@ struct Launch(Vec2);
 pub fn run() {
     // Assets du dépôt si on lance depuis une compilation du dépôt, sinon à côté du programme.
     // Un dossier `assets` à côté du programme (version livrée) passe avant celui du dépôt.
-    let beside_exe = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.join("assets")));
+    // Dans un paquet macOS (`Castle.app/Contents/MacOS/castle_client`), ils sont dans `Contents/Resources`.
+    let beside_exe = std::env::current_exe().ok().and_then(|exe| {
+        let dir = exe.parent()?;
+        let bundled = dir.parent()?.join("Resources/assets");
+        Some(if bundled.exists() { bundled } else { dir.join("assets") })
+    });
     let dev_assets = concat!(env!("CARGO_MANIFEST_DIR"), "/assets");
     let assets_path = match beside_exe {
         Some(dir) if dir.exists() => dir.to_string_lossy().into_owned(),

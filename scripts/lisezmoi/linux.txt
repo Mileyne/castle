@@ -1,8 +1,8 @@
 Castle v@VERSION@ - Linux 64 bits
 
-Lancer : ./castle_client   (castle_server doit rester a cote: le jeu le lance tout seul)
+Lancer : ./castle_client
 Menu : Jouer en solo / Cooperatif: heberger / Cooperatif: rejoindre (adresse IP de l'hote, reseau local)
 Echap en jeu : pause, ou abandonner le niveau et revenir au menu
 Parties sauvegardees (a chaque entree de niveau) : ~/.local/share/Castle/saves
 
-Cooperatif : autoriser castle_server dans le pare-feu (UDP 5000).
+Cooperatif : autoriser castle_client dans le pare-feu (UDP 5000).

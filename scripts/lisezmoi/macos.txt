@@ -1,10 +1,10 @@
 Castle v@VERSION@ - macOS (Apple Silicon)
 
-Lancer : ./castle_client   (castle_server doit rester a cote: le jeu le lance tout seul)
+Lancer : double-clic sur Castle.app
 Menu : Jouer en solo / Cooperatif: heberger / Cooperatif: rejoindre (adresse IP de l'hote, reseau local)
 Echap en jeu : pause, ou abandonner le niveau et revenir au menu
 Parties sauvegardees (a chaque entree de niveau) : ~/Library/Application Support/Castle/saves
 
 Premier lancement : macOS bloque les programmes non signes.
-Clic droit sur castle_client > Ouvrir, ou dans un Terminal :
-  xattr -dr com.apple.quarantine Castle-macOS
+Clic droit sur Castle.app > Ouvrir, ou dans un Terminal :
+  xattr -dr com.apple.quarantine Castle.app

@@ -1,7 +1,7 @@
 # Castle
 
 RPG d'action multijoueur en Rust (Bevy). Un seul code (`client/`, `server/`, `shared/`) pour tous les clients; le serveur
-est une bibliothèque, lancée par le client (sur iOS et tvOS, sur un fil du client).
+est une bibliothèque, lancée sur un fil du client: un seul exécutable partout (`castle_server` reste disponible pour un serveur dédié).
 
 ## Clients
 
