@@ -267,3 +267,6 @@ dlg-bm_05 = Un dernier effort. Après lui, plus rien ne nous barre la route !
 dlg-samelia_freed_01 = Merci, vaillants héros ! Ces geôliers m'avaient prise dans leurs filets.
 dlg-samelia_freed_02 = Princesse ! Restez derrière nous.
 dlg-samelia_freed_03 = Le plus dur reste à faire : Lord Muldant est tout en haut de la tour. Je vous ouvrirai la voie.
+settings-music = Volume de la musique :
+settings-voice = Volume des voix :
+settings-sfx = Volume des bruitages :

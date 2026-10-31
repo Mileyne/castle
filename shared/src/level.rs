@@ -103,6 +103,10 @@ pub struct LevelDef {
     pub layout: Layout,
     /// Objectif du niveau: genre et nombre à atteindre.
     pub quest: Option<(QuestKind, u32)>,
+    /// La sortie est la zone de sortie elle-même (invisible, par exemple au bout d'un chemin) plutôt qu'un escalier posé
+    /// à son centre. Sans effet quand un élément `Exit` est posé à la main.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exit_area: bool,
     pub things: Vec<Thing>,
 }
 
@@ -146,6 +150,7 @@ impl LevelDef {
                 treasure: None,
             },
             quest: None,
+            exit_area: false,
             things: Vec::new(),
         }
     }
@@ -177,6 +182,7 @@ impl LevelDef {
             decor: Vec::new(),
             layout: dungeon.layout.clone(),
             quest,
+            exit_area: false,
             things,
         }
     }

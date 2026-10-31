@@ -97,7 +97,7 @@ fn mix_music(
         if let Some(mut sink) = sink {
             // Courbe en puissance: à mi-fondu, les deux pistes ont chacune près de 0,7 de volume, sans creux au milieu.
             let fade = track.level.sqrt();
-            sink.set_volume(Volume::Linear(VOLUME * fade * ducked));
+            sink.set_volume(Volume::Linear(VOLUME * crate::settings::volume(crate::settings::Channel::Music) * fade * ducked));
         }
     }
 }

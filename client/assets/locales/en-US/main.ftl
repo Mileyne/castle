@@ -267,3 +267,6 @@ dlg-bm_05 = One last effort. After him, nothing stands in our way!
 dlg-samelia_freed_01 = Thank you, brave heroes! Those jailers had caught me in their nets.
 dlg-samelia_freed_02 = Princess! Stay behind us.
 dlg-samelia_freed_03 = The hardest part is still ahead: Lord Muldant is at the very top of the tower. I will clear the way.
+settings-music = Music volume:
+settings-voice = Voice volume:
+settings-sfx = Sound effects volume:

@@ -12,7 +12,8 @@ use crate::title::{HostAddress, ReturnToTitle, TitleActive};
 use crate::ui::ui_font;
 
 /// Entrées: reprendre, commandes tactiles (oui/non), abandonner.
-const ITEMS: [&str; 3] = ["pause-resume", "settings-touch", "pause-quit"];
+const ITEMS: [&str; 6] = ["pause-resume", "settings-touch", "settings-music", "settings-voice", "settings-sfx", "pause-quit"];
+const CHANNELS: [crate::settings::Channel; 3] = [crate::settings::Channel::Music, crate::settings::Channel::Voice, crate::settings::Channel::Sfx];
 
 #[derive(Resource, Default)]
 pub struct PauseMenu {
@@ -106,7 +107,18 @@ fn navigate(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, mut pause: 
                 crate::settings::set_touch_ui(!crate::settings::touch_ui());
                 pause.redraw = true;
             }
+            2..=4 => {
+                crate::settings::cycle_volume(CHANNELS[pause.cursor - 2]);
+                pause.redraw = true;
+            }
             _ => commands.trigger(ReturnToTitle(None)),
+        }
+    }
+    if (2..=4).contains(&pause.cursor) {
+        let step = i8::from(keys.just_pressed(KeyCode::ArrowRight)) - i8::from(keys.just_pressed(KeyCode::ArrowLeft));
+        if step != 0 {
+            crate::settings::adjust_volume(CHANNELS[pause.cursor - 2], step);
+            pause.redraw = true;
         }
     }
 }
@@ -173,6 +185,9 @@ fn sync_overlay(
                         if i == 1 {
                             let value = if crate::settings::touch_ui() { "settings-on" } else { "settings-off" };
                             row.spawn((Text::default(), Tr::new(value), font(16.0), TextColor(css::LIGHT_GRAY.into())));
+                        } else if (2..=4).contains(&i) {
+                            let value = format!("{} %", crate::settings::volume_tenths(CHANNELS[i - 2]) * 10);
+                            row.spawn((Text::new(value), font(16.0), TextColor(css::LIGHT_GRAY.into())));
                         }
                     });
                 }

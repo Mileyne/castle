@@ -38,6 +38,7 @@ mod sprite_meta;
 mod sprite_meta_lite;
 mod level_intro;
 mod music;
+mod sfx;
 mod quest;
 mod title;
 mod touch;
@@ -210,6 +211,7 @@ pub fn run() {
             live3d::Live3dPlugin,
             touch::TouchPlugin,
             music::MusicPlugin,
+            sfx::SfxPlugin,
             weather::WeatherPlugin,
         ))
         .add_plugins({

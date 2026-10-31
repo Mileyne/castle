@@ -228,7 +228,7 @@ impl Menu {
             // Valider, Retour.
             Screen::NewName(_) | Screen::JoinAddress => 2,
             // Commandes tactiles, langue, disposition de la manette, taille de l'interface, Retour.
-            Screen::Settings => 5,
+            Screen::Settings => 8,
             Screen::Connecting => 0,
         }
     }
@@ -511,7 +511,21 @@ fn rebuild_menu(
                     };
                     row.spawn((menu_text(&assets, 14.0, css::LIGHT_GRAY.into()), Tr::new(value)));
                 });
-                spawn_row(ui, &assets, 4, menu.cursor == 4, |row, color, tag| {
+                for (i, (key, channel)) in [
+                    ("settings-music", crate::settings::Channel::Music),
+                    ("settings-voice", crate::settings::Channel::Voice),
+                    ("settings-sfx", crate::settings::Channel::Sfx),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    spawn_row(ui, &assets, 4 + i, menu.cursor == 4 + i, |row, color, tag| {
+                        row.spawn((menu_text(&assets, 14.0, color), Tr::new(key), tag));
+                        let value = format!("{} %", crate::settings::volume_tenths(channel) * 10);
+                        row.spawn((menu_text(&assets, 14.0, css::LIGHT_GRAY.into()), Text::new(value)));
+                    });
+                }
+                spawn_row(ui, &assets, 7, menu.cursor == 7, |row, color, tag| {
                     row.spawn((menu_text(&assets, 14.0, color), Tr::new("menu-back"), tag));
                 });
                 line(ui, "settings-touch-hint", 8.0, css::LIGHT_GRAY.into());
@@ -733,6 +747,14 @@ fn menu_input(
         }
     }
 
+    if menu.screen == Screen::Settings && (4..=6).contains(&menu.cursor) {
+        let step = i8::from(keys.just_pressed(KeyCode::ArrowRight)) - i8::from(keys.just_pressed(KeyCode::ArrowLeft));
+        if step != 0 {
+            let channel = [crate::settings::Channel::Music, crate::settings::Channel::Voice, crate::settings::Channel::Sfx][menu.cursor - 4];
+            crate::settings::adjust_volume(channel, step);
+            menu.dirty = true;
+        }
+    }
     match menu.screen {
         Screen::Main if enter => match menu.cursor {
             0 => menu.go(Screen::Saves(GameMode::Solo)),
@@ -752,6 +774,9 @@ fn menu_input(
                 1 => crate::i18n::next_language(&mut locale),
                 2 => crate::settings::cycle_pad_choice(),
                 3 => crate::settings::cycle_ui_size(),
+                4 => crate::settings::cycle_volume(crate::settings::Channel::Music),
+                5 => crate::settings::cycle_volume(crate::settings::Channel::Voice),
+                6 => crate::settings::cycle_volume(crate::settings::Channel::Sfx),
                 _ => {
                     menu.go(Screen::Main);
                     return;

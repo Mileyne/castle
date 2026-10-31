@@ -254,7 +254,7 @@ fn play_voice(
         commands.entity(voice).despawn();
     }
     if let Some(id) = key.as_deref().and_then(|k| k.strip_prefix("dlg-")).filter(|id| VOICED.contains(id)) {
-        commands.spawn((Voice, AudioPlayer::new(assets.load::<AudioSource>(format!("audio/voice/{id}.ogg"))), PlaybackSettings::DESPAWN));
+        commands.spawn((Voice, AudioPlayer::new(assets.load::<AudioSource>(format!("audio/voice/{id}.ogg"))), PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(crate::settings::volume(crate::settings::Channel::Voice)))));
     }
     *shown = key;
 }

@@ -48,6 +48,48 @@ pub fn cycle_ui_size() {
     save();
 }
 
+/// Volumes réglés par le joueur, de 0 à 10 (dixièmes du volume maximal): musique, voix, bruitages.
+static VOLUMES: [AtomicU8; 3] = [AtomicU8::new(10), AtomicU8::new(10), AtomicU8::new(10)];
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Channel {
+    Music,
+    Voice,
+    Sfx,
+}
+
+impl Channel {
+    const KEYS: [&'static str; 3] = ["volume_music", "volume_voice", "volume_sfx"];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// Le volume réglé pour ce canal, de 0.0 à 1.0.
+pub fn volume(channel: Channel) -> f32 {
+    f32::from(VOLUMES[channel.index()].load(Ordering::Relaxed)) / 10.0
+}
+
+/// Le volume réglé, en dixièmes (0 à 10).
+pub fn volume_tenths(channel: Channel) -> u8 {
+    VOLUMES[channel.index()].load(Ordering::Relaxed)
+}
+
+/// Change le volume d'un canal de `delta` dixièmes (borné entre 0 et 10) et l'enregistre.
+pub fn adjust_volume(channel: Channel, delta: i8) {
+    let now = i16::from(volume_tenths(channel)) + i16::from(delta);
+    VOLUMES[channel.index()].store(now.clamp(0, 10) as u8, Ordering::Relaxed);
+    save();
+}
+
+/// Passe au palier suivant (de 20 % en 20 %, puis retour à 0), pour une validation sans flèches.
+pub fn cycle_volume(channel: Channel) {
+    let next = (volume_tenths(channel) / 2 * 2 + 2) % 12;
+    VOLUMES[channel.index()].store(next.min(10), Ordering::Relaxed);
+    save();
+}
+
 /// Choix du joueur: 0 automatique (d'après le nom de la manette), 1 Xbox, 2 Nintendo.
 static PAD_CHOICE: AtomicU8 = AtomicU8::new(0);
 /// Disposition reconnue d'après le nom de la manette branchée: 0 inconnue, 1 Xbox, 2 Nintendo.
@@ -138,6 +180,12 @@ fn load() {
         return;
     };
     for line in text.lines() {
+        if let Some((key, value)) = line.trim().split_once('=') {
+            if let (Some(i), Ok(tenths)) = (Channel::KEYS.iter().position(|k| *k == key), value.parse::<u8>()) {
+                VOLUMES[i].store(tenths.min(10), Ordering::Relaxed);
+                continue;
+            }
+        }
         match line.trim() {
             "touch_ui=on" => TOUCH_CHOICE.store(2, Ordering::Relaxed),
             "touch_ui=off" => TOUCH_CHOICE.store(1, Ordering::Relaxed),
@@ -168,7 +216,8 @@ fn save() {
         3 => "ui_size=large\n",
         _ => "",
     };
-    if let Err(err) = castle_shared::save::write_settings(&format!("{touch}{pad}{size}")) {
+    let volumes: String = Channel::KEYS.iter().zip(&VOLUMES).map(|(k, v)| format!("{k}={}\n", v.load(Ordering::Relaxed))).collect();
+    if let Err(err) = castle_shared::save::write_settings(&format!("{touch}{pad}{size}{volumes}")) {
         warn!("cannot write settings: {err}");
     }
 }

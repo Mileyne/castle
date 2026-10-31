@@ -320,6 +320,7 @@ pub fn exit_row(kind: ExitKind, open: bool) -> usize {
         (ExitKind::Bridge, true) => 4,
         (ExitKind::Drawbridge, false) => 5,
         (ExitKind::Drawbridge, true) => 6,
+        (ExitKind::Hidden, _) => 0,
     }
 }
 

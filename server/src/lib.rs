@@ -54,6 +54,16 @@ const GENERATOR_INTERVAL: f32 = 2.2;
 const MAX_MONSTERS: usize = 28;
 /// La sortie s'active quand tous les héros debout sont dans ce rayon, pendant ce délai.
 const EXIT_RADIUS: f32 = 48.0;
+
+/// Demi-côté de la zone d'une sortie invisible posée à la main, en pixels.
+const HIDDEN_EXIT_REACH: f32 = 64.0;
+
+/// Sortie sans dessin: toute la zone (coins en pixels) compte, pas seulement un point.
+#[derive(Component)]
+struct ExitArea {
+    min: Vec2,
+    max: Vec2,
+}
 const EXIT_DELAY: f32 = 1.5;
 
 /// Rempart: rayon d'effet, durée et part des dégâts qui passe encore.
@@ -1389,7 +1399,7 @@ fn check_wipe(
         (Entity, &mut Position, &mut Health, &mut Gold, &mut Keys, &PartyId, Has<Downed>),
         With<Player>,
     >,
-    world: Query<Entity, (With<Replicated>, Without<Player>)>,
+    world: Query<Entity, (Or<(With<Replicated>, With<LevelExit>)>, Without<Player>)>,
     triggers: Query<Entity, With<DialogueTrigger>>,
 ) {
     if players.is_empty() || !players.iter().all(|(.., downed)| downed) {
@@ -1731,6 +1741,11 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
                     commands.spawn((Position(pos), DialogueTrigger { node, radius: 64.0, delay: 0.4, fired: false }));
                 }
             }
+            Thing::Exit { kind: ExitKind::Hidden, .. } => {
+                // Invisible: pas répliquée; une zone plus large que le rayon d'un escalier, pour un chemin.
+                let reach = Vec2::splat(HIDDEN_EXIT_REACH);
+                commands.spawn((LevelExit { kind: ExitKind::Hidden, open: false }, ExitArea { min: pos - reach, max: pos + reach }, Position(pos)));
+            }
             Thing::Exit { kind, .. } => {
                 commands.spawn((Replicated, LevelExit { kind: *kind, open: false }, Position(pos)));
             }
@@ -1787,7 +1802,14 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
     // Sans sortie posée à la main, elle est au centre de la salle de sortie.
     if !def.things.iter().any(|t| matches!(t, Thing::Exit { .. })) {
         let exit = def.layout.rooms[def.layout.exit].center();
-        commands.spawn((Replicated, LevelExit { kind: ExitKind::Stairs, open: false }, Position(center_of(exit))));
+        if def.exit_area {
+            // La zone de sortie elle-même: invisible, donc pas répliquée; tous les héros doivent s'y trouver.
+            let room = &def.layout.rooms[def.layout.exit];
+            let (lo, hi) = (def.world(room.min.as_vec2()), def.world(room.max.as_vec2() + Vec2::ONE));
+            commands.spawn((LevelExit { kind: ExitKind::Stairs, open: false }, ExitArea { min: lo, max: hi }, Position((lo + hi) / 2.0)));
+        } else {
+            commands.spawn((Replicated, LevelExit { kind: ExitKind::Stairs, open: false }, Position(center_of(exit))));
+        }
     }
 
     // L'objectif du niveau. La sortie reste fermée tant qu'il n'est pas rempli (voir `open_exit`).
@@ -2007,15 +2029,15 @@ fn run_exit(
     mut transition: ResMut<Transition>,
     mut stats: ResMut<LevelStats>,
     clients: Query<(Entity, Has<Ready>), With<ActiveHero>>,
-    exits: Query<(&Position, &LevelExit), Without<Player>>,
+    exits: Query<(&Position, &LevelExit, Option<&ExitArea>), Without<Player>>,
     mut players: Query<
         (Entity, &mut Position, &mut Health, &PartyId, &Gold, &Keys, Has<Downed>, Has<Controlled>),
         With<Player>,
     >,
-    world: Query<Entity, (With<Replicated>, Without<Player>)>,
+    world: Query<Entity, (Or<(With<Replicated>, With<LevelExit>)>, Without<Player>)>,
     triggers: Query<Entity, With<DialogueTrigger>>,
 ) {
-    let Ok((exit_pos, exit)) = exits.single() else {
+    let Ok((exit_pos, exit, area)) = exits.single() else {
         return;
     };
     if let Some(elapsed) = transition.0.as_mut() {
@@ -2036,7 +2058,10 @@ fn run_exit(
             .collect();
         let all_in = exit.open
             && !standing.is_empty()
-            && standing.iter().all(|(_, p, ..)| p.0.distance(exit_pos.0) <= EXIT_RADIUS);
+            && standing.iter().all(|(_, p, ..)| match area {
+                Some(area) => p.0.cmpge(area.min).all() && p.0.cmple(area.max).all(),
+                None => p.0.distance(exit_pos.0) <= EXIT_RADIUS,
+            });
         if !all_in {
             *countdown = 0.0;
             return;

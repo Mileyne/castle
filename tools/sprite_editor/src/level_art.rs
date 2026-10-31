@@ -222,6 +222,7 @@ impl LevelArt {
             ExitKind::Gate => 1,
             ExitKind::Bridge => 3,
             ExitKind::Drawbridge => 5,
+            ExitKind::Hidden => 0,
         };
         Sprite {
             texture: &self.exits,
@@ -256,6 +257,7 @@ impl LevelArt {
                 },
                 white,
             ),
+            Thing::Exit { kind: ExitKind::Hidden, .. } => return None,
             Thing::Exit { kind, .. } => self.exit(*kind),
             Thing::Landmark { kind, .. } => {
                 let texture = &self.landmarks.iter().find(|(k, _)| k == kind)?.1;

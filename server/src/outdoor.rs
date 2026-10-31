@@ -293,6 +293,7 @@ pub fn outdoor_level(spec: &OutdoorSpec, seed: u64) -> LevelDef {
         rows,
         layout: Layout { rooms, connections, start: 0, exit: count - 1, treasure: None },
         quest: spec.quest,
+        exit_area: false,
         things,
     }
 }

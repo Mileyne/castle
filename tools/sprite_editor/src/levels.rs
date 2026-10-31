@@ -32,6 +32,9 @@ enum Tool {
 
 /// Comment l'outil Mur / Sol peint.
 /// Les outils qui peignent les tuiles (pinceau, rectangle, remplissage).
+/// Zoom maximal de la carte (pixels par tuile).
+const MAX_ZOOM: f32 = 80.0;
+
 fn painting_tool(tool: Tool) -> bool {
     matches!(tool, Tool::Wall | Tool::Floor | Tool::Style)
 }
@@ -91,11 +94,12 @@ impl Item {
         Item::Landmark(castle_shared::LandmarkKind::Fountain),
     ];
 
-    const EXITS: [Item; 4] = [
+    const EXITS: [Item; 5] = [
         Item::Exit(ExitKind::Stairs),
         Item::Exit(ExitKind::Gate),
         Item::Exit(ExitKind::Bridge),
         Item::Exit(ExitKind::Drawbridge),
+        Item::Exit(ExitKind::Hidden),
     ];
 
     fn label(self) -> &'static str {
@@ -125,6 +129,7 @@ impl Item {
             Item::Exit(ExitKind::Gate) => "Sortie: barrière",
             Item::Exit(ExitKind::Bridge) => "Sortie: pont",
             Item::Exit(ExitKind::Drawbridge) => "Sortie: pont-levis",
+            Item::Exit(ExitKind::Hidden) => "Sortie invisible (fin de chemin)",
         }
     }
 
@@ -178,6 +183,7 @@ fn marker(thing: &Thing) -> (&'static str, Color32) {
         Thing::Ward { .. } => ("w", Color32::from_rgb(150, 110, 240)),
         Thing::Portcullis { .. } => ("h", Color32::from_rgb(170, 170, 180)),
         Thing::Panel { .. } => ("#", Color32::from_rgb(150, 110, 240)),
+        Thing::Exit { kind: ExitKind::Hidden, .. } => ("⚑", Color32::from_rgb(120, 220, 255)),
         Thing::Exit { .. } => ("E", Color32::from_rgb(255, 255, 255)),
         Thing::Trigger { .. } => ("t", Color32::from_rgb(120, 140, 255)),
     }
@@ -254,6 +260,8 @@ pub struct LevelsTab {
     last_paint: Option<(i32, i32)>,
     /// Élément en cours de déplacement.
     moving: Option<usize>,
+    /// Zone en cours de redimensionnement: son rang et les bords saisis (gauche, droite, bas, haut).
+    resizing: Option<(usize, [bool; 4])>,
     undo: Vec<LevelDef>,
     redo: Vec<LevelDef>,
     want_undo: bool,
@@ -291,6 +299,7 @@ impl LevelsTab {
             show_zones: true,
             last_paint: None,
             moving: None,
+            resizing: None,
             undo: Vec::new(),
             redo: Vec::new(),
             want_undo: false,
@@ -466,18 +475,24 @@ impl LevelsTab {
                 .clicked();
             ui.separator();
             ui.label("Zoom");
-            ui.add(egui::Slider::new(&mut self.zoom, 4.0..=40.0));
+            ui.add(egui::Slider::new(&mut self.zoom, 4.0..=MAX_ZOOM).logarithmic(true));
             ui.checkbox(&mut self.show_grid, "Grille");
             ui.checkbox(&mut self.show_zones, "Zones");
         });
         match self.tool {
-            Tool::Place => self.palette_ui(ui, art.as_ref()),
+            Tool::Place => {
+                egui::ScrollArea::both()
+                    .id_salt("palette_scroll")
+                    .max_height(220.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| self.palette_ui(ui, art.as_ref()));
+            }
             Tool::Move => {
                 ui.label("Glisser un élément pour le déplacer.");
             }
             Tool::Zone => {
                 ui.horizontal(|ui| {
-                    ui.label("Genre de la zone à tracer (glisser sur la carte):");
+                    ui.label("Genre de la zone à tracer (glisser sur la carte; saisir un bord ou un coin d'une zone pour la redimensionner):");
                     for kind in [
                         RoomKind::Combat,
                         RoomKind::Start,
@@ -634,7 +649,7 @@ impl LevelsTab {
         // Ctrl + molette (ou pincement): zoom.
         let pinch = ui.input(|i| i.zoom_delta());
         if pinch != 1.0 && ui.rect_contains_pointer(ui.max_rect()) {
-            self.zoom = (self.zoom * pinch).clamp(4.0, 40.0);
+            self.zoom = (self.zoom * pinch).clamp(4.0, MAX_ZOOM);
         }
         let zoom = self.zoom;
         let (w, h) = (def.size.x as i32, def.size.y as i32);
@@ -916,7 +931,14 @@ impl LevelsTab {
                 def.things
                     .iter()
                     .enumerate()
-                    .map(|(i, t)| (i, (t.at() - V2::new(fx, fy)).length()))
+                    .map(|(i, t)| {
+                        let near = (t.at() - V2::new(fx, fy)).length();
+                        // Un grand sprite (sortie, motif) se saisit sur toute sa surface, pas seulement à son point d'ancrage.
+                        let inside = art.as_ref().and_then(|a| a.thing(t)).filter(|s| {
+                            (fx - t.at().x).abs() <= s.size / 2.0 && (fy - (t.at().y + s.lift)).abs() <= s.size / 2.0
+                        });
+                        (i, if inside.is_some() { near.min(0.89) } else { near })
+                    })
                     .filter(|(_, d)| *d < 0.9)
                     .min_by(|a, b| a.1.total_cmp(&b.1))
                     .map(|(i, _)| i)
@@ -949,6 +971,37 @@ impl LevelsTab {
                 self.drag = cursor;
                 match self.tool {
                     Tool::Wall | Tool::Floor | Tool::Style if self.shape == Shape::Brush => self.checkpoint(def),
+                    Tool::Zone => {
+                        // Saisir le bord ou le coin d'une zone existante la redimensionne, sinon on en trace une.
+                        self.resizing = precise.and_then(|(px, py)| {
+                            let tol = (7.0 / zoom).max(0.3);
+                            def.layout
+                                .rooms
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(i, r)| {
+                                    let (x0, x1) = (r.min.x as f32, r.max.x as f32 + 1.0);
+                                    let (y0, y1) = (r.min.y as f32, r.max.y as f32 + 1.0);
+                                    if px < x0 - tol || px > x1 + tol || py < y0 - tol || py > y1 + tol {
+                                        return None;
+                                    }
+                                    let edges = [(px - x0).abs() < tol, (px - x1).abs() < tol, (py - y0).abs() < tol, (py - y1).abs() < tol];
+                                    // Un bord ne compte que s'il est vraiment proche et que l'autre axe est dans la zone.
+                                    let edges = [
+                                        edges[0] && py > y0 - tol && py < y1 + tol,
+                                        edges[1] && py > y0 - tol && py < y1 + tol,
+                                        edges[2] && px > x0 - tol && px < x1 + tol,
+                                        edges[3] && px > x0 - tol && px < x1 + tol,
+                                    ];
+                                    edges.iter().any(|e| *e).then_some((i, edges))
+                                })
+                                .last()
+                        });
+                        if self.resizing.is_some() {
+                            self.drag = None;
+                            self.checkpoint(def);
+                        }
+                    }
                     Tool::Move => {
                         self.moving = precise.and_then(|p| nearest(def, p));
                         if self.moving.is_some() {
@@ -997,7 +1050,28 @@ impl LevelsTab {
                     }
                 }
             }
+            if self.tool == Tool::Zone && response.dragged_by(egui::PointerButton::Primary) {
+                if let (Some((i, [left, right, bottom, top])), Some((x, y))) = (self.resizing, cursor) {
+                    let room = &mut def.layout.rooms[i];
+                    let before = (room.min, room.max);
+                    let (x, y) = (x.clamp(0, w - 1) as u32, y.clamp(0, h - 1) as u32);
+                    if left {
+                        room.min.x = x.min(room.max.x);
+                    }
+                    if right {
+                        room.max.x = x.max(room.min.x);
+                    }
+                    if bottom {
+                        room.min.y = y.min(room.max.y);
+                    }
+                    if top {
+                        room.max.y = y.max(room.min.y);
+                    }
+                    changed |= before != (room.min, room.max);
+                }
+            }
             if response.drag_stopped() {
+                self.resizing = None;
                 self.last_paint = None;
                 self.moving = None;
                 if let (Some((sx, sy)), Some((ex, ey))) = (self.drag, cursor) {

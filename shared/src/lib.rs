@@ -691,6 +691,8 @@ pub enum ExitKind {
     Bridge,
     /// Pont-levis du château, levé puis baissé.
     Drawbridge,
+    /// Sans dessin dans le jeu (visible seulement dans l'éditeur): la fin d'un chemin, par exemple.
+    Hidden,
 }
 
 /// Sortie du niveau: quand tous les héros debout y sont, le niveau est terminé. Elle est fermée tant que l'objectif du
