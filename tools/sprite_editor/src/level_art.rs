@@ -42,6 +42,8 @@ pub struct LevelArt {
     /// La première image de chaque objet (dans l'ordre des lignes `object::*` du client).
     objects: Vec<TextureHandle>,
     exits: TextureHandle,
+    /// Les grands motifs (une image chacun).
+    landmarks: Vec<(castle_shared::LandmarkKind, TextureHandle)>,
     /// La planche du décor au sol (sortes en colonnes, variantes en lignes, cases de deux tuiles).
     decor: TextureHandle,
     /// Un monstre de face (repos), dans l'ordre de `MonsterKind`.
@@ -111,6 +113,13 @@ impl LevelArt {
         let dir = repo.join("client/assets/art/medieval");
         let tiles = load(&dir.join("tiles.png"))?;
         let decor = load(&dir.join("decor.png"))?;
+        let landmarks = castle_shared::LandmarkKind::ALL
+            .into_iter()
+            .map(|kind| {
+                let image = load_basis(&dir.join("landmarks").join(format!("{}.basis", kind.file())))?;
+                Some((kind, texture(ctx, "level_landmark", &image, TextureOptions::LINEAR)))
+            })
+            .collect::<Option<Vec<_>>>()?;
         let exits = load_basis(&dir.join("exits.basis"))?;
         let monsters = [
             (MonsterKind::Skeleton, "skeleton"),
@@ -142,6 +151,7 @@ impl LevelArt {
         Some(Self {
             tiles: texture(ctx, "level_tiles", &tiles, TextureOptions::NEAREST),
             objects,
+            landmarks,
             decor: texture(ctx, "level_decor", &decor, TextureOptions::NEAREST),
             exits: texture(ctx, "level_exits", &exits, TextureOptions::LINEAR),
             monsters,
@@ -246,6 +256,12 @@ impl LevelArt {
                 white,
             ),
             Thing::Exit { kind, .. } => self.exit(*kind),
+            Thing::Landmark { kind, .. } => {
+                let texture = &self.landmarks.iter().find(|(k, _)| k == kind)?.1;
+                // La case fait 64 unités (quatre tuiles), le pied du motif est à 92 % de sa hauteur.
+                let size = 4.0 * kind.display_scale();
+                Sprite { texture, uv: Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), size, lift: 0.4167 * size, tint: white }
+            }
             Thing::Ward { .. } | Thing::Trigger { .. } => return None,
         })
     }

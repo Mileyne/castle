@@ -987,5 +987,81 @@
       kind: Gate,
       at: (119.5, 23.5),
     ),
+    Landmark(
+      kind: Pine,
+      at: (63.5, 18.5),
+    ),
+    Landmark(
+      kind: Pine,
+      at: (73.5, 24.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (94.5, 37.5),
+    ),
+    Landmark(
+      kind: Pine,
+      at: (104.5, 33.5),
+    ),
+    Landmark(
+      kind: DeadTree,
+      at: (38.5, 35.5),
+    ),
+    Landmark(
+      kind: Pine,
+      at: (25.5, 33.5),
+    ),
+    Landmark(
+      kind: Pine,
+      at: (109.5, 23.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (24.5, 23.5),
+    ),
+    Landmark(
+      kind: Pine,
+      at: (62.5, 22.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (59.5, 21.5),
+    ),
+    Landmark(
+      kind: Pine,
+      at: (50.5, 33.5),
+    ),
+    Landmark(
+      kind: Pine,
+      at: (25.5, 26.5),
+    ),
+    Landmark(
+      kind: Pine,
+      at: (80.5, 25.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (39.5, 43.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (25.5, 30.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (59.5, 29.5),
+    ),
+    Landmark(
+      kind: DeadTree,
+      at: (41.5, 39.5),
+    ),
+    Landmark(
+      kind: Pine,
+      at: (104.5, 23.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (80.5, 28.5),
+    ),
   ],
 )

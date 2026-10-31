@@ -12,6 +12,7 @@ mod effects;
 mod heroes;
 mod heroes_gore;
 mod heroes_medieval;
+mod landmarks;
 mod monsters;
 mod photo;
 mod monsters_boss;
@@ -353,6 +354,14 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
     }
     source += "];\n";
     std::fs::write(out_dir.join("sprite_meta.rs"), source).unwrap();
+
+    // Grands motifs du décor: une planche par motif (une seule image, case des sorties de niveau).
+    std::fs::create_dir_all(out_dir.join("landmarks")).unwrap();
+    let landmark_camera = Camera { yaw: 0.0, elevation: ELEVATION, scale: SCALE, size: EXIT_CELL, feet_y: FEET_Y * 2.0, outline: true, shadow: true };
+    for (index, name) in landmarks::LANDMARKS.iter().enumerate() {
+        let image = to_rgba8(&render(&landmarks::build(index), &landmark_camera, SUPERSAMPLE));
+        write_basis(&out_dir.join("landmarks").join(format!("{name}.basis")), EXIT_CELL, EXIT_CELL, &image);
+    }
 
     // Sorties de niveau: dessinées en grand (cases de 192 px, éléments agrandis), avec un cycle de vacillement plus court.
     let exit_cell = EXIT_CELL;

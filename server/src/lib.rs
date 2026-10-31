@@ -1684,6 +1684,10 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
             Thing::Captive { .. } => {
                 commands.spawn((Replicated, Captive, Position(pos), RescueHold(0.0)));
             }
+            Thing::Landmark { kind, .. } => {
+                // Le client dessine le motif; le serveur n'en garde que le pied, qui bloque les héros et les monstres.
+                commands.spawn((Replicated, Landmark(*kind), Position(pos), Solid(kind.half_size())));
+            }
             Thing::Ward { .. } => {
                 commands.spawn((Replicated, Ward { radius: WARD_RADIUS }, Position(pos)));
             }
@@ -1921,8 +1925,17 @@ pub fn decorate_levels(dir: &std::path::Path, force: bool) -> std::io::Result<()
             continue;
         }
         def.decor = def.scatter_decor(0xDEC0 + u64::from(level));
+        // Les grands motifs sont des éléments du niveau: on remplace ceux qui existent déjà.
+        def.things.retain(|t| !matches!(t, Thing::Landmark { .. }));
+        let landmarks = def.scatter_landmarks(0xBEEF + u64::from(level));
+        let count = landmarks.len();
+        def.things.extend(landmarks);
+        let problems = def.validate();
+        if !problems.is_empty() {
+            return Err(std::io::Error::other(format!("niveau {level}: {problems:?}")));
+        }
         std::fs::write(&path, def.to_ron())?;
-        println!("niveau {level}: {} éléments de décor", def.decor.len());
+        println!("niveau {level}: {} éléments de décor, {count} grands motifs", def.decor.len());
     }
     Ok(())
 }

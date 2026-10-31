@@ -21,7 +21,7 @@ Pour jouer directement depuis les sources: `./play.sh` (le client démarre le se
 ## Outils
 
 - `./edit.sh`: éditeur d'art (tuiles et sprites).
-- Décor au sol: les niveaux listent des éléments de décor (`decor`, herbes, cailloux, flaques, ossements, tapis...), assemblés aux tuiles par le client; `castle_server --decorate shared/levels [--force]` en sème selon la région, et l'outil Décor de l'éditeur en pose à la main. Quand deux régions se touchent (champ `style`), leurs tuiles se fondent l'une dans l'autre.
+- Décor au sol: les niveaux listent des éléments de décor (`decor`, herbes, cailloux, flaques, ossements, tapis...), assemblés aux tuiles par le client; `castle_server --decorate shared/levels [--force]` en sème selon la région, et l'outil Décor de l'éditeur en pose à la main. Les grands motifs (chênes, sapins, rochers, colonnes, statues, fontaines: `Thing::Landmark`) bloquent le passage par leur pied et passent devant ou derrière les personnages selon leur position. Quand deux régions se touchent (champ `style`), leurs tuiles se fondent l'une dans l'autre.
 - `tools/sprite_forge`: génère les planches de sprites du style médiéval (`cd` à la racine puis `cargo run --release -p sprite_forge -- <dossier>`): une planche par personnage, par monstre et par objet (`heroes/`, `monsters/`, `objects/`), à 288 px la case (constante `DETAIL`), rognées à ce qu'elles dessinent et compressées en `.basis` (Basis Universal: le jeu les décompresse vers BC7, ASTC ou ETC2 selon la carte graphique). Après une génération, copier `sprite_meta.rs` dans `client/src/`.
 
 ## Documentation

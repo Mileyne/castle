@@ -1368,5 +1368,69 @@
       radius: 60.0,
       delay: 0.5,
     ),
+    Landmark(
+      kind: Pillar,
+      at: (16.5, 37.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (72.5, 8.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (50.5, 22.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (48.5, 9.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (83.5, 10.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (10.5, 19.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (72.5, 5.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (57.5, 5.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (83.5, 5.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (50.5, 19.5),
+    ),
+    Landmark(
+      kind: Statue,
+      at: (60.5, 4.5),
+    ),
+    Landmark(
+      kind: Statue,
+      at: (11.5, 41.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (71.5, 36.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (25.5, 37.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (40.5, 37.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (75.5, 36.5),
+    ),
   ],
 )

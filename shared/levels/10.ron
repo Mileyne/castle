@@ -1653,5 +1653,69 @@
       kind: TargetDisc,
       at: (8.400589, 25.526377),
     ),
+    Landmark(
+      kind: Pillar,
+      at: (82.5, 9.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (54.5, 22.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (81.5, 41.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (17.5, 5.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (73.5, 6.5),
+    ),
+    Landmark(
+      kind: Statue,
+      at: (72.5, 9.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (83.5, 35.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (35.5, 41.5),
+    ),
+    Landmark(
+      kind: Statue,
+      at: (73.5, 37.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (14.5, 4.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (6.5, 4.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (83.5, 4.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (17.5, 10.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (57.5, 24.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (83.5, 38.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (18.5, 44.5),
+    ),
   ],
 )

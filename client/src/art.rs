@@ -216,6 +216,13 @@ impl Art {
         self.sheets.sprite("monsters", &file_name(kind), sheet_index(direction, frame), size, PROP_ANCHOR)
     }
 
+    /// Sprite d'un grand motif (arbre, colonne, fontaine...) et son ancrage: une image unique dont le pied est l'origine.
+    pub fn landmark_sprite(&self, kind: LandmarkKind) -> (Sprite, Anchor) {
+        let size = 64.0 * kind.display_scale();
+        let sprite = Sprite { image: self.sheets.image("landmarks", kind.file()), custom_size: Some(Vec2::splat(size)), ..default() };
+        (sprite, PROP_ANCHOR)
+    }
+
     /// Sprite d'un objet (ligne `object::*`, image d'animation) et son ancrage.
     pub fn prop_sprite(&self, row: usize, frame: usize, size: Vec2) -> (Sprite, Anchor) {
         self.sheets.sprite("objects", object::FILES[row], frame, size, prop_base_anchor(row))
@@ -360,6 +367,24 @@ pub const PROP_ANCHOR: Anchor = Anchor(Vec2::new(0.0, -0.417));
 
 /// Les panneaux de mur sont dessinés centrés dans leur case (vus de face), pas posés au sol.
 pub const WALL_ANCHOR: Anchor = Anchor(Vec2::ZERO);
+
+/// Une entité dessinée devant ou derrière les autres selon sa position vers le haut ou le bas de l'écran (les héros, les monstres
+/// et les grands motifs): celle qui est plus bas est devant. Le nombre est une petite avance pour départager deux entités au même endroit.
+#[derive(Component)]
+pub struct YSort(pub f32);
+
+/// Profondeur de l'ensemble des entités triées (voir `YSort`) et pente: un monde de 2 000 unités de haut reste entre 0,8 et 1,2.
+const SORT_DEPTH: f32 = 1.0;
+const SORT_SLOPE: f32 = 0.0002;
+
+pub fn y_sort(mut sorted: Query<(&mut Transform, &YSort)>) {
+    for (mut transform, sort) in &mut sorted {
+        let z = SORT_DEPTH - transform.translation.y * SORT_SLOPE + sort.0;
+        if (transform.translation.z - z).abs() > 1e-6 {
+            transform.translation.z = z;
+        }
+    }
+}
 
 /// Ligne d'objet affichée par une entité: l'animation (impulsions, rotation) choisit l'image.
 #[derive(Component)]
@@ -601,10 +626,22 @@ fn run_transition(
     }
 }
 
+/// Débordement maximal, en pixels, de la lisière irrégulière entre une clairière et sa forêt.
+const RAGGED_REACH: f32 = 22.0;
+/// Longueur d'onde, en pixels, des ondulations de la lisière.
+const RAGGED_WAVE: f32 = 17.0;
 /// Largeur, en pixels, sur laquelle une tuile se fond dans celle d'un voisin d'une autre région.
 const TRANSITION_REACH: f32 = 14.0;
 /// Côté d'une case de la planche de décor (deux tuiles).
 const DECOR_CELL: usize = 96;
+
+/// Bruit lissé entre 0 et 1 le long d'une ligne (`t` en longueurs d'onde), distinct pour chaque `seed`.
+fn smooth_noise(t: f32, seed: u32) -> f32 {
+    let (i, f) = (t.floor(), t - t.floor());
+    let value = |k: f32| edge_noise(k as i32 as u32, seed, 3, 7);
+    let blend = f * f * (3.0 - 2.0 * f);
+    value(i) * (1.0 - blend) + value(i + 1.0) * blend
+}
 
 /// Valeur pseudo-aléatoire stable entre 0 et 1 pour un bloc de pixels d'une tuile.
 fn edge_noise(x: u32, y: u32, bx: usize, by: usize) -> f32 {
@@ -743,6 +780,57 @@ fn bake_chunk(def: &LevelDef, room: &Room, sources: &BakeSources, chunk_x: u32, 
                         for channel in 0..3 {
                             let mixed = pixels[to + channel] as f32 * (1.0 - weight) + source[from + channel] as f32 * weight;
                             pixels[to + channel] = (mixed + 0.5) as u8;
+                        }
+                    }
+                }
+            }
+            // Dehors, la lisière n'est pas un trait droit: les arbres débordent de façon irrégulière sur la clairière (et la
+            // clairière mord un peu sur la forêt), ce qui efface l'effet d'escalier des bords de tuiles.
+            if Region::ALL[tile_row].is_outdoor() {
+                // Seule la forêt déborde sur la clairière: si la clairière mordait aussi sur la forêt, la limite des deux tuiles resterait droite.
+                let face = wall;
+                for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1)] {
+                    let (nx, ny) = (xi + dx, yi + dy);
+                    if face || nx < 0 || ny < 0 || nx >= size.x as i32 || ny >= size.y as i32 {
+                        continue;
+                    }
+                    let neighbor_wall = room.tile(nx, ny) == Tile::Wall;
+                    if neighbor_wall == wall || (neighbor_wall && room.tile(nx, ny - 1) == Tile::Floor) {
+                        // Même nature des deux côtés, ou le voisin montre sa face de tronc: pas de lisière à casser.
+                        continue;
+                    }
+                    let neighbor_row = rank(def.region_at(nx, ny));
+                    let neighbor_column = tile_column(nx as u32, ny as u32, neighbor_row, neighbor_wall, room.tile(nx, ny - 1) == Tile::Floor);
+                    let reach = RAGGED_REACH;
+                    for py in 0..tile_px {
+                        for px in 0..tile_px {
+                            let edge = match (dx, dy) {
+                                (-1, 0) => px,
+                                (1, 0) => tile_px - 1 - px,
+                                _ => tile_px - 1 - py,
+                            };
+                            if edge as f32 >= reach {
+                                continue;
+                            }
+                            // Le contour de la lisière ondule le long du bord (bruit lissé en coordonnées du niveau, donc continu d'une
+                            // tuile à l'autre), avec un peu de grain feuillu par-dessus.
+                            let along = if dx != 0 { y as usize * tile_px + py } else { x as usize * tile_px + px };
+                            let side = if dx != 0 { 1 } else { 2 };
+                            let wave = smooth_noise(along as f32 / RAGGED_WAVE, side);
+                            let grain = edge_noise(x, y, px / 2, py / 2);
+                            let contour = reach * (0.3 + 0.7 * wave) + 3.0 * (grain - 0.5);
+                            if (edge as f32) >= contour {
+                                continue;
+                            }
+                            // Le pixel du voisin à la même distance du bord partagé.
+                            let (sx, sy) = match (dx, dy) {
+                                (-1, 0) => (tile_px - 1 - edge, py),
+                                (1, 0) => (edge, py),
+                                _ => (px, edge),
+                            };
+                            let from = ((neighbor_row * TILE_CELL as usize + sy) * source_width + neighbor_column * tile_px + sx) * 4;
+                            let to = origin + (py * width + px) * 4;
+                            pixels[to..to + 3].copy_from_slice(&source[from..from + 3]);
                         }
                     }
                 }

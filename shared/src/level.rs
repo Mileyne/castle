@@ -34,6 +34,8 @@ pub enum Thing {
     Panel { kind: InteractKind, at: Vec2, node: String },
     /// Sortie du niveau. Sans elle, la sortie est au centre de la salle de sortie.
     Exit { kind: ExitKind, at: Vec2 },
+    /// Grand motif (arbre, rocher, colonne, fontaine...) dont le pied bloque le passage.
+    Landmark { kind: crate::decor::LandmarkKind, at: Vec2 },
     /// Scène de dialogue déclenchée quand un héros s'approche.
     Trigger { node: String, at: Vec2, radius: f32, delay: f32 },
 }
@@ -52,6 +54,7 @@ impl Thing {
             | Self::Portcullis { at, .. }
             | Self::Panel { at, .. }
             | Self::Exit { at, .. }
+            | Self::Landmark { at, .. }
             | Self::Trigger { at, .. } => *at,
         }
     }
@@ -69,6 +72,7 @@ impl Thing {
             | Self::Portcullis { at, .. }
             | Self::Panel { at, .. }
             | Self::Exit { at, .. }
+            | Self::Landmark { at, .. }
             | Self::Trigger { at, .. } => *at = to,
         }
     }

@@ -14,7 +14,7 @@ use bevy_replicon_renet::{
 };
 use castle_shared::*;
 
-use art::{Art, PROP_ANCHOR, Prop, SPRITE_SIZE, WalkCycle, direction_index, monster_scale, object, projectile};
+use art::{Art, PROP_ANCHOR, Prop, SPRITE_SIZE, WalkCycle, YSort, direction_index, monster_scale, object, projectile};
 
 mod art;
 mod boss;
@@ -225,7 +225,7 @@ pub fn run() {
             Update,
             (
                 send_input.run_if(in_state(ClientState::Connected)).run_if(level_intro::player_can_act),
-                raise_active_hero.after(smooth_positions),
+                art::y_sort.after(smooth_positions),
                 layer_projectiles.after(smooth_positions),
                 update_exit,
                 (dress_new_entities, fade_downed).chain(),
@@ -454,6 +454,7 @@ fn dress_new_entities(
     traps: Query<(Entity, &Position), Added<Trap>>,
     exits: Query<(Entity, &Position, &LevelExit), Added<LevelExit>>,
     portcullises: Query<(Entity, &Position, &Portcullis), Added<Portcullis>>,
+    landmarks: Query<(Entity, &Position, &Landmark), Added<Landmark>>,
 ) {
     // Un objet animé: sprite de la ligne `row` de la planche, ancré au sol.
     let prop = |row: usize| {
@@ -467,6 +468,7 @@ fn dress_new_entities(
         commands.entity(entity).insert((
             sprite,
             anchor,
+            YSort(0.00004),
             WalkCycle::default(),
             Transform::from_translation(pos.0.extend(1.0)),
         ));
@@ -476,8 +478,9 @@ fn dress_new_entities(
         commands.entity(entity).insert((
             sprite,
             anchor,
+            YSort(0.0),
             WalkCycle::default(),
-            Transform::from_translation(pos.0.extend(0.9)),
+            Transform::from_translation(pos.0.extend(1.0)),
         ));
     }
     for (entity, pos) in &generators {
@@ -538,6 +541,10 @@ fn dress_new_entities(
                     ));
                 }
             });
+    }
+    for (entity, pos, landmark) in &landmarks {
+        let (sprite, anchor) = art.landmark_sprite(landmark.0);
+        commands.entity(entity).insert((sprite, anchor, YSort(0.0), Transform::from_translation(pos.0.extend(1.0))));
     }
     for (entity, pos, exit) in &exits {
         commands.entity(entity).insert((
@@ -748,16 +755,6 @@ fn layer_projectiles(mut shots: Query<(&mut Transform, &Position, &Launch, &Proj
     for (mut transform, pos, launch, shot) in &mut shots {
         let behind = shot.dir.y > 0.3 && pos.0.distance(launch.0) < BODY_CLEAR;
         let z = if behind { 0.99 } else { 1.1 };
-        if transform.translation.z != z {
-            transform.translation.z = z;
-        }
-    }
-}
-
-/// Le héros dirigé par le joueur est dessiné au premier plan, devant les autres héros et les monstres.
-fn raise_active_hero(mut heroes: Query<(&mut Transform, Has<LocalPlayer>), With<Player>>) {
-    for (mut transform, active) in &mut heroes {
-        let z = if active { 1.08 } else { 1.0 };
         if transform.translation.z != z {
             transform.translation.z = z;
         }

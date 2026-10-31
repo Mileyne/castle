@@ -1654,5 +1654,73 @@
       radius: 200.0,
       delay: 2.0,
     ),
+    Landmark(
+      kind: Oak,
+      at: (11.5, 19.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (48.5, 23.5),
+    ),
+    Landmark(
+      kind: Statue,
+      at: (12.5, 36.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (74.5, 43.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (31.5, 41.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (79.5, 24.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (51.5, 37.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (37.5, 3.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (6.5, 37.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (8.5, 20.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (76.5, 4.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (59.5, 22.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (62.5, 21.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (69.5, 35.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (48.5, 11.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (70.5, 4.5),
+    ),
+    Landmark(
+      kind: Oak,
+      at: (76.5, 36.5),
+    ),
   ],
 )

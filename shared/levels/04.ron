@@ -983,5 +983,89 @@
       radius: 40.0,
       delay: 0.5,
     ),
+    Landmark(
+      kind: Pine,
+      at: (25.5, 24.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (38.5, 14.5),
+    ),
+    Landmark(
+      kind: DeadTree,
+      at: (35.5, 37.5),
+    ),
+    Landmark(
+      kind: Pine,
+      at: (43.5, 16.5),
+    ),
+    Landmark(
+      kind: DeadTree,
+      at: (51.5, 19.5),
+    ),
+    Landmark(
+      kind: Boulder,
+      at: (39.5, 35.5),
+    ),
+    Landmark(
+      kind: DeadTree,
+      at: (40.5, 26.5),
+    ),
+    Landmark(
+      kind: DeadTree,
+      at: (49.5, 35.5),
+    ),
+    Landmark(
+      kind: Pine,
+      at: (36.5, 19.5),
+    ),
+    Landmark(
+      kind: DeadTree,
+      at: (22.5, 22.5),
+    ),
+    Landmark(
+      kind: DeadTree,
+      at: (30.5, 41.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (37.5, 41.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (35.5, 14.5),
+    ),
+    Landmark(
+      kind: DeadTree,
+      at: (56.5, 25.5),
+    ),
+    Landmark(
+      kind: DeadTree,
+      at: (47.5, 31.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (51.5, 32.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (25.5, 29.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (60.5, 17.5),
+    ),
+    Landmark(
+      kind: Pine,
+      at: (42.5, 21.5),
+    ),
+    Landmark(
+      kind: Pillar,
+      at: (30.5, 37.5),
+    ),
+    Landmark(
+      kind: Pine,
+      at: (23.5, 17.5),
+    ),
   ],
 )

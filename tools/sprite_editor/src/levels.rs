@@ -56,6 +56,7 @@ enum Item {
     Relic,
     Captive,
     Exit(ExitKind),
+    Landmark(castle_shared::LandmarkKind),
 }
 
 impl Item {
@@ -81,6 +82,16 @@ impl Item {
         Item::Pickup(PickupKind::Ingredient),
         Item::Pickup(PickupKind::GearPart),
         Item::Pickup(PickupKind::TargetDisc),
+    ];
+
+    const LANDMARKS: [Item; 7] = [
+        Item::Landmark(castle_shared::LandmarkKind::Oak),
+        Item::Landmark(castle_shared::LandmarkKind::Pine),
+        Item::Landmark(castle_shared::LandmarkKind::DeadTree),
+        Item::Landmark(castle_shared::LandmarkKind::Boulder),
+        Item::Landmark(castle_shared::LandmarkKind::Pillar),
+        Item::Landmark(castle_shared::LandmarkKind::Statue),
+        Item::Landmark(castle_shared::LandmarkKind::Fountain),
     ];
 
     const EXITS: [Item; 4] = [
@@ -112,6 +123,7 @@ impl Item {
             Item::Pickup(PickupKind::TargetDisc) => "Disque de cible (vert)",
             Item::Relic => "Relique",
             Item::Captive => "Prisonnier",
+            Item::Landmark(kind) => kind.label(),
             Item::Exit(ExitKind::Stairs) => "Sortie: escalier",
             Item::Exit(ExitKind::Gate) => "Sortie: barrière",
             Item::Exit(ExitKind::Bridge) => "Sortie: pont",
@@ -128,6 +140,7 @@ impl Item {
             Item::Relic => Thing::Relic { at },
             Item::Captive => Thing::Captive { at },
             Item::Exit(kind) => Thing::Exit { kind, at },
+            Item::Landmark(kind) => Thing::Landmark { kind, at },
         }
     }
 }
@@ -163,6 +176,7 @@ fn marker(thing: &Thing) -> (&'static str, Color32) {
         Thing::Trap { .. } => ("^", Color32::from_rgb(190, 90, 190)),
         Thing::Relic { .. } => ("R", Color32::from_rgb(90, 200, 230)),
         Thing::Captive { .. } => ("P", Color32::from_rgb(120, 220, 140)),
+        Thing::Landmark { .. } => ("T", Color32::from_rgb(110, 180, 90)),
         Thing::Ward { .. } => ("w", Color32::from_rgb(150, 110, 240)),
         Thing::Portcullis { .. } => ("h", Color32::from_rgb(170, 170, 180)),
         Thing::Panel { .. } => ("#", Color32::from_rgb(150, 110, 240)),
@@ -531,10 +545,11 @@ impl LevelsTab {
 
     /// Les éléments à poser, en images (le nom est dans l'info-bulle).
     fn palette_ui(&mut self, ui: &mut egui::Ui, art: Option<&LevelArt>) {
-        let groups: [(&str, &[Item]); 4] = [
+        let groups: [(&str, &[Item]); 5] = [
             ("Ennemis", &Item::MONSTERS),
             ("Éléments", &Item::ELEMENTS),
             ("Objets", &Item::PICKUPS),
+            ("Grands motifs", &Item::LANDMARKS),
             ("Sorties", &Item::EXITS),
         ];
         ui.horizontal_wrapped(|ui| {
