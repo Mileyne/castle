@@ -1645,8 +1645,9 @@
     Captive(
       at: (49.5, 7.5),
     ),
-    Captive(
+    Guide(
       at: (73.5, 36.5),
+      caged: true,
     ),
     Trigger(
       node: "castle_intro",

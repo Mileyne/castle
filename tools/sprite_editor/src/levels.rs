@@ -69,7 +69,7 @@ impl Item {
         Item::Monster(MonsterKind::Wolf),
         Item::Monster(MonsterKind::Warg),
         Item::Monster(MonsterKind::Troll),
-        Item::Monster(MonsterKind::Lich),
+        Item::Monster(MonsterKind::Muldant),
     ];
 
     const ELEMENTS: [Item; 4] = [Item::Generator, Item::Trap, Item::Relic, Item::Captive];
@@ -108,7 +108,7 @@ impl Item {
             Item::Monster(MonsterKind::Wolf) => "Loup",
             Item::Monster(MonsterKind::Warg) => "Boss: Croc-Noir (chef de meute)",
             Item::Monster(MonsterKind::Troll) => "Boss: Grogoth (roi-troll)",
-            Item::Monster(MonsterKind::Lich) => "Boss: Mortemer (roi-liche)",
+            Item::Monster(MonsterKind::Muldant) => "Boss: Lord Muldant",
             Item::Generator => "Générateur",
             Item::Trap => "Piège",
             Item::Pickup(PickupKind::Coin) => "Pièce",
@@ -153,7 +153,7 @@ fn marker(thing: &Thing) -> (&'static str, Color32) {
                 MonsterKind::Orc => "O",
                 MonsterKind::Ghoul => "H",
                 MonsterKind::Wolf => "L",
-                MonsterKind::Warg | MonsterKind::Troll | MonsterKind::Lich => "☠",
+                MonsterKind::Warg | MonsterKind::Troll | MonsterKind::Muldant => "☠",
             },
             Color32::from_rgb(220, 70, 70),
         ),
@@ -173,6 +173,7 @@ fn marker(thing: &Thing) -> (&'static str, Color32) {
         Thing::Trap { .. } => ("^", Color32::from_rgb(190, 90, 190)),
         Thing::Relic { .. } => ("R", Color32::from_rgb(90, 200, 230)),
         Thing::Captive { .. } => ("P", Color32::from_rgb(120, 220, 140)),
+        Thing::Guide { .. } => ("E", Color32::from_rgb(120, 240, 200)),
         Thing::Landmark { .. } => ("T", Color32::from_rgb(110, 180, 90)),
         Thing::Ward { .. } => ("w", Color32::from_rgb(150, 110, 240)),
         Thing::Portcullis { .. } => ("h", Color32::from_rgb(170, 170, 180)),

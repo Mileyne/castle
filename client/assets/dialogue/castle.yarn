@@ -1,5 +1,18 @@
+title: prologue
+---
+samelia: Le royaume de Valenwood se meurt sous un ciel d'encre et de cendre. Une tempête de foudre noire déchire le ciel sans répit. #line:prologue_01
+samelia: C'est l'œuvre de Lord Muldant. Retranché au château de Nareff, il garde la Pierre Ancestrale, qui maintient grandes ouvertes les portes de l'abîme. #line:prologue_02
+samelia: Nuit et jour, des meutes de créatures cauchemardesques en jaillissent, dévorent l'énergie vitale du monde et empêchent toute vie de s'épanouir. #line:prologue_03
+samelia: Je suis Samélia, princesse des elfes, et je refuse de voir mon peuple s'éteindre. Vous êtes les quatre plus grands héros des terres libres. #line:prologue_04
+samelia: Votre mission : infiltrer le donjon de Nareff, terrasser le seigneur noir et briser le pouvoir de la pierre. #line:prologue_05
+knight: Mon armure est bénie, princesse. Mon épée et mon corps feront rempart à la troupe. #line:prologue_06
+sorcerer: Les maléfices antiques de cette forteresse n'auront bientôt plus de secrets pour moi. #line:prologue_07
+ranger: Mon arc abattra les sentinelles avant même qu'elles ne donnent l'alerte. #line:prologue_08
+forgebraise: Et mon marteau enfoncera leurs portes de fer ! #line:prologue_09
+===
 title: intro
 ---
+samelia: Voici la forêt de Valenwood. Courage, chaque pas vous rapproche de Nareff ! #line:intro_e0
 knight: La forêt est silencieuse. Trop silencieuse. Restez groupés. #line:intro_01
 sorcerer: Silencieuse ? Écoute... au loin, le château murmure. Tu ne l'entends pas ? #line:intro_02
 ranger: Je n'entends que du vent et des ennuis. Gardez les yeux ouverts. #line:intro_03
@@ -8,6 +21,7 @@ knight: Pas dans mon dos. Et pas sans mon ordre. #line:intro_05
 knight: Quelques consignes. Pour avancer : %move%. Pour frapper : %attack%. #line:intro_06
 ranger: Pour le pouvoir spécial du héros que vous dirigez : %special%. #line:intro_07
 forgebraise: %action% pour agir sur ce qui nous entoure, et %switch% pour passer au héros suivant. #line:intro_08
+samelia: Allez, que la lumière vous guide ! Mon cœur est avec vous. #line:intro_e5
 ===
 title: royal_door
 ---
@@ -46,6 +60,7 @@ forgebraise: Une alcôve verrouillée. Je pourrais la faire sauter. #line:alcove
 ===
 title: bridge_intro
 ---
+samelia: Le marais est plus dangereux que la forêt. Ce pont brisé est l'œuvre des monstres : sans lui, Nareff reste hors d'atteinte. #line:bridge_e1
 knight: Le pont du marais est brisé. Sans lui, impossible de gagner l'autre rive. #line:bridge_01
 forgebraise: Du bois, du fer, un peu de patience : je peux le remettre d'aplomb. #line:bridge_02
 forgebraise: Il me faut juste une pièce de rechange, cachée quelque part dans les clairières. #line:bridge_03
@@ -105,6 +120,8 @@ sorcerer: Gardée par trois obstacles, un pour chacun de nous. #line:castle_02
 forgebraise: Une garde violette, un mécanisme grippé, une herse... Du travail pour tout le monde ! #line:castle_03
 ranger: Et il faudra trouver de quoi les vaincre : des cristaux, une pièce de rechange, un disque de cible. #line:castle_04
 knight: Quand tout sera réglé, la porte, elle, est pour moi. Rassemblez ce qu'il faut. #line:castle_05
+ranger: J'aperçois une cage au loin, avec une silhouette verte à l'intérieur... C'est la princesse Samélia ! #line:castle_06
+knight: Délivrons-la : elle est restée près de nous trop longtemps pour l'abandonner. #line:castle_07
 ===
 ===
 title: boss_warg
@@ -121,10 +138,17 @@ forgebraise: Il frappe le sol de ses poings. Quand le cercle rouge apparaît, so
 sorcerer: À mi-vie, il entrera en rage et appellera ses gobelins. #line:bt_03
 knight: Je tiens son attention. Frappez-le dans le dos ! #line:bt_04
 ===
-title: boss_lich
+title: boss_muldant
 ---
-sorcerer: Mortemer, le roi-liche. Je sens sa magie d'ici. #line:bl_01
-ranger: Il garde ses distances et lâche une onde de mort. Quittez le cercle violet ! #line:bl_02
-knight: Il relèvera des squelettes. Ne vous laissez pas encercler. #line:bl_03
-forgebraise: Un dernier effort. Après lui, plus rien ne nous barre la route. #line:bl_04
+samelia: Lord Muldant ! C'est lui qui retient la Pierre Ancestrale. Brisez son pouvoir, et le royaume vivra ! #line:bm_01
+sorcerer: Cette foudre noire... elle vient de lui. Je sens la pierre battre sur sa poitrine. #line:bm_02
+ranger: Il est énorme ! Quittez les cercles violets dès qu'ils apparaissent ! #line:bm_03
+knight: Il appellera des morts à la rescousse. Ne vous laissez pas encercler. #line:bm_04
+forgebraise: Un dernier effort. Après lui, plus rien ne nous barre la route ! #line:bm_05
+===
+title: samelia_freed
+---
+samelia: Merci, vaillants héros ! Ces geôliers m'avaient prise dans leurs filets. #line:samelia_freed_01
+knight: Princesse ! Restez derrière nous. #line:samelia_freed_02
+samelia: Le plus dur reste à faire : Lord Muldant est tout en haut de la tour. Je vous ouvrirai la voie. #line:samelia_freed_03
 ===

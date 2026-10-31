@@ -24,7 +24,7 @@ pub fn build(monster: Monster, pose: Pose) -> Vec<Part> {
         | Monster::Ghoul
         | Monster::Warg
         | Monster::Troll
-        | Monster::Lich => crate::monsters::build_manga(monster, pose),
+        | Monster::Muldant => crate::monsters::build_manga(monster, pose),
     }
 }
 

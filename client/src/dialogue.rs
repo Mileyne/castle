@@ -42,7 +42,8 @@ impl Plugin for DialoguePlugin {
         app.add_plugins(YarnSpinnerPlugin::new())
             .init_resource::<DialogueState>()
             .init_resource::<SkipHold>()
-            .add_systems(Startup, spawn_panel)
+            .add_systems(Startup, (spawn_panel, spawn_prologue_screen))
+            .add_systems(Update, play_voice)
             .add_systems(
                 Update,
                 (
@@ -87,6 +88,9 @@ pub struct DialogueState {
     voted: bool,
     /// Nombre de caractères déjà affichés (effet machine à écrire).
     revealed: f32,
+    /// Le prologue de Samélia est à l'écran, ou vient de s'achever (l'annonce du niveau 1 l'attend).
+    in_prologue: bool,
+    pub prologue_done: bool,
 }
 
 impl DialogueState {
@@ -103,6 +107,43 @@ impl DialogueState {
 
 #[derive(Component)]
 struct DialoguePanel;
+
+/// Écran à part du prologue: le portrait de la princesse Samélia en grand, sur fond noir, sous le dialogue.
+#[derive(Component)]
+struct PrologueScreen;
+
+/// Répliques dont la voix est enregistrée (`assets/audio/voice/<identifiant>.ogg`), jouée en même temps que le texte.
+const VOICED: [&str; 5] = ["prologue_01", "prologue_02", "prologue_03", "prologue_04", "prologue_05"];
+
+/// La voix en cours; la musique de fond baisse tant qu'elle existe.
+#[derive(Component)]
+pub struct Voice;
+
+/// Joue la voix de la réplique à l'écran, et coupe celle de la précédente (ou de la scène achevée).
+fn play_voice(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    state: Res<DialogueState>,
+    voices: Query<Entity, With<Voice>>,
+    mut shown: Local<Option<String>>,
+) {
+    let key = state.line.as_ref().map(|l| l.key.clone());
+    if *shown == key {
+        return;
+    }
+    for voice in &voices {
+        commands.entity(voice).despawn();
+    }
+    if let Some(id) = key.as_deref().and_then(|k| k.strip_prefix("dlg-")).filter(|id| VOICED.contains(id)) {
+        commands.spawn((Voice, AudioPlayer::new(assets.load::<AudioSource>(format!("audio/voice/{id}.ogg"))), PlaybackSettings::DESPAWN));
+    }
+    *shown = key;
+}
+
+/// Les répliques du prologue (`prologue_01`...) se jouent sur cet écran à part.
+fn is_prologue(key: &str) -> bool {
+    key.starts_with("dlg-prologue_")
+}
 
 #[derive(Component)]
 struct SpeakerText;
@@ -321,15 +362,40 @@ fn speaker_color(speaker: &str) -> Color {
         "sorcerer" => css::MEDIUM_ORCHID,
         "ranger" => css::FOREST_GREEN,
         "forgebraise" => css::ORANGE_RED,
+        "samelia" => css::MEDIUM_SEA_GREEN,
         _ => css::CRIMSON,
     }
     .into()
+}
+
+fn spawn_prologue_screen(mut commands: Commands, assets: Res<AssetServer>) {
+    commands
+        .spawn((
+            PrologueScreen,
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::BLACK),
+            GlobalZIndex(100),
+            Visibility::Hidden,
+        ))
+        .with_children(|screen| {
+            screen.spawn((
+                ImageNode::new(assets.load("art/samelia.png")),
+                Node { height: Val::Percent(100.0), aspect_ratio: Some(1195.0 / 896.0), ..default() },
+            ));
+        });
 }
 
 fn spawn_panel(mut commands: Commands, assets: Res<AssetServer>) {
     commands
         .spawn((
             DialoguePanel,
+            GlobalZIndex(105),
             Node {
                 position_type: PositionType::Absolute,
                 bottom: Val::Px(120.0),
@@ -373,6 +439,7 @@ fn update_panel(
     localization: Option<Res<Localization>>,
     mut state: ResMut<DialogueState>,
     mut panel: Single<&mut Visibility, With<DialoguePanel>>,
+    mut screen: Single<&mut Visibility, (With<PrologueScreen>, Without<DialoguePanel>, Without<DialoguePortrait>)>,
     mut speaker: Single<(&mut Text, &mut TextColor), (With<SpeakerText>, Without<BodyText>, Without<PromptText>)>,
     mut body: Single<&mut Text, (With<BodyText>, Without<SpeakerText>, Without<PromptText>)>,
     mut prompt: Single<&mut Tr, With<PromptText>>,
@@ -382,29 +449,47 @@ fn update_panel(
     mode: Res<crate::controls::InputMode>,
 ) {
     let loc = localization.as_deref();
+    // Le prologue achevé (plus de réplique de prologue à l'écran) libère l'annonce du niveau.
+    let showing_prologue = state.line.as_ref().is_some_and(|l| is_prologue(&l.key));
+    if showing_prologue != state.in_prologue {
+        state.in_prologue = showing_prologue;
+        state.prologue_done |= !showing_prologue;
+    }
     let Some(line) = state.line.as_ref() else {
         if **panel != Visibility::Hidden {
             **panel = Visibility::Hidden;
         }
+        if **screen != Visibility::Hidden {
+            **screen = Visibility::Hidden;
+        }
         return;
     };
+    let prologue = is_prologue(&line.key);
+    let wanted = if prologue { Visibility::Inherited } else { Visibility::Hidden };
+
+    if **screen != wanted {
+        **screen = wanted;
+    }
     if **panel != Visibility::Inherited {
         **panel = Visibility::Inherited;
     }
 
     // La vignette du personnage qui parle (le Château n'en a pas).
-    let speaker_class = line.speaker.as_deref().and_then(|s| match s {
-        "knight" => Some(HeroClass::Knight),
-        "sorcerer" => Some(HeroClass::Sorcerer),
-        "ranger" => Some(HeroClass::Ranger),
-        "forgebraise" => Some(HeroClass::Forgebraise),
+    let speaker_portrait = line.speaker.as_deref().and_then(|s| match s {
+        "knight" => Some(crate::art::class_row(HeroClass::Knight)),
+        "sorcerer" => Some(crate::art::class_row(HeroClass::Sorcerer)),
+        "ranger" => Some(crate::art::class_row(HeroClass::Ranger)),
+        "forgebraise" => Some(crate::art::class_row(HeroClass::Forgebraise)),
+        "samelia" => Some(crate::art::SAMELIA_PORTRAIT),
         _ => None,
     });
     let (image, visibility) = &mut *portrait;
-    match speaker_class {
-        Some(class) => {
+    // Sur l'écran du prologue, Samélia est déjà là en grand: pas de vignette pour elle.
+    let speaker_portrait = speaker_portrait.filter(|index| !(prologue && *index == crate::art::SAMELIA_PORTRAIT));
+    match speaker_portrait {
+        Some(index) => {
             image.image = art.portraits.image.clone();
-            image.texture_atlas = Some(TextureAtlas { layout: art.portraits.layout.clone(), index: crate::art::class_row(class) });
+            image.texture_atlas = Some(TextureAtlas { layout: art.portraits.layout.clone(), index });
             **visibility = Visibility::Inherited;
         }
         None => **visibility = Visibility::Hidden,

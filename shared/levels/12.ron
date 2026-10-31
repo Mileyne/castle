@@ -939,7 +939,7 @@
   quest: Some((Rescue, 2)),
   things: [
     Monster(
-      kind: Lich,
+      kind: Muldant,
       at: (34.5, 7.5),
     ),
     Generator(
@@ -1363,7 +1363,7 @@
       at: (10.5, 38.5),
     ),
     Trigger(
-      node: "boss_lich",
+      node: "boss_muldant",
       at: (45.5, 6.5),
       radius: 60.0,
       delay: 0.5,

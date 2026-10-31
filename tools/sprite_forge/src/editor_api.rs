@@ -54,7 +54,7 @@ fn monster_label(monster: Monster) -> &'static str {
         Monster::Wolf => "Loup",
         Monster::Warg => "Croc-Noir (boss)",
         Monster::Troll => "Grogoth (boss)",
-        Monster::Lich => "Mortemer (boss)",
+        Monster::Muldant => "Lord Muldant (boss)",
     }
 }
 
@@ -89,6 +89,8 @@ fn prop_label(prop: Prop) -> &'static str {
         Prop::DrawbridgeRaised => "Pont-levis levé",
         Prop::DrawbridgeLowered => "Pont-levis baissé",
         Prop::CaptiveCage => "Prisonnier en cage",
+        Prop::Samelia => "Samélia, la princesse",
+        Prop::SameliaCaged => "Samélia prisonnière",
         Prop::Ingredient => "Ingrédient (violet)",
         Prop::GearPart => "Pièce de rechange (orange)",
         Prop::TargetDisc => "Disque de cible (vert)",
@@ -178,7 +180,7 @@ pub fn model_params(key: &str, theme: Theme) -> Vec<(String, f32)> {
                 params.extend(crate::monsters_more::ghoul_dims().fields().map(|(n, v)| (format!("dims.{n}"), v)));
             }
             Model::Monster(
-                Monster::Bat | Monster::Wolf | Monster::Warg | Monster::Troll | Monster::Lich,
+                Monster::Bat | Monster::Wolf | Monster::Warg | Monster::Troll | Monster::Muldant,
             )
             | Model::Prop(_) => {}
         }

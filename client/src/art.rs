@@ -268,9 +268,11 @@ pub mod object {
     pub const GEAR_PART: usize = 23;
     pub const TARGET_DISC: usize = 24;
     pub const CAPTIVE: usize = 25;
+    pub const SAMELIA: usize = 26;
+    pub const SAMELIA_CAGED: usize = 27;
 
     /// Nom du fichier de planche de chaque objet (même ordre que `PROPS` dans `tools/sprite_forge`).
-    pub const FILES: [&str; 26] = [
+    pub const FILES: [&str; 28] = [
         "generator",
         "turret",
         "coin",
@@ -297,6 +299,8 @@ pub mod object {
         "gearpart",
         "targetdisc",
         "captivecage",
+        "samelia",
+        "sameliacaged",
     ];
 }
 
@@ -332,7 +336,7 @@ pub fn monster_scale(kind: MonsterKind) -> f32 {
         // Les boss dominent l'écran.
         MonsterKind::Warg => 3.1,
         MonsterKind::Troll => 3.0,
-        MonsterKind::Lich => 2.0,
+        MonsterKind::Muldant => 3.0,
         _ => 1.0,
     }
 }
@@ -346,6 +350,9 @@ pub mod projectile {
 }
 
 /// Classe -> numéro de classe dans la planche des héros.
+/// Colonne de la vignette de Samélia dans `portraits.png`, après celles des quatre classes.
+pub const SAMELIA_PORTRAIT: usize = 4;
+
 pub fn class_row(class: HeroClass) -> usize {
     match class {
         HeroClass::Knight => 0,
@@ -467,7 +474,7 @@ fn load_set(assets: &AssetServer, layouts: &mut Assets<TextureAtlasLayout>, them
         projectiles: atlas("projectiles.png", 4, 1, 64, true),
         fx: atlas("fx.png", 2, 1, 96, true),
         decals: atlas("decals.png", 13, 1, 128, true),
-        portraits: atlas("portraits.png", 4, 1, 128, true),
+        portraits: atlas("portraits.png", 5, 1, 128, true),
         decor: assets.load(format!("art/{folder}/decor.png")),
         sheets,
     }
@@ -721,6 +728,11 @@ fn boundary_contour(gx: usize) -> f32 {
     BOUNDARY_REACH * (2.0 * fractal_noise(gx as f32 / BOUNDARY_WAVE, 7) - 1.0) - 3.0 + 2.0 * (edge_noise(gx as u32, 5, 1, 1) - 0.5)
 }
 
+/// Les lisières irrégulières ne valent que pour la végétation (forêt, marais): les murs de pierre (abords du château...) gardent des bords nets.
+fn is_vegetation(region: Region) -> bool {
+    matches!(region, Region::Forest | Region::Marsh)
+}
+
 /// Tuile du décor, effacée quand le château est regénéré.
 #[derive(Component)]
 struct WorldTile;
@@ -822,7 +834,7 @@ fn bake_chunk(def: &LevelDef, room: &Room, sources: &BakeSources, chunk_x: u32, 
             }
             // Dehors, la lisière n'est pas un trait droit: les arbres débordent de façon irrégulière sur la clairière (et la
             // clairière mord un peu sur la forêt), ce qui efface l'effet d'escalier des bords de tuiles.
-            if Region::ALL[tile_row].is_outdoor() {
+            if is_vegetation(Region::ALL[tile_row]) {
                 // Seule la forêt déborde sur la clairière: si la clairière mordait aussi sur la forêt, la limite des deux tuiles resterait droite.
                 let face = wall;
                 for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1)] {
@@ -874,7 +886,7 @@ fn bake_chunk(def: &LevelDef, room: &Room, sources: &BakeSources, chunk_x: u32, 
             // Entre la bande des troncs (face d'un mur) et l'herbe qui la longe, la limite ondule le long du bord au lieu de suivre la
             // ligne droite de la tuile: la face avance dans l'herbe par endroits, et l'herbe remonte dans la face ailleurs. Les deux
             // tuiles lisent le même contour (en coordonnées du niveau), donc il est continu de l'une à l'autre.
-            let outdoor = Region::ALL[tile_row].is_outdoor();
+            let outdoor = is_vegetation(Region::ALL[tile_row]);
             if outdoor && !wall && room.tile(xi, yi + 1) == Tile::Wall {
                 let above_row = rank(def.region_at(xi, yi + 1));
                 let above_column = tile_column(x, y + 1, above_row, true, true);
@@ -1253,7 +1265,7 @@ mod tests {
         let cells = (SHEET_COLUMNS * SHEET_ROWS) as usize;
         assert_eq!(cells, 8 * HERO_FRAMES, "la planche contient huit directions de HERO_FRAMES images");
         assert_eq!(sheet_index(7, HERO_FRAMES - 1), cells - 1);
-        assert_eq!(object::FILES.len(), 26);
+        assert_eq!(object::FILES.len(), 28);
     }
 
     #[test]

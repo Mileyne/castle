@@ -54,6 +54,9 @@ pub enum Prop {
     DrawbridgeLowered,
     /// Un prisonnier dans une cage de fer, à délivrer (quête de sauvetage).
     CaptiveCage,
+    /// Samélia, la princesse des elfes, debout ou prisonnière dans une cage.
+    Samelia,
+    SameliaCaged,
 }
 
 impl Prop {
@@ -67,7 +70,7 @@ impl Prop {
 }
 
 /// Ordre des lignes dans la planche (le client utilise les mêmes indices).
-pub const PROPS: [Prop; 26] = [
+pub const PROPS: [Prop; 28] = [
     Prop::Generator,
     Prop::Turret,
     Prop::Coin,
@@ -94,6 +97,8 @@ pub const PROPS: [Prop; 26] = [
     Prop::GearPart,
     Prop::TargetDisc,
     Prop::CaptiveCage,
+    Prop::Samelia,
+    Prop::SameliaCaged,
 ];
 
 /// Couleurs des classes, reprises par tout ce que la classe doit débloquer: on voit tout de suite à qui s'adresse un panneau.
@@ -607,16 +612,9 @@ const IRON_BAND: u32 = 0x3a3e4a;
 /// Un prisonnier dans une cage de fer, suspendue à une chaîne: il s'agrippe aux barreaux, tête basse, les vêtements en
 /// lambeaux; ses mains et sa tête bougent un peu. Un cadenas ferme la porte.
 fn captive_cage(t: f32) -> Vec<Part> {
-    let iron = 0x4a4e5a;
-    let iron_l = 0x7a8090;
     let skin = 0xe0b890;
     let tunic = 0x8a7a54;
-    let mut p = Vec::new();
-    // Plancher de bois de la cage et ses pieds.
-    p.push(shiny(block(Vec3::new(0.0, 0.06, 0.0), Vec3::new(0.56, 0.05, 0.56), Mat3::IDENTITY, WOOD_D), 0.2));
-    for (sx, sz) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-        p.push(block(Vec3::new(sx * 0.5, 0.02, sz * 0.5), Vec3::new(0.07, 0.03, 0.07), Mat3::IDENTITY, WOOD_D));
-    }
+    let mut p = cage_frame();
     // Le prisonnier: jambes, tunique déchirée, ceinture de corde, tête et cheveux, visage triste.
     let sway = 0.025 * (t * TAU).sin();
     for sg in [-1.0f32, 1.0] {
@@ -643,6 +641,19 @@ fn captive_cage(t: f32) -> Vec<Part> {
         p.push(shiny(limb(Vec3::new(sg * 0.2, 0.92, 0.04), hand, 0.045, skin), 0.15));
         p.push(shiny(ball(hand, 0.06, skin), 0.15));
     }
+    p
+}
+
+/// La cage seule: plancher, barreaux, anneaux, toit en dôme, chaîne et cadenas.
+fn cage_frame() -> Vec<Part> {
+    let iron = 0x4a4e5a;
+    let iron_l = 0x7a8090;
+    let mut p = Vec::new();
+    // Plancher de bois de la cage et ses pieds.
+    p.push(shiny(block(Vec3::new(0.0, 0.06, 0.0), Vec3::new(0.56, 0.05, 0.56), Mat3::IDENTITY, WOOD_D), 0.2));
+    for (sx, sz) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+        p.push(block(Vec3::new(sx * 0.5, 0.02, sz * 0.5), Vec3::new(0.07, 0.03, 0.07), Mat3::IDENTITY, WOOD_D));
+    }
     // La cage: barreaux autour (ceux de devant sont plus fins pour laisser voir), anneaux, toit en dôme, chaîne et cadenas.
     for k in 0..12 {
         let a = k as f32 * TAU / 12.0;
@@ -665,6 +676,59 @@ fn captive_cage(t: f32) -> Vec<Part> {
     p.push(shiny(limb(Vec3::new(0.0, 1.6, 0.0), Vec3::new(0.0, 1.95, 0.0), 0.022, iron_l), 0.6));
     p.push(shiny(block(Vec3::new(0.0, 0.62, 0.52), Vec3::new(0.06, 0.07, 0.025), Mat3::IDENTITY, 0xb89030), 0.7));
     p.push(shiny(limb(Vec3::new(-0.03, 0.69, 0.52), Vec3::new(0.03, 0.69, 0.52), 0.012, 0xb89030), 0.7));
+    p
+}
+
+/// Samélia, la princesse elfique qui envoie les héros en mission: robe verte brodée d'or, longues tresses brunes, oreilles pointues, diadème de
+/// perles, bâton à cristal. Elle se tient droite et ses habits ondulent; en cage, elle s'agrippe aux barreaux.
+fn samelia(t: f32, caged: bool) -> Vec<Part> {
+    let skin = 0xf0c8a8;
+    let hair = 0x6a4428;
+    let green = 0x3e8a48;
+    let gold = 0xd8b050;
+    let mut p = if caged { cage_frame() } else { Vec::new() };
+    let k = if caged { 0.85 } else { 1.0 };
+    let sway = 0.02 * (t * TAU).sin();
+    // Robe: une jupe évasée, un corsage doré, des manches larges, et des pieds.
+    p.push(shiny(cone(Vec3::new(0.0, 0.04, 0.0), Vec3::new(sway, 0.62 * k, 0.0), 0.34 * k, 0.15 * k, green), 0.25));
+    p.push(shiny(cone(Vec3::new(0.0, 0.1, 0.1 * k), Vec3::new(0.0, 0.6 * k, 0.1 * k), 0.15 * k, 0.07 * k, gold), 0.3));
+    p.push(shiny(ellipsoid(Vec3::new(sway, 0.82 * k, 0.0), Vec3::new(0.15 * k, 0.22 * k, 0.11 * k), gold), 0.3));
+    p.push(shiny(block(Vec3::new(sway, 0.62 * k, 0.0), Vec3::new(0.16 * k, 0.02, 0.12 * k), Mat3::IDENTITY, gold), 0.5));
+    p.push(glow(ball(Vec3::new(sway, 0.86 * k, 0.11 * k), 0.025, 0x40e090)));
+    // Tête, cheveux, tresses, oreilles pointues, visage souriant.
+    let head = Vec3::new(sway, 1.14 * k, 0.0);
+    p.push(shiny(ball(head, 0.14 * k, skin), 0.2));
+    p.push(shiny(ellipsoid(head + Vec3::new(0.0, 0.05, -0.03), Vec3::new(0.15 * k, 0.12 * k, 0.14 * k), hair), 0.2));
+    for sg in [-1.0f32, 1.0] {
+        let top = head + Vec3::new(sg * 0.13 * k, -0.04, 0.0);
+        let end = Vec3::new(sg * (0.16 + 0.02 * (t * TAU + sg).sin()) * k, 0.55 * k, 0.04);
+        p.push(shiny(limb(top, end, 0.03 * k, hair), 0.2));
+        p.push(shiny(cone(head + Vec3::new(sg * 0.13 * k, 0.0, 0.0), head + Vec3::new(sg * 0.27 * k, 0.07, 0.0), 0.03, 0.005, skin), 0.2));
+        p.push(ball(head + Vec3::new(sg * 0.055 * k, 0.0, 0.125 * k), 0.016, 0x2a3a2a));
+    }
+    p.push(ellipsoid(head + Vec3::new(0.0, -0.065 * k, 0.125 * k), Vec3::new(0.04, 0.012, 0.02), 0xc06860));
+    for a in [-0.8f32, -0.4, 0.0, 0.4, 0.8] {
+        p.push(glow(ball(head + Vec3::new(a * 0.12 * k, 0.1 * k - 0.02 * a.abs(), 0.12 * k), 0.016, 0xf4f4ff)));
+    }
+    // Bras: la main droite tient le bâton (ou, en cage, les deux s'agrippent aux barreaux).
+    let staff_x = 0.36 * k;
+    if caged {
+        for sg in [-1.0f32, 1.0] {
+            let hand = Vec3::new(sg * 0.38, 0.95 + 0.03 * (t * TAU * 2.0 + sg).sin(), 0.42);
+            p.push(shiny(limb(Vec3::new(sg * 0.15, 0.9, 0.04), hand, 0.04, green), 0.15));
+            p.push(shiny(ball(hand, 0.05, skin), 0.15));
+        }
+    } else {
+        let hand = Vec3::new(staff_x, 0.78, 0.08);
+        p.push(shiny(limb(Vec3::new(0.15, 0.92, 0.0), hand, 0.045, green), 0.15));
+        p.push(shiny(ball(hand, 0.05, skin), 0.15));
+        p.push(shiny(limb(Vec3::new(-0.15, 0.92, 0.0), Vec3::new(-0.3, 0.6, 0.06), 0.045, green), 0.15));
+        p.push(shiny(ball(Vec3::new(-0.3, 0.6, 0.06), 0.05, skin), 0.15));
+        // Bâton de bois noueux et son cristal qui pulse.
+        let pulse = 1.0 + 0.12 * (t * TAU).sin();
+        p.push(shiny(limb(Vec3::new(staff_x, 0.0, 0.08), Vec3::new(staff_x, 1.75, 0.08), 0.03, WOOD_D), 0.2));
+        p.push(glow(cone(Vec3::new(staff_x, 1.75, 0.08), Vec3::new(staff_x, 1.98 * pulse, 0.08), 0.07 * pulse, 0.01, 0xa0f0ff)));
+    }
     p
 }
 
@@ -841,6 +905,8 @@ pub(crate) fn build_manga(prop: Prop, t: f32) -> Vec<Part> {
         Prop::DrawbridgeRaised => drawbridge(false, t),
         Prop::DrawbridgeLowered => drawbridge(true, t),
         Prop::CaptiveCage => captive_cage(t),
+        Prop::Samelia => samelia(t, false),
+        Prop::SameliaCaged => samelia(t, true),
     }
 }
 

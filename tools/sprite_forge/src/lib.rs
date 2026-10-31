@@ -441,23 +441,25 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
     // Vignettes des héros: les visages des photos de référence (dossier `photos/`), identiques dans tous les styles.
     // Carrés (x, y, côté) repérés sur chaque photo, dans l'ordre de `CLASSES`.
     const PORTRAIT: usize = 128;
-    let mut portraits = vec![0u8; CLASSES.len() * PORTRAIT * PORTRAIT * 4];
-    for (col, class) in CLASSES.iter().enumerate() {
-        let (file, x, y, side) = match class {
-            Class::Knight => ("Chevalier", 340, 60, 280),
-            Class::Sorcerer => ("Ensorceleur", 360, 200, 270),
-            Class::Ranger => ("Rodeur", 340, 50, 270),
-            Class::Forgebraise => ("Forgebraise", 330, 10, 270),
+    // Une colonne de plus que les classes: la princesse Samélia (photo Emma.jpg).
+    let columns = CLASSES.len() + 1;
+    let mut portraits = vec![0u8; columns * PORTRAIT * PORTRAIT * 4];
+    for col in 0..columns {
+        let (file, x, y, side) = match CLASSES.get(col) {
+            Some(Class::Knight) => ("Chevalier", 340, 60, 280),
+            Some(Class::Sorcerer) => ("Ensorceleur", 360, 200, 270),
+            Some(Class::Ranger) => ("Rodeur", 340, 50, 270),
+            Some(Class::Forgebraise) => ("Forgebraise", 330, 10, 270),
+            None => ("Emma", 480, 100, 280),
         };
-        let tile = photo::Photo::load(Path::new(&format!("photos/{file}.png"))).square(x, y, side, PORTRAIT);
-        let mut tile = tile;
+        let mut tile = photo::Photo::load(Path::new(&format!("photos/{file}.png"))).square(x, y, side, PORTRAIT);
         photo::cutout(&mut tile, PORTRAIT, 12);
         for row in 0..PORTRAIT {
-            let dst = (row * CLASSES.len() * PORTRAIT + col * PORTRAIT) * 4;
+            let dst = (row * columns * PORTRAIT + col * PORTRAIT) * 4;
             portraits[dst..dst + PORTRAIT * 4].copy_from_slice(&tile[row * PORTRAIT * 4..(row + 1) * PORTRAIT * 4]);
         }
     }
-    write_png(&out_dir.join("portraits.png"), CLASSES.len() * PORTRAIT, PORTRAIT, &portraits);
+    write_png(&out_dir.join("portraits.png"), columns * PORTRAIT, PORTRAIT, &portraits);
 
     // Marques d'usure du sol: masques blancs que le jeu teinte et étire.
     let decal_sheet = sheet_of_cells(1, decals::COLUMNS, decals::CELL, |_, col| decals::cells()[col].clone());
@@ -487,7 +489,7 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
             }
             write_png(&dir.join(name), zw, zh, &img);
         };
-        zoomed("portraits_x2.png", CLASSES.len() * PORTRAIT, PORTRAIT, &portraits, 2);
+        zoomed("portraits_x2.png", columns * PORTRAIT, PORTRAIT, &portraits, 2);
         zoomed("projectiles_x2.png", effects::PROJECTILES * effects::PROJECTILE_CELL, effects::PROJECTILE_CELL, &projectile_sheet, 2);
         zoomed("fx_x2.png", effects::FX * effects::FX_CELL, effects::FX_CELL, &fx_sheet, 2);
         // Aperçu d'une zone de 12x4 tuiles par région: trois motifs de sol, puis des faces de mur, des dessus et des faces décorées.

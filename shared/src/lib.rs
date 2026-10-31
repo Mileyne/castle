@@ -332,8 +332,8 @@ pub enum MonsterKind {
     Warg,
     /// Boss du niveau 8: un troll couronné, lent, qui frappe le sol de ses poings.
     Troll,
-    /// Boss du niveau 12: un roi-liche qui garde ses distances, lance des ondes de mort et relève des squelettes.
-    Lich,
+    /// Boss du niveau 12: Lord Muldant, un colosse à la peau orange et à la crinière blonde, qui lance de la foudre noire et appelle des squelettes.
+    Muldant,
 }
 
 pub struct MonsterStats {
@@ -358,13 +358,13 @@ impl MonsterKind {
             // Les boss voient toute l'arène. Leurs points de vie sont réglés pour une équipe de quatre héros.
             Self::Warg => MonsterStats { max_hp: 1300.0, speed: 72.0, damage: 16.0, cooldown: 0.9, half_size: 18.0, sight: 600.0 },
             Self::Troll => MonsterStats { max_hp: 2200.0, speed: 34.0, damage: 26.0, cooldown: 1.3, half_size: 22.0, sight: 600.0 },
-            Self::Lich => MonsterStats { max_hp: 2800.0, speed: 38.0, damage: 10.0, cooldown: 1.0, half_size: 12.0, sight: 700.0 },
+            Self::Muldant => MonsterStats { max_hp: 3000.0, speed: 40.0, damage: 28.0, cooldown: 1.2, half_size: 20.0, sight: 700.0 },
         }
     }
 
     /// Un boss: personnage unique du niveau, qu'il faut vaincre en groupe pour libérer la sortie.
     pub fn is_boss(self) -> bool {
-        matches!(self, Self::Warg | Self::Troll | Self::Lich)
+        matches!(self, Self::Warg | Self::Troll | Self::Muldant)
     }
 
     /// Clé de traduction du nom d'un boss (barre de vie).
@@ -372,7 +372,7 @@ impl MonsterKind {
         match self {
             Self::Warg => Some("boss-warg"),
             Self::Troll => Some("boss-troll"),
-            Self::Lich => Some("boss-lich"),
+            Self::Muldant => Some("boss-muldant"),
             _ => None,
         }
     }
@@ -530,6 +530,10 @@ pub struct Relic;
 /// Prisonnier à délivrer (quête de sauvetage): un héros doit rester près de lui un instant.
 #[derive(Component, Serialize, Deserialize)]
 pub struct Captive;
+
+/// Samélia, la princesse des elfes (avec `Captive`, elle est prisonnière dans une cage).
+#[derive(Component, Serialize, Deserialize)]
+pub struct Guide;
 
 /// Pièces d'un héros.
 #[derive(Component, Clone, Copy, Default, Serialize, Deserialize)]
@@ -760,7 +764,7 @@ pub struct ScreenShake(pub f32);
 pub enum BossMove {
     /// Coup de poing sur le sol: dégâts dans le cercle.
     Slam,
-    /// Onde de mort autour du liche: dégâts dans le cercle.
+    /// Onde de foudre noire autour de Muldant: dégâts dans le cercle.
     Nova,
     /// Cri qui appelle des renforts (pas de zone à éviter).
     Howl,
@@ -860,6 +864,7 @@ impl Plugin for CastleSharedPlugin {
             .replicate::<Quest>()
             .replicate::<Relic>()
             .replicate::<Captive>()
+            .replicate::<Guide>()
             .replicate::<Gold>()
             .replicate::<Keys>()
             .replicate::<Projectile>()

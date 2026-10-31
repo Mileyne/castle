@@ -137,7 +137,7 @@ pub fn build(prop: Prop, t: f32) -> Vec<Part> {
             parts.push(ellipsoid(c + Vec3::new(0.0, 0.0, 0.3), Vec3::new(0.02, 0.08, 0.015), DARK));
         }
         Prop::Key | Prop::Potion => {}
-        Prop::GateClosed | Prop::GateOpen | Prop::BridgeBroken | Prop::BridgeRepaired | Prop::DrawbridgeRaised | Prop::DrawbridgeLowered | Prop::CaptiveCage => {}
+        Prop::GateClosed | Prop::GateOpen | Prop::BridgeBroken | Prop::BridgeRepaired | Prop::DrawbridgeRaised | Prop::DrawbridgeLowered | Prop::CaptiveCage | Prop::Samelia | Prop::SameliaCaged => {}
         // Les éléments de l'énigme gardent le même dessin dans tous les styles: leurs couleurs disent à qui ils s'adressent.
         Prop::WallRune
         | Prop::WallGearsJammed

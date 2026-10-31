@@ -6,8 +6,8 @@
 //! - **Warg** (niveau 4): hurle régulièrement pour rameuter des loups (davantage sous la moitié de vie), et mord.
 //! - **Troll** (niveau 8): frappe le sol de ses poings, zone à quitter avant le coup. À mi-vie il appelle des gobelins, se
 //!   met en rage (plus vite, coups plus rapprochés).
-//! - **Liche** (niveau 12): garde ses distances, lance une onde de mort autour de lui, et relève des squelettes à deux
-//!   tiers puis à un tiers de vie.
+//! - **Lord Muldant** (niveau 12): un colosse qui fonce au corps à corps, lance une onde de foudre noire autour de lui (et,
+//!   sous la moitié de vie, frappe aussi le sol), et appelle des squelettes à deux tiers puis à un tiers de vie.
 
 use super::*;
 
@@ -54,9 +54,6 @@ const NOVA_RADIUS: f32 = 85.0;
 const NOVA_DAMAGE: f32 = 30.0;
 const HOWL_TIME: f32 = 1.0;
 const RECOVER_TIME: f32 = 0.7;
-/// Le liche recule quand un héros est plus près que cela, et s'approche quand il est plus loin.
-const LICH_NEAR: f32 = 70.0;
-const LICH_FAR: f32 = 140.0;
 
 /// Seuils de vie (part restante) auxquels le boss appelle des renforts, et ce qu'il appelle.
 fn waves(kind: MonsterKind) -> (&'static [f32], MonsterKind, usize) {
@@ -78,10 +75,12 @@ fn special_interval(kind: MonsterKind, enraged: bool) -> f32 {
 }
 
 /// Le geste spécial de ce boss.
-fn special(kind: MonsterKind) -> BossMove {
+fn special(kind: MonsterKind, enraged: bool) -> BossMove {
     match kind {
         MonsterKind::Warg => BossMove::Howl,
         MonsterKind::Troll => BossMove::Slam,
+        // Muldant alterne la foudre noire et les coups de poing au sol une fois enragé.
+        _ if enraged => BossMove::Slam,
         _ => BossMove::Nova,
     }
 }
@@ -236,7 +235,7 @@ pub fn boss_ai(
                 if brain.special_in <= 0.0 && dist > stats.half_size + HERO_HALF_SIZE + 4.0
                     || brain.special_in <= -3.0
                 {
-                    let mv = special(kind);
+                    let mv = special(kind, enraged);
                     let (windup, radius) = match mv {
                         BossMove::Slam => (SLAM_WINDUP, SLAM_RADIUS),
                         BossMove::Nova => (NOVA_WINDUP, NOVA_RADIUS),
@@ -272,23 +271,9 @@ pub fn boss_ai(
                             strikes.0 = strikes.0.wrapping_add(1);
                         }
                     }
-                    // Le liche, acculé, recule malgré tout.
-                    if kind != MonsterKind::Lich {
-                        continue;
-                    }
+                    continue;
                 }
-                let toward = (target_pos - pos.0).normalize_or_zero();
-                let dir = if kind == MonsterKind::Lich {
-                    if dist < LICH_NEAR {
-                        -toward
-                    } else if dist > LICH_FAR {
-                        toward
-                    } else {
-                        Vec2::ZERO
-                    }
-                } else {
-                    toward
-                };
+                let dir = (target_pos - pos.0).normalize_or_zero();
                 pos.0 = room.move_and_collide_solids(pos.0, dir * speed * dt, stats.half_size, &[]);
             }
         }

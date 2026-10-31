@@ -367,6 +367,7 @@ pub fn run(options: Options, stop: Option<StopFlag>) {
                 // Actions des héros, puis effets, puis monde et dialogues.
                 (
                     hold_heroes,
+                    dismiss_guide,
                     move_players,
                     player_attacks,
                     resolve_attacks,
@@ -1171,11 +1172,11 @@ fn rescue_captives(
     mut commands: Commands,
     time: Res<Time>,
     players: Query<&Position, (With<Player>, With<Controlled>, Without<Downed>)>,
-    mut captives: Query<(Entity, &Position, &mut RescueHold), (With<Captive>, Without<Player>)>,
+    mut captives: Query<(Entity, &Position, &mut RescueHold, Has<Guide>), (With<Captive>, Without<Player>)>,
     mut quests: Query<&mut Quest>,
     mut rng: ResMut<Rng>,
 ) {
-    for (entity, captive_pos, mut hold) in &mut captives {
+    for (entity, captive_pos, mut hold, is_guide) in &mut captives {
         if players.iter().any(|pos| pos.0.distance(captive_pos.0) <= RESCUE_RANGE) {
             hold.0 += time.delta_secs();
         } else {
@@ -1183,6 +1184,13 @@ fn rescue_captives(
         }
         if hold.0 >= RESCUE_TIME {
             commands.entity(entity).despawn();
+            if is_guide {
+                // Samélia délivrée remercie les héros à sa façon.
+                commands.spawn((
+                    Position(captive_pos.0),
+                    DialogueTrigger { node: "samelia_freed", radius: 200.0, delay: 0.5, fired: false },
+                ));
+            }
             // Un prisonnier délivré remercie: quelques pièces et de quoi se soigner.
             for _ in 0..3 {
                 spawn_pickup(&mut commands, PickupKind::Coin, captive_pos.0, &mut rng);
@@ -1501,6 +1509,7 @@ const RESCUE_RANGE: f32 = 22.0;
 /// Scènes de dialogue qu'un niveau peut déclencher (les noms sont des chaînes dans les fichiers de niveau).
 fn dialogue_node(name: &str) -> Option<&'static str> {
     [
+        "prologue",
         "intro",
         "royal_door",
         "alcove",
@@ -1518,7 +1527,8 @@ fn dialogue_node(name: &str) -> Option<&'static str> {
         "knight_door",
         "boss_warg",
         "boss_troll",
-        "boss_lich",
+        "boss_muldant",
+        "samelia_freed",
     ]
     .into_iter()
     .find(|n| *n == name)
@@ -1693,6 +1703,17 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
             Thing::Captive { .. } => {
                 commands.spawn((Replicated, Captive, Position(pos), RescueHold(0.0)));
             }
+            Thing::Guide { caged, .. } => {
+                // Samélia n'attend à l'entrée que pour la première arrivée: elle disparaît après l'introduction.
+                if !*caged && level == 1 && !first {
+                    continue;
+                }
+                if *caged {
+                    commands.spawn((Replicated, Guide, Captive, Position(pos), RescueHold(0.0)));
+                } else {
+                    commands.spawn((Replicated, Guide, Position(pos), Solid(Vec2::new(6.0, 4.0))));
+                }
+            }
             Thing::Landmark { kind, .. } => {
                 // Le client dessine le motif; le serveur n'en garde que le pied, qui bloque les héros et les monstres.
                 commands.spawn((Replicated, Landmark(*kind), Position(pos), Solid(kind.half_size())));
@@ -1792,9 +1813,14 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
 
     if first {
         let start = def.layout.rooms[def.layout.start].center();
+        // Le prologue de Samélia, sur un écran à part, avant l'annonce du niveau; l'introduction suit une fois le niveau affiché.
         commands.spawn((
             Position(center_of(start)),
-            DialogueTrigger { node: "intro", radius: 200.0, delay: 3.0, fired: false },
+            DialogueTrigger { node: "prologue", radius: 400.0, delay: 0.2, fired: false },
+        ));
+        commands.spawn((
+            Position(center_of(start)),
+            DialogueTrigger { node: "intro", radius: 200.0, delay: 3.8, fired: false },
         ));
     }
 }
@@ -2530,8 +2556,13 @@ fn purge_dialogues(
 ) -> (bool, bool) {
     let was_active = session.active.is_some();
     let skipped_intro = session.active.as_deref() == Some("intro") && !intro_done;
+    // Passer le prologue ne passe pas l'introduction, qui suit sur le niveau.
+    let skipped_prologue = session.active.as_deref() == Some("prologue");
     *session = DialogueSession::default();
     for (pos, mut trigger) in triggers.iter_mut() {
+        if skipped_prologue && trigger.node == "intro" {
+            continue;
+        }
         if !trigger.fired && heroes.iter().any(|h| h.distance(pos.0) <= trigger.radius) {
             trigger.fired = true;
         }
@@ -2566,6 +2597,15 @@ fn dialogue_vote(vote: On<FromClient<DialogueVote>>, mut session: ResMut<Dialogu
     if session.active.is_some() {
         session.idle = 0.0;
         session.votes.insert(client, vote.0);
+    }
+}
+
+/// Une fois l'introduction vue (ou passée), Samélia quitte l'entrée du premier niveau: le client la fait disparaître dans un halo.
+fn dismiss_guide(campaign: Res<Campaign>, guides: Query<Entity, (With<Guide>, Without<Captive>)>, mut commands: Commands) {
+    if campaign.0.intro_done {
+        for guide in &guides {
+            commands.entity(guide).despawn();
+        }
     }
 }
 

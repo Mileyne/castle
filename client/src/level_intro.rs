@@ -4,7 +4,7 @@
 
 use bevy::{color::palettes::css, prelude::*};
 use bevy_replicon::prelude::*;
-use castle_shared::{ContinueLevel, Expedition, LevelSummary};
+use castle_shared::{Captive, ContinueLevel, Expedition, Guide, LevelSummary};
 
 use crate::i18n::Tr;
 use crate::title::{ReturnToTitle, TitleActive};
@@ -27,7 +27,12 @@ pub struct LevelIntro {
     elapsed: Option<f32>,
     /// Le bilan du niveau terminé, tant qu'il est affiché.
     summary: Option<Summary>,
+    /// Temps passé à attendre la fin du prologue de Samélia.
+    prologue_wait: f32,
 }
+
+/// Au plus, combien de secondes l'annonce du niveau 1 attend le prologue.
+const PROLOGUE_WAIT: f32 = 8.0;
 
 struct Summary {
     elapsed: f32,
@@ -92,10 +97,19 @@ fn start_intro(
     mut intro: ResMut<LevelIntro>,
     expeditions: Query<&Expedition>,
     old: Query<Entity, With<IntroScreen>>,
+    guides: Query<(), (With<Guide>, Without<Captive>)>,
+    dialogue: Res<crate::dialogue::DialogueState>,
+    time: Res<Time>,
 ) {
     if !intro.pending || title.0 {
         return;
     }
+    // À la toute première arrivée, Samélia parle d'abord, sur son écran à part: l'annonce du niveau vient après.
+    if !guides.is_empty() && !dialogue.prologue_done && intro.prologue_wait < PROLOGUE_WAIT {
+        intro.prologue_wait += time.delta_secs();
+        return;
+    }
+    intro.prologue_wait = 0.0;
     let Some(expedition) = expeditions.iter().last() else {
         return;
     };

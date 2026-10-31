@@ -31,10 +31,10 @@ pub struct Sprite<'a> {
 }
 
 /// Fichiers des planches d'objets, dans l'ordre des lignes d'objets du jeu.
-const OBJECT_FILES: [&str; 26] = [
+const OBJECT_FILES: [&str; 28] = [
     "generator", "turret", "coin", "food", "key", "lever", "rune", "mechanism", "traparmed", "trapoff", "doorlocked", "doorroyal",
     "doorroyalemblem", "stairs", "potion", "wallrune", "wallgearsjammed", "wallgearsfixed", "walltargetempty", "walltargetmounted",
-    "walltargethit", "portcullis", "ingredient", "gearpart", "targetdisc", "captivecage",
+    "walltargethit", "portcullis", "ingredient", "gearpart", "targetdisc", "captivecage", "samelia", "sameliacaged",
 ];
 
 pub struct LevelArt {
@@ -130,7 +130,7 @@ impl LevelArt {
             (MonsterKind::Wolf, "wolf"),
             (MonsterKind::Warg, "warg"),
             (MonsterKind::Troll, "troll"),
-            (MonsterKind::Lich, "lich"),
+            (MonsterKind::Muldant, "muldant"),
         ]
         .into_iter()
         .map(|(kind, file)| {
@@ -204,7 +204,7 @@ impl LevelArt {
             MonsterKind::Wolf => 2.4,
             MonsterKind::Warg => 6.2,
             MonsterKind::Troll => 6.0,
-            MonsterKind::Lich => 4.0,
+            MonsterKind::Muldant => 6.0,
             _ => 2.0,
         };
         Sprite {
@@ -241,6 +241,7 @@ impl LevelArt {
             Thing::Trap { .. } => self.object(8, white),
             Thing::Relic { .. } => self.object(4, Color32::from_rgb(140, 255, 255)),
             Thing::Captive { .. } => self.object(25, white),
+            Thing::Guide { caged, .. } => self.object(if *caged { 27 } else { 26 }, white),
             Thing::Portcullis { .. } => self.object(21, white),
             Thing::Panel { .. } => self.object(15, white),
             Thing::Pickup { kind, .. } => self.object(

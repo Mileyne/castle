@@ -26,6 +26,8 @@ pub enum Thing {
     Relic { at: Vec2 },
     /// Prisonnier de la quête de sauvetage.
     Captive { at: Vec2 },
+    /// Samélia, la princesse des elfes: debout (elle parle) ou, avec `caged`, prisonnière à délivrer comme un captif.
+    Guide { at: Vec2, caged: bool },
     /// Enchantement qui tient à distance de la porte royale.
     Ward { at: Vec2 },
     /// Herse devant la porte royale; `vertical` quand elle s'étend en hauteur.
@@ -50,6 +52,7 @@ impl Thing {
             | Self::Trap { at }
             | Self::Relic { at }
             | Self::Captive { at }
+            | Self::Guide { at, .. }
             | Self::Ward { at }
             | Self::Portcullis { at, .. }
             | Self::Panel { at, .. }
@@ -68,6 +71,7 @@ impl Thing {
             | Self::Trap { at }
             | Self::Relic { at }
             | Self::Captive { at }
+            | Self::Guide { at, .. }
             | Self::Ward { at }
             | Self::Portcullis { at, .. }
             | Self::Panel { at, .. }

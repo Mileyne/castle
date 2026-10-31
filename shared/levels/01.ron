@@ -843,6 +843,10 @@
   ),
   quest: Some((Hunt, 12)),
   things: [
+    Guide(
+      at: (15.5, 20.5),
+      caged: false,
+    ),
     Monster(
       kind: Wolf,
       at: (42.5, 33.5),

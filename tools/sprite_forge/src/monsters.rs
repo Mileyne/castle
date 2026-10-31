@@ -27,8 +27,8 @@ pub enum Monster {
     Warg,
     /// Boss: le roi-troll.
     Troll,
-    /// Boss: le roi-liche.
-    Lich,
+    /// Boss: Lord Muldant.
+    Muldant,
 }
 
 /// Ordre des lignes dans la planche (le client utilise les mêmes indices).
@@ -41,7 +41,7 @@ pub const MONSTERS: [Monster; 9] = [
     Monster::Wolf,
     Monster::Warg,
     Monster::Troll,
-    Monster::Lich,
+    Monster::Muldant,
 ];
 
 pub(crate) fn skeleton_dims() -> Dims {
@@ -233,6 +233,6 @@ pub(crate) fn build_manga(monster: Monster, pose: Pose) -> Vec<Part> {
         Monster::Wolf => scaled(crate::monsters_more::wolf(pose, false), 1.7),
         Monster::Warg => crate::monsters_boss::warg(pose),
         Monster::Troll => crate::monsters_boss::troll(pose),
-        Monster::Lich => crate::monsters_boss::lich(pose),
+        Monster::Muldant => crate::monsters_boss::muldant(pose),
     }
 }

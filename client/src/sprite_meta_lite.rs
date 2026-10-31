@@ -18,7 +18,7 @@ pub const SHEETS: &[(&str, &str, u32, u32, u32, u32)] = &[
     ("monsters", "wolf", 0, 32, 192, 160),
     ("monsters", "warg", 0, 68, 192, 124),
     ("monsters", "troll", 0, 20, 192, 172),
-    ("monsters", "lich", 0, 8, 192, 184),
+    ("monsters", "muldant", 9, 52, 176, 140),
     ("objects", "generator", 9, 64, 176, 128),
     ("objects", "turret", 43, 92, 108, 100),
     ("objects", "coin", 54, 124, 84, 68),
@@ -45,4 +45,6 @@ pub const SHEETS: &[(&str, &str, u32, u32, u32, u32)] = &[
     ("objects", "gearpart", 54, 120, 84, 72),
     ("objects", "targetdisc", 54, 120, 84, 72),
     ("objects", "captivecage", 47, 28, 100, 164),
+    ("objects", "samelia", 54, 12, 84, 180),
+    ("objects", "sameliacaged", 47, 28, 100, 164),
 ];
