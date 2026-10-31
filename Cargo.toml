@@ -19,3 +19,5 @@ opt-level = 3
 winit = { path = "vendor/winit" }
 # Dessin des sprites sans instance de départ (Apple TV HD): voir vendor/bevy_sprite_render/src/render/mod.rs.
 bevy_sprite_render = { path = "vendor/bevy_sprite_render" }
+# Pas de regroupement des lumières par le GPU sur iOS et tvOS (Apple TV HD): voir vendor/bevy_pbr/src/cluster/mod.rs.
+bevy_pbr = { path = "vendor/bevy_pbr" }
