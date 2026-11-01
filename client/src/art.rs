@@ -740,7 +740,7 @@ pub(crate) struct WorldTile;
 
 /// Marque une tuile du décor (pour la teinte du héros dirigé).
 #[derive(Component)]
-struct TileMark;
+pub(crate) struct TileMark;
 
 /// Teint les tuiles de la couleur du héros dirigé (multiplication de la couleur): seul le décor change, les
 /// personnages gardent leurs couleurs. Appliqué quand la teinte bouge, et à toute nouvelle tuile.

@@ -1,9 +1,11 @@
 //! Prototype (`CASTLE_DECOR3D=1`): le sol et les murs sont de vraies surfaces en 3D, éclairées par un petit shader, au lieu de blocs
 //! d'image posés à plat.
 //!
-//! Les blocs de décor déjà assemblés (`art::rebuild_world`) servent de texture: chaque bloc devient un maillage (le sol, plus un
-//! relief par tuile de mur), dessiné par une caméra 3D placée derrière la caméra 2D. La caméra 2D ne s'efface plus et dessine
-//! par-dessus (personnages, objets, interface): le tri par hauteur et les collisions n'ont donc pas à changer.
+//! Le sol: les blocs de décor déjà assemblés (les décalques, taches et fissures restent des sprites 2D par-dessus) (`art::rebuild_world`) servent de texture, un maillage par bloc. Les murs: de vrais blocs
+//! 3D, un seul maillage pour tout le niveau, dont la face et le dessus sont dessinés ensemble par le shader (briques et dalles de la
+//! même pierre; tronc, puis feuillage qui continue sur le dessus), selon la région. Le tout est dessiné par une caméra 3D placée
+//! derrière la caméra 2D, qui ne s'efface plus et dessine par-dessus (personnages, objets, interface): le tri par hauteur et les
+//! collisions n'ont donc pas à changer.
 //!
 //! Les deux caméras doivent avoir le même réglage d'antialiasing (`Msaa`): sinon Bevy ne leur fait pas partager l'image de la fenêtre,
 //! et la dernière écrase l'autre.
@@ -22,22 +24,21 @@ use bevy::{
     shader::ShaderRef,
 };
 use castle_shared::tileart::TILE_CELL;
-use castle_shared::{Room, TILE_SIZE, Tile};
+use castle_shared::{Expedition, Region, Room, TILE_SIZE, Tile};
 
 use crate::LocalPlayer;
-use crate::art::WorldTile;
+use crate::art::TileMark;
 
 /// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2).
 const ELEVATION: f32 = 0.9;
-/// Hauteur des murs, en unités du monde. L'art d'une tuile de mur est déjà une face vue en 3/4, et elle doit remplir exactement une
-/// tuile à l'écran: la hauteur à l'écran d'une verticale est `hauteur x cos(élévation)`.
+/// Hauteur d'un mur, en unités du monde. Sa face doit couvrir au moins la tuile qu'il occupe sur l'écran (la hauteur à l'écran d'une
+/// verticale est `hauteur x cos(élévation)`), pour que le sol dessiné dessous ne dépasse pas.
 fn wall_height() -> f32 {
-    TILE_SIZE * 1.02 / ELEVATION.cos()
+    TILE_SIZE * 1.02 / ELEVATION.cos() + extra_height()
 }
 
-/// Hauteur ajoutée au-dessus de la face dessinée, en tuiles à l'écran (`CASTLE_WALL_EXTRA=<tuiles>` pour l'essayer; 0,3 par défaut, 0 pour des murs à plat: au-delà de 0,6 les murs cachent trop de sol): le mur
-/// continue avec le haut de son art étiré, et un dessus surélevé reprend l'art du mur voisin. Il masque alors une partie du sol
-/// derrière lui.
+/// Hauteur ajoutée au-dessus, en tuiles à l'écran (`CASTLE_WALL_EXTRA=<tuiles>`; 0,3 par défaut). Plus le mur est haut, plus il masque
+/// le sol derrière lui.
 fn extra_height() -> f32 {
     static EXTRA: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     *EXTRA.get_or_init(|| {
@@ -46,10 +47,6 @@ fn extra_height() -> f32 {
     })
 }
 
-/// Hauteur totale d'un mur.
-fn total_height() -> f32 {
-    wall_height() + extra_height()
-}
 /// Nombre maximal de lampes par bloc.
 const MAX_LIGHTS: usize = 8;
 /// Lanterne du héros dirigé: hauteur, rayon, couleur (linéaire).
@@ -88,9 +85,14 @@ struct DecorCamera;
 /// Un bloc de décor en 3D, et le sprite à plat dont il reprend l'image.
 #[derive(Component)]
 struct Decor3d {
-    source: Entity,
+    /// Le sprite à plat dont le bloc reprend l'image (aucun pour les murs).
+    source: Option<Entity>,
     material: Handle<DecorMaterial>,
 }
+
+/// Les murs du niveau.
+#[derive(Component)]
+struct Decor3dWalls;
 
 /// Les blocs de sprite déjà transformés.
 #[derive(Component)]
@@ -102,8 +104,14 @@ struct DecorData {
     tint: Vec4,
     /// (1 / sin de l'élévation: l'étirement du sol, nombre de lampes, hauteur des murs, côté d'une tuile).
     params: Vec4,
-    /// (largeur et hauteur de la salle en tuiles, -, -).
+    /// (largeur et hauteur de la salle en tuiles, pixels d'une tuile dans l'art, -).
     room: Vec4,
+    /// (0: image du bloc, 1: murs de pierre, 2: murs de feuillage, -, -).
+    style: Vec4,
+    /// Couleurs des murs (linéaires): la première et la seconde variantes de la matière, puis les joints (pierre) ou l'écorce (feuillage).
+    color_a: Vec4,
+    color_b: Vec4,
+    color_c: Vec4,
     /// Lampes: position (x, hauteur, z étiré) et rayon; couleur.
     light_pos: [Vec4; MAX_LIGHTS],
     light_color: [Vec4; MAX_LIGHTS],
@@ -168,18 +176,23 @@ fn to_3d(point: Vec2, height: f32) -> Vec3 {
 fn build_chunks(
     mut commands: Commands,
     room: Option<Res<Room>>,
-    mut tiles: Query<(Entity, &mut Visibility, &Sprite, &Transform), (With<WorldTile>, Without<Built>)>,
+    mut tiles: Query<(Entity, &mut Visibility, &Sprite, &Transform), (With<TileMark>, Without<Built>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<DecorMaterial>>,
     mut images: ResMut<Assets<Image>>,
     built: Query<(Entity, &Decor3d)>,
-    alive: Query<(), With<WorldTile>>,
+    walls_entities: Query<Entity, With<Decor3dWalls>>,
+    expeditions: Query<&Expedition>,
+    alive: Query<(), With<TileMark>>,
 ) {
     // Les blocs d'un ancien niveau disparaissent avec leurs sprites.
     for (entity, chunk) in &built {
-        if !alive.contains(chunk.source) {
+        if chunk.source.is_some_and(|source| !alive.contains(source)) {
             commands.entity(entity).despawn();
         }
+    }
+    if alive.is_empty() {
+        walls_entities.iter().for_each(|entity| commands.entity(entity).despawn());
     }
     let Some(room) = room else {
         return;
@@ -188,6 +201,18 @@ fn build_chunks(
         return;
     }
     let walls = images.add(wall_mask(&room));
+    let region = expeditions.iter().last().map(|expedition| expedition.region).unwrap_or(Region::Crypts);
+    let base = |style: Vec4, colors: [Vec4; 3]| DecorData {
+        tint: Vec4::ONE,
+        params: Vec4::new(1.0 / ELEVATION.sin(), 0.0, wall_height(), TILE_SIZE),
+        room: Vec4::new(room.size().x as f32, room.size().y as f32, TILE_CELL as f32, 0.0),
+        style,
+        color_a: colors[0],
+        color_b: colors[1],
+        color_c: colors[2],
+        light_pos: [Vec4::ZERO; MAX_LIGHTS],
+        light_color: [Vec4::ZERO; MAX_LIGHTS],
+    };
     // La version à plat dessine les blocs dans l'ordre de leurs entités: le dernier est devant.
     let mut order: Vec<Entity> = tiles.iter().map(|(entity, ..)| entity).collect();
     order.sort();
@@ -202,21 +227,46 @@ fn build_chunks(
         let (cols, rows) = ((size.x / TILE_SIZE).round() as u32, (size.y / TILE_SIZE).round() as u32);
         let half = Vec2::new(cols as f32 - 1.0, rows as f32 - 1.0) * TILE_SIZE / 2.0;
         let origin = room.world_to_tile(transform.translation.truncate() - half);
-        let mesh = meshes.add(chunk_mesh(&room, origin, cols, rows, lift));
+        let mesh = meshes.add(ground_mesh(&room, origin, cols, rows, lift));
         let material = materials.add(DecorMaterial {
             image: sprite.image.clone(),
-            data: DecorData {
-                tint: Vec4::ONE,
-                params: Vec4::new(1.0 / ELEVATION.sin(), 0.0, total_height(), TILE_SIZE),
-                room: Vec4::new(room.size().x as f32, room.size().y as f32, 0.0, 0.0),
-                light_pos: [Vec4::ZERO; MAX_LIGHTS],
-                light_color: [Vec4::ZERO; MAX_LIGHTS],
-            },
+            data: base(Vec4::ZERO, [Vec4::ZERO; 3]),
             walls: walls.clone(),
         });
-        commands.spawn((Decor3d { source: entity, material: material.clone() }, Mesh3d(mesh), MeshMaterial3d(material), RenderLayers::layer(LAYER), Transform::default()));
+        commands.spawn((Decor3d { source: Some(entity), material: material.clone() }, Mesh3d(mesh), MeshMaterial3d(material), RenderLayers::layer(LAYER), Transform::default()));
         *visibility = Visibility::Hidden;
         commands.entity(entity).insert(Built);
+    }
+    // Les murs: un seul maillage pour tout le niveau.
+    walls_entities.iter().for_each(|entity| commands.entity(entity).despawn());
+    let (kind, colors) = wall_style(region);
+    let material = materials.add(DecorMaterial { image: images.add(Image::default()), data: base(Vec4::new(kind, 0.0, 0.0, 0.0), colors), walls });
+    commands.spawn((
+        Decor3dWalls,
+        Decor3d { source: None, material: material.clone() },
+        Mesh3d(meshes.add(walls_mesh(&room))),
+        MeshMaterial3d(material),
+        RenderLayers::layer(LAYER),
+        Transform::default(),
+    ));
+}
+
+/// La matière des murs d'une région: (1 pierre ou 2 feuillage, [première variante, seconde variante, joints ou écorce]), en linéaire.
+fn wall_style(region: Region) -> (f32, [Vec4; 3]) {
+    let linear = |r: f32, g: f32, b: f32| {
+        let color = Color::srgb(r, g, b).to_linear();
+        Vec4::new(color.red, color.green, color.blue, 1.0)
+    };
+    match region {
+        Region::Forest => (2.0, [linear(0.20, 0.38, 0.18), linear(0.10, 0.22, 0.11), linear(0.24, 0.16, 0.10)]),
+        Region::Marsh => (2.0, [linear(0.22, 0.34, 0.20), linear(0.11, 0.20, 0.14), linear(0.18, 0.14, 0.10)]),
+        Region::Gardens => (2.0, [linear(0.26, 0.42, 0.20), linear(0.13, 0.27, 0.13), linear(0.22, 0.15, 0.11)]),
+        Region::Crypts => (1.0, [linear(0.42, 0.42, 0.46), linear(0.30, 0.30, 0.35), linear(0.15, 0.15, 0.19)]),
+        Region::Library => (1.0, [linear(0.48, 0.36, 0.25), linear(0.36, 0.27, 0.19), linear(0.17, 0.12, 0.09)]),
+        Region::Forge => (1.0, [linear(0.40, 0.27, 0.24), linear(0.28, 0.19, 0.18), linear(0.12, 0.08, 0.08)]),
+        Region::Tower => (1.0, [linear(0.42, 0.40, 0.55), linear(0.30, 0.28, 0.43), linear(0.15, 0.14, 0.22)]),
+        Region::Royal => (1.0, [linear(0.64, 0.57, 0.44), linear(0.50, 0.44, 0.34), linear(0.27, 0.22, 0.16)]),
+        Region::Approach => (1.0, [linear(0.52, 0.47, 0.41), linear(0.40, 0.36, 0.31), linear(0.21, 0.19, 0.16)]),
     }
 }
 
@@ -238,77 +288,74 @@ fn wall_mask(room: &Room) -> Image {
     image
 }
 
-/// Le maillage d'un bloc: le sol en un seul rectangle (texturé par l'image du bloc, murs compris), et, pour chaque tuile de mur qui a du
-/// sol devant elle, sa face dressée à la verticale avec la même image. L'art d'un mur est déjà sa face vue en 3/4: la dresser (sans
-/// rien poser au-dessus) évite de le dessiner deux fois.
-fn chunk_mesh(room: &Room, origin: IVec2, cols: u32, rows: u32, lift: f32) -> Mesh {
-    let mut positions: Vec<Vec3> = Vec::new();
-    let mut normals: Vec<Vec3> = Vec::new();
-    let mut uvs: Vec<Vec2> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-    let mut quad = |corners: [Vec3; 4], normal: Vec3, uv: [Vec2; 4]| {
-        let base = positions.len() as u32;
-        positions.extend(corners);
-        normals.extend([normal; 4]);
-        uvs.extend(uv);
-        indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
-    };
-    let world = |x: i32, y: i32| room.tile_center(x.max(0) as u32, y.max(0) as u32) - Vec2::splat(TILE_SIZE / 2.0);
+/// Un maillage à remplir de rectangles.
+#[derive(Default)]
+struct Quads {
+    positions: Vec<Vec3>,
+    normals: Vec<Vec3>,
+    uvs: Vec<Vec2>,
+    indices: Vec<u32>,
+}
+
+impl Quads {
+    fn add(&mut self, corners: [Vec3; 4], normal: Vec3, uv: [Vec2; 4]) {
+        let base = self.positions.len() as u32;
+        self.positions.extend(corners);
+        self.normals.extend([normal; 4]);
+        self.uvs.extend(uv);
+        self.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
+    fn into_mesh(self) -> Mesh {
+        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.positions)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs)
+            .with_inserted_indices(Indices::U32(self.indices))
+    }
+}
+
+/// Coin sud-ouest de la tuile (x, y), en coordonnées du monde.
+fn tile_corner(room: &Room, x: i32, y: i32) -> Vec2 {
+    room.tile_center(x.max(0) as u32, y.max(0) as u32) - Vec2::splat(TILE_SIZE / 2.0)
+}
+
+/// Le sol d'un bloc: un seul rectangle, texturé par l'image du bloc (murs compris: ils restent dessous, cachés par les murs en 3D).
+fn ground_mesh(room: &Room, origin: IVec2, cols: u32, rows: u32, lift: f32) -> Mesh {
+    let mut quads = Quads::default();
     // L'image du bloc: le coin haut-gauche est (0, 0) et v croît vers le bas; le nord (y croissant) est en haut. `ty` compte depuis le haut.
     let uv_at = |tx: f32, ty: f32| Vec2::new(tx / cols as f32, ty / rows as f32);
-    let (min, max) = (world(origin.x, origin.y), world(origin.x + cols as i32, origin.y + rows as i32));
-    // Le sol: sud-ouest, sud-est, nord-est, nord-ouest, vu de dessus (normale vers le haut).
-    quad(
+    let (min, max) = (tile_corner(room, origin.x, origin.y), tile_corner(room, origin.x + cols as i32, origin.y + rows as i32));
+    // Sud-ouest, sud-est, nord-est, nord-ouest, vu de dessus (normale vers le haut).
+    quads.add(
         [to_3d(min, lift), to_3d(Vec2::new(max.x, min.y), lift), to_3d(max, lift), to_3d(Vec2::new(min.x, max.y), lift)],
         Vec3::Y,
         [uv_at(0.0, rows as f32), uv_at(cols as f32, rows as f32), uv_at(cols as f32, 0.0), uv_at(0.0, 0.0)],
     );
-    for j in 0..rows as i32 {
-        for i in 0..cols as i32 {
-            let (x, y) = (origin.x + i, origin.y + j);
+    quads.into_mesh()
+}
+
+/// Les murs de tout le niveau: pour chaque tuile de mur, un dessus à la hauteur du mur et, quand il y a du sol devant (au sud), sa
+/// face. La matière est calculée par le shader (`decor3d.wesl`) à partir de la position dans le monde: face et dessus s'accordent.
+fn walls_mesh(room: &Room) -> Mesh {
+    let mut quads = Quads::default();
+    let height = wall_height();
+    let size = room.size();
+    for y in 0..size.y as i32 {
+        for x in 0..size.x as i32 {
             if room.tile(x, y) != Tile::Wall {
                 continue;
             }
-            let sw = world(x, y);
-            let se = sw + Vec2::new(TILE_SIZE, 0.0);
-            let (u0, u1) = (i as f32, i as f32 + 1.0);
-            let (v_top, v_bottom) = ((rows as i32 - 1 - j) as f32, (rows as i32 - j) as f32);
-            let cell = [uv_at(u0, v_bottom), uv_at(u1, v_bottom), uv_at(u1, v_top), uv_at(u0, v_top)];
-            // La face du sud, visible quand la tuile devant est du sol.
-            let has_face = room.tile(x, y - 1) == Tile::Floor;
-            if has_face {
-                quad([to_3d(sw, lift), to_3d(se, lift), to_3d(se, wall_height() + lift), to_3d(sw, wall_height() + lift)], Vec3::Z, cell);
-            }
-            let extra = extra_height();
-            if extra > 0.0 {
-                let (low, high) = (wall_height() + lift, total_height() + lift);
-                // La rangée du haut de l'art, étirée vers le haut: la suite du mur au-dessus de sa face.
-                let smear = (v_top + 0.5 / TILE_CELL as f32).min(v_bottom);
-                let streak = [uv_at(u0, smear), uv_at(u1, smear)];
-                if has_face {
-                    quad([to_3d(sw, low), to_3d(se, low), to_3d(se, high), to_3d(sw, high)], Vec3::Z, [streak[0], streak[1], streak[1], streak[0]]);
-                }
-                // Le dessus: l'art du mur voisin au nord (l'intérieur du mur), sinon la rangée étirée.
-                let ne = se + Vec2::new(0.0, TILE_SIZE);
-                let nw = sw + Vec2::new(0.0, TILE_SIZE);
-                let north_art = has_face && j + 1 < rows as i32 && room.tile(x, y + 1) == Tile::Wall;
-                let top = if !has_face {
-                    cell
-                } else if north_art {
-                    let (north_top, north_bottom) = (v_top - 1.0, v_top);
-                    [uv_at(u0, north_bottom), uv_at(u1, north_bottom), uv_at(u1, north_top), uv_at(u0, north_top)]
-                } else {
-                    [streak[0], streak[1], streak[1], streak[0]]
-                };
-                quad([to_3d(sw, high), to_3d(se, high), to_3d(ne, high), to_3d(nw, high)], Vec3::Y, top);
+            let sw = tile_corner(room, x, y);
+            let (se, ne, nw) = (sw + Vec2::new(TILE_SIZE, 0.0), sw + Vec2::splat(TILE_SIZE), sw + Vec2::new(0.0, TILE_SIZE));
+            let none = [Vec2::ZERO; 4];
+            quads.add([to_3d(sw, height), to_3d(se, height), to_3d(ne, height), to_3d(nw, height)], Vec3::Y, none);
+            if room.tile(x, y - 1) == Tile::Floor {
+                quads.add([to_3d(sw, 0.0), to_3d(se, 0.0), to_3d(se, height), to_3d(sw, height)], Vec3::Z, none);
             }
         }
     }
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-        .with_inserted_indices(Indices::U32(indices))
+    quads.into_mesh()
 }
 
 /// La caméra 3D suit la caméra 2D: même position, même zoom.
@@ -330,18 +377,20 @@ fn follow_camera(
 fn update_materials(
     mut materials: ResMut<Assets<DecorMaterial>>,
     chunks: Query<&Decor3d>,
-    sprites: Query<&Sprite, With<WorldTile>>,
+    sprites: Query<&Sprite, With<TileMark>>,
     hero: Option<Single<&Transform, With<LocalPlayer>>>,
 ) {
+    // La teinte du décor (celle du héros dirigé) est la même pour tous les blocs, murs compris.
+    let tint = sprites.iter().next().map_or(Vec4::ONE, |sprite| {
+        let tint = sprite.color.to_linear();
+        Vec4::new(tint.red, tint.green, tint.blue, 1.0)
+    });
     let lantern = hero.map(|hero| (to_3d(hero.translation.truncate(), LANTERN_HEIGHT), hero.translation.truncate()));
     for chunk in &chunks {
         let Some(mut material) = materials.get_mut(&chunk.material) else {
             continue;
         };
-        if let Ok(sprite) = sprites.get(chunk.source) {
-            let tint = sprite.color.to_linear();
-            material.data.tint = Vec4::new(tint.red, tint.green, tint.blue, 1.0);
-        }
+        material.data.tint = tint;
         // Les lampes sont données dans le monde 2D (x, hauteur, y): le shader a besoin de distances non étirées.
         material.data.light_pos = [Vec4::ZERO; MAX_LIGHTS];
         material.data.light_color = [Vec4::ZERO; MAX_LIGHTS];
