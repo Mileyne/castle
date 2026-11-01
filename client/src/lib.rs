@@ -151,11 +151,23 @@ fn log_plugin() -> bevy::log::LogPlugin {
         }
         return bevy::log::LogPlugin { custom_layer: file_layer, ..default() };
     }
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(not(any(target_os = "ios", target_os = "tvos")))]
     bevy::log::LogPlugin::default()
 }
 
 /// Lance le jeu (ne revient qu'à la fermeture).
+/// Aperçu du décor 3D sans lancer le jeu (`cargo run -p castle_client --bin decor_preview`).
+#[cfg(not(any(target_os = "ios", target_os = "tvos")))]
+pub fn decor_preview() {
+    decor3d::preview::run();
+}
+
+/// Le programme de réglage de la lumière (`./lumiere.sh`).
+#[cfg(not(any(target_os = "ios", target_os = "tvos")))]
+pub fn light_tuner() {
+    decor3d::tuner::run();
+}
+
 pub fn run() {
     #[cfg(target_os = "ios")]
     {
@@ -222,7 +234,7 @@ pub fn run() {
             {
                 gamecontroller::GameControllerPlugin
             }
-            #[cfg(not(target_os = "ios"))]
+            #[cfg(not(any(target_os = "ios", target_os = "tvos")))]
             {
                 ()
             }
@@ -270,7 +282,7 @@ fn window() -> Window {
 }
 
 /// Fenêtre du jeu sur ordinateur.
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "tvos")))]
 fn window() -> Window {
     Window {
         title: "Castle".into(),

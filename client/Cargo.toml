@@ -2,6 +2,7 @@
 name = "castle_client"
 version = "0.6.0"
 edition = "2024"
+default-run = "castle_client"
 
 [features]
 # Trace des systèmes du moteur (fichier JSON pour chrome://tracing ou Perfetto): `cargo run --release -p castle_client --features profile`

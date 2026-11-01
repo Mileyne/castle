@@ -25,7 +25,7 @@ use bevy::{
 };
 use castle_shared::tileart::TILE_CELL;
 use bevy::window::PrimaryWindow;
-use castle_shared::{Expedition, Projectile, Region, Room, TILE_SIZE, Tile};
+use castle_shared::{Expedition, PartyId, Player, Projectile, Region, Room, TILE_SIZE, Tile};
 
 use crate::LocalPlayer;
 use crate::art::{Prop, TileMark, WorldTile, object};
@@ -59,8 +59,19 @@ fn field_of_view() -> Option<f32> {
 const MAX_LIGHTS: usize = 8;
 /// Lanterne du héros dirigé: hauteur, rayon, couleur (linéaire).
 const LANTERN_HEIGHT: f32 = 22.0;
-const LANTERN_RADIUS: f32 = 150.0;
-const LANTERN_COLOR: Vec3 = Vec3::new(1.0, 0.72, 0.4);
+/// Hauteur de la lumière d'une torche (un peu au-dessus de sa flamme).
+const TORCH_LIGHT_HEIGHT: f32 = 21.0;
+const LANTERN_COLOR: Vec3 = Vec3::new(1.0, 0.87, 0.68);
+
+mod flame;
+pub(crate) mod look;
+#[cfg(not(any(target_os = "ios", target_os = "tvos")))]
+pub mod preview;
+#[cfg(not(any(target_os = "ios", target_os = "tvos")))]
+pub mod tuner;
+
+use flame::{FlameMaterial, TorchMark, face_flames, spawn_torches};
+use look::{ActiveLight, LightTuning, Lights, Mood, Palette, Torches};
 
 /// Couche de rendu du décor: la caméra 3D des personnages (`live3d`, couche 0) ne doit pas le dessiner dans son atlas, ni la
 /// caméra du décor les personnages.
@@ -70,15 +81,20 @@ pub struct Decor3dPlugin;
 
 impl Plugin for Decor3dPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((MaterialPlugin::<DecorMaterial>::default(), MaterialPlugin::<BillboardMaterial>::default()))
+        app.add_plugins((MaterialPlugin::<DecorMaterial>::default(), MaterialPlugin::<BillboardMaterial>::default(), MaterialPlugin::<FlameMaterial>::default()))
+            .insert_resource(LightTuning::load())
+            .init_resource::<ActiveLight>()
+            .init_resource::<Torches>()
+            .init_resource::<Lights>()
+            .init_resource::<Mood>()
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
-                (keep_the_image, build_chunks.after(crate::art::rebuild_world), follow_camera, update_materials).chain(),
+                (keep_the_image, build_chunks.after(crate::art::rebuild_world), follow_camera, update_materials, face_flames, apply_mood, drive_lamps).chain(),
             )
             .add_systems(
                 Update,
-                mirror_sprites.after(crate::art::AnimateCharacters).after(crate::art::animate_props).after(follow_camera),
+                mirror_sprites.after(crate::art::AnimateCharacters).after(crate::art::animate_props).after(follow_camera).after(update_materials),
             );
     }
 }
@@ -110,12 +126,17 @@ struct DecorData {
     params: Vec4,
     /// (largeur et hauteur de la salle en tuiles, pixels d'une tuile dans l'art, -).
     room: Vec4,
-    /// (0: image du bloc, 1: murs de pierre, 2: murs de feuillage, -, -).
+    /// (0: image du bloc, ou 1 pour les murs (la matière est lue tuile par tuile dans le masque des murs); 2 si le niveau a des murs de
+    /// feuillage; lumière ambiante; force du soleil).
     style: Vec4,
     /// Couleurs des murs (linéaires): la première et la seconde variantes de la matière, puis les joints (pierre) ou l'écorce (feuillage).
     color_a: Vec4,
     color_b: Vec4,
     color_c: Vec4,
+    /// La seconde matière des murs (le feuillage), pour les niveaux qui ont de la pierre et des arbres.
+    color_d: Vec4,
+    color_e: Vec4,
+    color_f: Vec4,
     /// Lampes: position (x, hauteur, z étiré) et rayon; couleur.
     light_pos: [Vec4; MAX_LIGHTS],
     light_color: [Vec4; MAX_LIGHTS],
@@ -163,14 +184,7 @@ fn keep_the_image(mut cameras: Query<&mut Camera, (With<Camera2d>, Changed<Camer
 const SUN_FROM: Vec3 = Vec3::new(-0.45, 0.75, 0.5);
 
 fn setup(mut commands: Commands) {
-    // Le soleil des matériaux de Bevy, sur la seule couche des modèles (le sol et les murs ont leur propre éclairage, dans leur shader),
-    // sans ombres portées (elles coûteraient une passe de plus).
-    commands.spawn((
-        DirectionalLight { illuminance: 9000.0, shadow_maps_enabled: false, ..default() },
-        Transform::from_translation(SUN_FROM * 10.0).looking_at(Vec3::ZERO, Vec3::Y),
-        RenderLayers::layer(LAYER),
-    ));
-    commands.insert_resource(GlobalAmbientLight { color: Color::WHITE, brightness: 450.0, ..default() });
+    spawn_sun_and_lamps(&mut commands);
     commands.spawn((
         DecorCamera,
         Camera3d::default(),
@@ -180,6 +194,28 @@ fn setup(mut commands: Commands) {
         RenderLayers::layer(LAYER),
         Transform::default(),
     ));
+}
+
+/// Le soleil, la lumière ambiante et les lampes des modèles 3D (les héros, les monstres, les objets).
+fn spawn_sun_and_lamps(commands: &mut Commands) {
+    // Le soleil des matériaux de Bevy, sur la seule couche des modèles (le sol et les murs ont leur propre éclairage, dans leur shader),
+    // sans ombres portées (elles coûteraient une passe de plus).
+    commands.spawn((
+        DirectionalLight { illuminance: 9000.0, shadow_maps_enabled: false, ..default() },
+        Transform::from_translation(SUN_FROM * 10.0).looking_at(Vec3::ZERO, Vec3::Y),
+        RenderLayers::layer(LAYER),
+    ));
+    commands.insert_resource(GlobalAmbientLight { color: Color::WHITE, brightness: 450.0, ..default() });
+    // Les lampes des modèles 3D (lanternes des héros, torches): `MAX_LIGHTS` lumières ponctuelles, réglées chaque image par `drive_lamps`
+    // avec les mêmes lampes que celles du shader du décor, pour que le sol, les murs et les modèles aient la même lumière.
+    for index in 0..MAX_LIGHTS {
+        commands.spawn((
+            Lamp(index),
+            PointLight { intensity: 0.0, shadow_maps_enabled: false, ..default() },
+            Transform::default(),
+            RenderLayers::layer(LAYER),
+        ));
+    }
 }
 
 /// Position 3D d'un point du monde 2D (x vers la droite, y vers le nord), à la hauteur `height`: le nord est -z.
@@ -197,6 +233,10 @@ fn build_chunks(
     mut images: ResMut<Assets<Image>>,
     built: Query<(Entity, &Decor3d)>,
     walls_entities: Query<Entity, With<Decor3dWalls>>,
+    torch_entities: Query<Entity, With<TorchMark>>,
+    mut standard: ResMut<Assets<StandardMaterial>>,
+    mut flames: ResMut<Assets<FlameMaterial>>,
+    tuning: Res<LightTuning>,
     expeditions: Query<&Expedition>,
     alive: Query<(), With<TileMark>>,
 ) {
@@ -208,6 +248,7 @@ fn build_chunks(
     }
     if alive.is_empty() {
         walls_entities.iter().for_each(|entity| commands.entity(entity).despawn());
+        torch_entities.iter().for_each(|entity| commands.entity(entity).despawn());
     }
     let Some(room) = room else {
         return;
@@ -215,19 +256,18 @@ fn build_chunks(
     if tiles.is_empty() {
         return;
     }
-    let walls = images.add(wall_mask(&room));
-    let region = expeditions.iter().last().map(|expedition| expedition.region).unwrap_or(Region::Crypts);
-    let base = |style: Vec4, colors: [Vec4; 3]| DecorData {
-        tint: Vec4::ONE,
-        params: Vec4::new(1.0, 0.0, wall_height(), TILE_SIZE),
-        room: Vec4::new(room.size().x as f32, room.size().y as f32, TILE_CELL as f32, 0.0),
-        style,
-        color_a: colors[0],
-        color_b: colors[1],
-        color_c: colors[2],
-        light_pos: [Vec4::ZERO; MAX_LIGHTS],
-        light_color: [Vec4::ZERO; MAX_LIGHTS],
-    };
+    let expedition = expeditions.iter().last();
+    let region = expedition.map(|expedition| expedition.region).unwrap_or(Region::Crypts);
+    // Chaque tuile de mur a sa matière (pierre ou arbres): un niveau en mêle quand son fichier change le décor de certaines tuiles.
+    let def = expedition.and_then(|expedition| look::level_of(&room, expedition.level));
+    let kinds = look::wall_kinds(&room, region, def);
+    let walls = images.add(wall_mask(&room, &kinds));
+    let palette = look::palette(region, &room, def);
+    // Les réglages de lumière de ce niveau (les siens, sinon ceux de sa région).
+    let light = tuning.light(expedition.map_or(1, |expedition| expedition.level), region);
+    let mood = light.mood();
+    let foliage = if kinds.contains(&2) { 2.0 } else { 0.0 };
+    let base = |wall: f32| decor_data(&room, wall, foliage, &palette, mood, yaw());
     // La version à plat dessine les blocs dans l'ordre de leurs entités: le dernier est devant.
     let mut order: Vec<Entity> = tiles.iter().map(|(entity, ..)| entity).collect();
     order.sort();
@@ -245,7 +285,8 @@ fn build_chunks(
         let mesh = meshes.add(ground_mesh(&room, origin, cols, rows, lift));
         let material = materials.add(DecorMaterial {
             image: sprite.image.clone(),
-            data: base(Vec4::ZERO, [Vec4::ZERO; 3]),
+            // Le sol sait s'il y a des arbres (y du style): il s'assombrit alors au pied des troncs.
+            data: base(0.0),
             walls: walls.clone(),
         });
         commands.spawn((Decor3d { source: Some(entity), material: material.clone() }, Mesh3d(mesh), MeshMaterial3d(material), RenderLayers::layer(LAYER), Transform::default()));
@@ -254,8 +295,8 @@ fn build_chunks(
     }
     // Les murs: un seul maillage pour tout le niveau.
     walls_entities.iter().for_each(|entity| commands.entity(entity).despawn());
-    let (kind, colors) = wall_style(region);
-    let material = materials.add(DecorMaterial { image: images.add(Image::default()), data: base(Vec4::new(kind, 0.0, 0.0, 0.0), colors), walls });
+    torch_entities.iter().for_each(|entity| commands.entity(entity).despawn());
+    let material = materials.add(DecorMaterial { image: images.add(Image::default()), data: base(1.0), walls });
     commands.spawn((
         Decor3dWalls,
         Decor3d { source: None, material: material.clone() },
@@ -264,6 +305,12 @@ fn build_chunks(
         RenderLayers::layer(LAYER),
         Transform::default(),
     ));
+    // Dans le château, des torches sur les murs de pierre: elles éclairent, et se voient.
+    let torches = if mood.darkness() > 0.3 { look::torch_sites(&room, &kinds) } else { Vec::new() };
+    spawn_torches(&mut commands, &mut meshes, &mut standard, &mut flames, &torches, yaw());
+    commands.insert_resource(mood);
+    commands.insert_resource(ActiveLight(light));
+    commands.insert_resource(Torches(torches));
 }
 
 /// La matière des murs d'une région: (1 pierre ou 2 feuillage, [première variante, seconde variante, joints ou écorce]), en linéaire.
@@ -273,8 +320,8 @@ fn wall_style(region: Region) -> (f32, [Vec4; 3]) {
         Vec4::new(color.red, color.green, color.blue, 1.0)
     };
     match region {
-        Region::Forest => (2.0, [linear(0.20, 0.38, 0.18), linear(0.10, 0.22, 0.11), linear(0.24, 0.16, 0.10)]),
-        Region::Marsh => (2.0, [linear(0.22, 0.34, 0.20), linear(0.11, 0.20, 0.14), linear(0.18, 0.14, 0.10)]),
+        Region::Forest => (2.0, [linear(0.15, 0.29, 0.14), linear(0.07, 0.16, 0.08), linear(0.22, 0.15, 0.09)]),
+        Region::Marsh => (2.0, [linear(0.16, 0.26, 0.15), linear(0.08, 0.15, 0.10), linear(0.17, 0.13, 0.09)]),
         Region::Gardens => (2.0, [linear(0.26, 0.42, 0.20), linear(0.13, 0.27, 0.13), linear(0.22, 0.15, 0.11)]),
         Region::Crypts => (1.0, [linear(0.42, 0.42, 0.46), linear(0.30, 0.30, 0.35), linear(0.15, 0.15, 0.19)]),
         Region::Library => (1.0, [linear(0.48, 0.36, 0.25), linear(0.36, 0.27, 0.19), linear(0.17, 0.12, 0.09)]),
@@ -285,18 +332,16 @@ fn wall_style(region: Region) -> (f32, [Vec4; 3]) {
     }
 }
 
-/// Une tuile de mur qui touche du sol (même en diagonale) est un bloc surélevé; les tuiles plus profondes ne sont qu'un fond de roche.
+/// Toute tuile de mur est un bloc de pleine hauteur, y compris celles qui sont loin du sol: leur dessus se voit au-dessus des premières
+/// rangées, et il doit être à la bonne hauteur. (Hors de la salle, c'est un mur.)
 fn is_raised(room: &Room, x: i32, y: i32) -> bool {
-    room.tile(x, y) == Tile::Wall && (-1..=1).any(|dy| (-1..=1).any(|dx| room.tile(x + dx, y + dy) == Tile::Floor))
+    room.tile(x, y) == Tile::Wall
 }
 
-/// Les blocs de mur du niveau, une tuile par pixel (voir `DecorMaterial::walls`).
-fn wall_mask(room: &Room) -> Image {
+/// Les blocs de mur du niveau, une tuile par pixel (voir `DecorMaterial::walls`): 0 pas de mur, 255 mur de pierre, 170 mur de feuillage.
+fn wall_mask(room: &Room, kinds: &[u8]) -> Image {
     let size = room.size();
-    let data = (0..size.y as i32)
-        .flat_map(|y| (0..size.x as i32).map(move |x| (x, y)))
-        .map(|(x, y)| if is_raised(room, x, y) { 255 } else { 0 })
-        .collect();
+    let data = kinds.iter().map(|kind| match kind { 1 => 255, 2 => 170, _ => 0 }).collect();
     let mut image = Image::new(
         Extent3d { width: size.x, height: size.y, depth_or_array_layers: 1 },
         TextureDimension::D2,
@@ -355,11 +400,10 @@ fn ground_mesh(room: &Room, origin: IVec2, cols: u32, rows: u32, lift: f32) -> M
     quads.into_mesh()
 }
 
-/// Hauteur du dessus plat des masses de mur (au-delà de la première rangée): juste au-dessus du sol, pour recouvrir son image.
+/// Hauteur du sol à l'intérieur des blocs de mur: juste au-dessus du sol, pour recouvrir son image.
 const MASS_HEIGHT: f32 = 1.5;
 
-/// Les murs de tout le niveau. Une tuile de mur qui touche du sol est un cube de six faces (on ne génère pas celles qui touchent un
-/// autre cube); les tuiles plus profondes ne sont qu'un fond de roche, à plat. La matière est calculée par le shader (`decor3d.wesl`) à
+/// Les murs de tout le niveau. Chaque tuile de mur est un cube de six faces (on ne génère pas celles qui touchent un autre cube). La matière est calculée par le shader (`decor3d.wesl`) à
 /// partir de la position dans le monde et de la normale de la face: les six faces sont de la même matière.
 fn walls_mesh(room: &Room) -> Mesh {
     let mut quads = Quads::default();
@@ -373,13 +417,11 @@ fn walls_mesh(room: &Room) -> Mesh {
             let sw = tile_corner(room, x, y);
             let (se, ne, nw) = (sw + Vec2::new(TILE_SIZE, 0.0), sw + Vec2::splat(TILE_SIZE), sw + Vec2::new(0.0, TILE_SIZE));
             let none = [Vec2::ZERO; 4];
-            if !is_raised(room, x, y) {
-                let flat = |at: Vec2| to_3d(at, MASS_HEIGHT);
-                quads.add([flat(sw), flat(se), flat(ne), flat(nw)], Vec3::Y, none);
-                continue;
-            }
             // Les huit coins du cube: le pied (hauteur 0) et le haut.
             let (low, high) = (|at: Vec2| to_3d(at, 0.0), |at: Vec2| to_3d(at, height));
+            // Le sol à l'intérieur du cube: on le voit à travers les vides du feuillage (entre les troncs).
+            let flat = |at: Vec2| to_3d(at, MASS_HEIGHT);
+            quads.add([flat(sw), flat(se), flat(ne), flat(nw)], Vec3::Y, none);
             // Dessus et dessous.
             quads.add([high(sw), high(se), high(ne), high(nw)], Vec3::Y, none);
             quads.add([low(nw), low(ne), low(se), low(sw)], Vec3::NEG_Y, none);
@@ -435,29 +477,64 @@ fn follow_camera(
     }
 }
 
-/// Teinte du décor (celle des sprites à plat) et lampes (la lanterne du héros dirigé).
+/// Les paramètres du shader du décor pour une salle. `wall` est 0 pour le sol, 1 pour les murs (la matière de chaque tuile est lue dans le
+/// masque des murs); `foliage` vaut 2 si le niveau a des murs de feuillage.
+fn decor_data(room: &Room, wall: f32, foliage: f32, palette: &Palette, mood: Mood, yaw: f32) -> DecorData {
+    DecorData {
+        tint: Vec4::ONE,
+        params: Vec4::new(1.0, 0.0, wall_height(), TILE_SIZE),
+        // (largeur et hauteur de la salle en tuiles, pixels d'une tuile dans l'art, angle de la vue en radians).
+        room: Vec4::new(room.size().x as f32, room.size().y as f32, TILE_CELL as f32, yaw),
+        style: Vec4::new(wall, foliage, mood.ambient, mood.sun),
+        color_a: palette.stone[0],
+        color_b: palette.stone[1],
+        color_c: palette.stone[2],
+        color_d: palette.foliage[0],
+        color_e: palette.foliage[1],
+        color_f: palette.foliage[2],
+        light_pos: [Vec4::ZERO; MAX_LIGHTS],
+        light_color: [Vec4::ZERO; MAX_LIGHTS],
+    }
+}
+
+/// Teinte du décor (celle des sprites à plat) et lampes (les lanternes des héros de l'équipe, et les torches les plus proches).
 fn update_materials(
     mut materials: ResMut<Assets<DecorMaterial>>,
     chunks: Query<&Decor3d>,
     sprites: Query<&Sprite, With<TileMark>>,
-    hero: Option<Single<&Transform, With<LocalPlayer>>>,
+    local: Option<Single<(Entity, &Transform), With<LocalPlayer>>>,
+    heroes: Query<(Entity, &Transform, &PartyId), With<Player>>,
+    party: Option<Res<crate::LocalParty>>,
+    torches: Res<Torches>,
+    active: Res<ActiveLight>,
+    mut scene: ResMut<Lights>,
 ) {
     // La teinte du décor (celle du héros dirigé) est la même pour tous les blocs, murs compris.
     let tint = sprites.iter().next().map_or(Vec4::ONE, |sprite| {
         let tint = sprite.color.to_linear();
         Vec4::new(tint.red, tint.green, tint.blue, 1.0)
     });
-    let lantern = hero.map(|hero| (to_3d(hero.translation.truncate(), LANTERN_HEIGHT), hero.translation.truncate()));
     let wall = wall_height();
-    // Les lampes sont données dans le monde 2D (x, hauteur, y): le shader a besoin de distances non étirées.
-    let mut light_pos = [Vec4::ZERO; MAX_LIGHTS];
-    let mut light_color = [Vec4::ZERO; MAX_LIGHTS];
-    let mut count = 0.0;
-    if let Some((_, flat)) = lantern {
-        light_pos[0] = Vec4::new(flat.x, LANTERN_HEIGHT, flat.y, LANTERN_RADIUS);
-        light_color[0] = LANTERN_COLOR.extend(1.0);
-        count = 1.0;
+    let angle = yaw();
+    // Les lampes sont données dans le monde 2D (x, hauteur, y): le shader a besoin de distances non étirées. D'abord le héros que l'on
+    // dirige, puis le reste de son équipe (dans l'ordre des entités, pour que les lampes ne changent pas de place d'une image à l'autre).
+    let mut positions: Vec<Vec2> = Vec::new();
+    if let Some(local) = &local {
+        positions.push(local.1.translation.truncate());
     }
+    if let Some(party) = party {
+        let mut team: Vec<(Entity, Vec2)> = heroes
+            .iter()
+            .filter(|(entity, _, id)| id.0 == party.0 && local.as_ref().is_none_or(|local| local.0 != *entity))
+            .map(|(entity, transform, _)| (entity, transform.translation.truncate()))
+            .collect();
+        team.sort_by_key(|(entity, _)| *entity);
+        positions.extend(team.into_iter().map(|(_, at)| at));
+    }
+    let focus = positions.first().copied().unwrap_or(Vec2::ZERO);
+    let lights = look::lights(&positions, &torches.0, focus, &active.0);
+    let (light_pos, light_color, count) = (lights.pos, lights.color, lights.count);
+    *scene = lights;
     for chunk in &chunks {
         // `get_mut` marque la matière modifiée, donc renvoyée au GPU à chaque image: on n'y touche que si quelque chose change.
         let Some(current) = materials.get(&chunk.material) else {
@@ -467,6 +544,7 @@ fn update_materials(
         if data.tint == tint
             && data.params.y == count
             && data.params.z == wall
+            && data.room.w == angle
             && data.light_pos == light_pos
             && data.light_color == light_color
         {
@@ -478,8 +556,53 @@ fn update_materials(
         material.data.tint = tint;
         material.data.params.y = count;
         material.data.params.z = wall;
+        material.data.room.w = angle;
         material.data.light_pos = light_pos;
         material.data.light_color = light_color;
+    }
+}
+
+/// Une lampe des modèles 3D: l'indice de la lampe du shader dont elle reprend la position et la couleur.
+#[derive(Component)]
+struct Lamp(usize);
+
+/// Rapport entre l'intensité d'une lampe du shader et la puissance de la lumière de Bevy (lumens): à mi-rayon, une lampe d'intensité `w`
+/// éclaire un modèle comme sa lampe du shader éclaire le sol, avec des matières de modèles plus claires que le sol (mesuré sur l'aperçu):
+/// un ton de 1 sur le sol vaut environ 1100 lux sur un modèle.
+const LUMENS_PER_UNIT: f32 = 150.0 * std::f32::consts::PI;
+
+/// Le soleil et la lumière ambiante des modèles 3D suivent l'ambiance du niveau (très sombre dans les bois à la nuit tombante et dans le
+/// château), comme le décor.
+fn apply_mood(mood: Res<Mood>, mut sun: Query<&mut DirectionalLight>, mut ambient: ResMut<GlobalAmbientLight>) {
+    if !mood.is_changed() {
+        return;
+    }
+    // Le ton d'une surface horizontale au soleil, comme sur le sol (1 en plein jour); de nuit, les modèles s'alignent sur le sol (leurs
+    // matières sont plus claires que le sol: sans ce facteur, ils resteraient bien plus vifs que lui).
+    let tone = mood.ambient + (1.0 - mood.ambient) * mood.sun;
+    let day = ((tone - 0.5) / 0.5).clamp(0.0, 1.0);
+    let night_factor = 0.08 + 0.92 * day * day * (3.0 - 2.0 * day);
+    for mut light in &mut sun {
+        light.illuminance = 9000.0 * tone * night_factor;
+    }
+    ambient.brightness = 450.0 * tone * night_factor;
+}
+
+/// Les lampes de Bevy reprennent celles du shader: lanternes des héros, torches proches.
+fn drive_lamps(scene: Res<Lights>, mut lamps: Query<(&Lamp, &mut PointLight, &mut Transform)>) {
+    for (Lamp(index), mut light, mut transform) in &mut lamps {
+        let (intensity, range, at, color) = if (*index as f32) < scene.count {
+            let (pos, color) = (scene.pos[*index], scene.color[*index]);
+            (LUMENS_PER_UNIT * color.w * pos.w * pos.w, pos.w * 1.8, to_3d(Vec2::new(pos.x, pos.z), pos.y), Color::linear_rgb(color.x, color.y, color.z))
+        } else {
+            (0.0, 1.0, Vec3::ZERO, Color::BLACK)
+        };
+        if light.intensity != intensity || transform.translation != at {
+            light.intensity = intensity;
+            light.range = range;
+            light.color = color;
+            transform.translation = at;
+        }
     }
 }
 
@@ -584,6 +707,8 @@ fn mirror_sprites(
     mut materials: ResMut<Assets<BillboardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut quad: Local<Option<Handle<Mesh>>>,
+    lights: Res<Lights>,
+    mood: Res<Mood>,
 ) {
     // Les panneaux dont le sprite a disparu.
     for (entity, billboard) in &billboards {
@@ -607,9 +732,15 @@ fn mirror_sprites(
             continue;
         };
         let tint = sprite.color.to_linear();
-        let data = BillboardData { rect, tint: Vec4::new(tint.red, tint.green, tint.blue, tint.alpha) };
         // Le centre du sprite dans le monde 2D, et son bas.
         let center = transform.translation.truncate() - anchor.map_or(Vec2::ZERO, |anchor| anchor.as_vec()) * size;
+        // Un sprite ne brille pas de lui-même: il n'a que la lumière de l'ambiance et des lampes (un tir en vol, lui, est une lumière).
+        let lit = if projectile.is_some() {
+            Vec3::ONE
+        } else {
+            look::light_on(Vec3::new(center.x, if decal { 0.3 } else { size.y * 0.5 }, center.y), decal, &lights, *mood)
+        };
+        let data = BillboardData { rect, tint: Vec4::new(tint.red * lit.x, tint.green * lit.y, tint.blue * lit.z, tint.alpha) };
         let place = if decal {
             // À plat sur le sol, un peu au-dessus (plus haut pour les marques que le jeu dessine plus tard).
             Transform {

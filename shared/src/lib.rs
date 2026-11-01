@@ -109,6 +109,22 @@ pub struct Room {
 }
 
 impl Room {
+    /// Une salle dessinée en texte, pour les essais et les aperçus: `#` est un mur, tout autre caractère du sol. La première ligne est
+    /// le nord; toutes les lignes ont la même longueur.
+    pub fn from_rows(rows: &[&str]) -> Room {
+        let size = UVec2::new(rows[0].chars().count() as u32, rows.len() as u32);
+        let mut room = Room { size, tiles: vec![Tile::Floor; (size.x * size.y) as usize] };
+        for (row, text) in rows.iter().enumerate() {
+            assert_eq!(text.chars().count() as u32, size.x, "ligne {row} de longueur différente");
+            for (x, c) in text.chars().enumerate() {
+                if c == '#' {
+                    room.set(x as u32, size.y - 1 - row as u32, Tile::Wall);
+                }
+            }
+        }
+        room
+    }
+
     fn set(&mut self, x: u32, y: u32, tile: Tile) {
         let i = (y * self.size.x + x) as usize;
         self.tiles[i] = tile;

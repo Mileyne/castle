@@ -5,10 +5,17 @@
 //! Chaque modèle est une seule entité qui porte le maillage fusionné de sa pose du moment. Les poses de tous les modèles d'un niveau
 //! sont construites à l'avance (voir `prebake`); une pose manquante se construit à la demande.
 
-use bevy::{camera::visibility::RenderLayers, prelude::*};
+use bevy::{
+    camera::visibility::RenderLayers,
+    pbr::{ExtendedMaterial, MaterialExtension},
+    prelude::*,
+    render::render_resource::AsBindGroup,
+    shader::ShaderRef,
+};
 use castle_shared::{ExitKind, HeroClass, Landmark, LandmarkKind, LevelExit, Monster, MonsterKind};
 use sprite_forge::{Anim, models};
 
+use crate::decor3d::look::{ActiveLight, LevelLight, Response};
 use crate::art::{PoseKind, Prop, SPRITE_SIZE, WalkCycle, exit_row, monster_scale, object};
 use crate::merged::{ModelSource, PoseCache, SURFACES, Surface, face_path, load_face, surface_material, weave_image};
 use crate::settings::ModelShader;
@@ -19,13 +26,32 @@ const METERS_PER_SPRITE: f32 = 2.4;
 const LARGE_PLATE_METERS: f32 = 4.8;
 const LARGE_PLATE_UNITS: f32 = 64.0;
 
+/// L'extension du matériau standard qui donne aux modèles leur émission propre (voir `assets/shaders/model_glow.wesl`).
+#[derive(Asset, AsBindGroup, TypePath, Clone, Debug)]
+pub struct GlowExtension {
+    /// (part de la couleur du modèle qu'il émet, -, -, -).
+    #[uniform(100)]
+    glow: Vec4,
+}
+
+impl MaterialExtension for GlowExtension {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/model_glow.wesl".into()
+    }
+}
+
+/// Le matériau des modèles 3D: un matériau standard, avec la capacité d'émettre sa propre lumière.
+pub type ModelMaterial = ExtendedMaterial<StandardMaterial, GlowExtension>;
+
 pub struct Live3dPlugin;
 
 impl Plugin for Live3dPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Caches>()
+            .add_plugins(MaterialPlugin::<ModelMaterial>::default())
             .add_observer(release)
-            .add_systems(Update, (attach_characters, attach_props, attach_landmarks, attach_exits, animate).chain().after(crate::art::AnimateCharacters));
+            .add_systems(Update, (attach_characters, attach_props, attach_landmarks, attach_exits, animate).chain().after(crate::art::AnimateCharacters))
+            .add_systems(Update, retune);
     }
 }
 
@@ -38,6 +64,44 @@ pub struct ModelTint(pub Color);
 type TintKey = [u8; 4];
 
 const WHITE: TintKey = [127, 127, 127, 255];
+
+/// La catégorie d'un modèle pour la lumière: chacune a ses réglages (`LightTuning`): capacité à capter la lumière et à rayonner.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Kind {
+    /// Les héros: ce sont les seuls modèles qui ont un regard répliqué.
+    Hero,
+    /// Les monstres: ils marchent, mais n'ont pas de regard répliqué.
+    Enemy,
+    /// Les objets, grands motifs et sorties.
+    Object,
+}
+
+impl Kind {
+    fn response(self, tuning: &LevelLight) -> Response {
+        match self {
+            Self::Hero => tuning.hero,
+            Self::Enemy => tuning.enemy,
+            Self::Object => tuning.object,
+        }
+    }
+}
+
+/// Applique à un matériau la réponse de sa catégorie: les couleurs sont multipliées par le gain (ce qui garde les teintes), et le modèle
+/// émet une part `glow` de ses propres couleurs. Les matières lumineuses (yeux des loups) et les modèles sans éclairage n'y touchent pas.
+fn respond(material: &mut ModelMaterial, surface: Surface, tint: Color, response: Response, lit: bool) {
+    if !lit || surface == Surface::Glow {
+        return;
+    }
+    let linear = tint.to_linear();
+    material.base.base_color = Color::linear_rgba(linear.red * response.gain, linear.green * response.gain, linear.blue * response.gain, linear.alpha);
+    material.extension.glow.x = response.glow;
+}
+
+/// La couleur d'une teinte quantifiée.
+fn tint_color(tint: TintKey) -> Color {
+    let channel = |byte: u8| f32::from(byte) / 127.0;
+    Color::srgba(channel(tint[0]), channel(tint[1]), channel(tint[2]), f32::from(tint[3]) / 255.0)
+}
 
 fn tint_key(tint: Option<&ModelTint>) -> TintKey {
     let Some(ModelTint(color)) = tint else {
@@ -52,7 +116,7 @@ fn tint_key(tint: Option<&ModelTint>) -> TintKey {
 #[derive(Resource, Default)]
 pub struct Caches {
     pub poses: PoseCache,
-    materials: std::collections::HashMap<(Surface, ModelShader, TintKey, Option<&'static str>), Handle<StandardMaterial>>,
+    materials: std::collections::HashMap<(Surface, ModelShader, TintKey, Option<&'static str>, Kind), Handle<ModelMaterial>>,
     /// Les peaux des crânes (une par héros), chargées à la première utilisation.
     faces: std::collections::HashMap<&'static str, Handle<Image>>,
     /// La texture de tissage des vêtements, créée à la première utilisation.
@@ -183,6 +247,19 @@ fn attach_exits(mut commands: Commands, fresh: Query<(Entity, &LevelExit), (Adde
     }
 }
 
+/// Quand les réglages de lumière changent (dans le programme `lumiere`), les matériaux déjà créés les reprennent.
+fn retune(active: Res<ActiveLight>, caches: Res<Caches>, mut materials: ResMut<Assets<ModelMaterial>>) {
+    if !active.is_changed() {
+        return;
+    }
+    let tuning = &active.0;
+    for ((surface, shader, tint, _, kind), handle) in &caches.materials {
+        if let Some(mut material) = materials.get_mut(handle) {
+            respond(&mut material, *surface, tint_color(*tint), kind.response(tuning), *shader == ModelShader::Lit);
+        }
+    }
+}
+
 /// Un modèle disparu retire sa scène.
 fn release(removed: On<Remove<Live3d>>, models: Query<&Live3d>, mut commands: Commands) {
     if let Ok(live) = models.get(removed.entity) {
@@ -200,10 +277,12 @@ fn animate(
     mut shown: Query<&mut Visibility>,
     mut caches: ResMut<Caches>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<ModelMaterial>>,
     mut images: ResMut<Assets<Image>>,
     assets: Res<AssetServer>,
+    active: Res<ActiveLight>,
 ) {
+    let tuning = &active.0;
     let caches = &mut *caches;
     let shader = crate::settings::model_shader();
     for (entity, mut live, cycle, facing, prop, exit, tint, visible) in &mut models {
@@ -255,6 +334,13 @@ fn animate(
         let tint = tint_key(tint);
         let cloth = caches.cloth.get_or_insert_with(|| images.add(weave_image())).clone();
         let restyle = live.tint != tint || live.shader != Some(shader);
+        let kind = if facing.is_some() {
+            Kind::Hero
+        } else if cycle.is_some() {
+            Kind::Enemy
+        } else {
+            Kind::Object
+        };
         let face = face_path(&live.source);
         // Les maillages de la pose: construits à l'avance (`prebake`), sinon à la demande.
         let (family, index) = live.source.pose(anim);
@@ -266,7 +352,7 @@ fn animate(
         let pose = if new_pose { Some(caches.poses.get_or_build(&wanted, &mut meshes)) } else { None };
         for surface in Surface::ALL {
             let slot = surface.index();
-            let material = restyle.then(|| material_for(caches, &mut materials, &cloth, &assets, face, surface, shader, tint));
+            let material = restyle.then(|| material_for(caches, &mut materials, &cloth, &assets, face, surface, shader, tint, kind, tuning));
             match (live.bodies[slot], pose.as_ref().map(|meshes| meshes[slot].clone())) {
                 // La pose change: le corps montre le maillage de sa matière, ou se cache s'il n'y en a pas.
                 (Some(body), Some(Some(handle))) => {
@@ -276,7 +362,7 @@ fn animate(
                     commands.entity(body).insert(Visibility::Hidden);
                 }
                 (None, Some(Some(handle))) => {
-                    let material = material.clone().unwrap_or_else(|| material_for(caches, &mut materials, &cloth, &assets, face, surface, shader, tint));
+                    let material = material.clone().unwrap_or_else(|| material_for(caches, &mut materials, &cloth, &assets, face, surface, shader, tint, kind, tuning));
                     live.bodies[slot] = Some(
                         commands
                             .spawn((Mesh3d(handle), MeshMaterial3d(material), ChildOf(live.root), RenderLayers::layer(crate::decor3d::LAYER)))
@@ -299,24 +385,31 @@ fn animate(
 #[allow(clippy::too_many_arguments)]
 fn material_for(
     caches: &mut Caches,
-    standard: &mut Assets<StandardMaterial>,
+    standard: &mut Assets<ModelMaterial>,
     cloth: &Handle<Image>,
     assets: &AssetServer,
     face: Option<&'static str>,
     surface: Surface,
     shader: ModelShader,
     tint: TintKey,
-) -> Handle<StandardMaterial> {
+    kind: Kind,
+    tuning: &LevelLight,
+) -> Handle<ModelMaterial> {
     // Seul le crâne dépend de la photo: les autres matières sont communes à tous les modèles.
     let face = if surface == Surface::Face { face } else { None };
     let face_image = face.map(|path| caches.faces.entry(path).or_insert_with(|| load_face(assets, path)).clone());
     caches
         .materials
-        .entry((surface, shader, tint, face))
+        .entry((surface, shader, tint, face, kind))
         .or_insert_with(|| {
-            let channel = |byte: u8| f32::from(byte) / 127.0;
-            let color = Color::srgba(channel(tint[0]), channel(tint[1]), channel(tint[2]), f32::from(tint[3]) / 255.0);
-            standard.add(surface_material(surface, shader == ModelShader::Lit, color, Some(cloth), face_image.as_ref()))
+            let lit = shader == ModelShader::Lit;
+            let color = tint_color(tint);
+            let mut material = ModelMaterial {
+                base: surface_material(surface, lit, color, Some(cloth), face_image.as_ref()),
+                extension: GlowExtension { glow: Vec4::ZERO },
+            };
+            respond(&mut material, surface, color, kind.response(tuning), lit);
+            standard.add(material)
         })
         .clone()
 }

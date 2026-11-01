@@ -11,7 +11,7 @@ use crate::LocalPlayer;
 /// Vitesse à laquelle la colorimétrie glisse vers celle d'un nouveau héros.
 const GRADE_SPEED: f32 = 4.0;
 /// Part de la teinte du héros qui passe dans le décor.
-const ENVIRONMENT_MIX: f32 = 0.6;
+const ENVIRONMENT_MIX: f32 = 0.22;
 
 /// Multiplicateur de couleur du décor appliqué par un héros: gris pour le Chevalier, violet pour l'Ensorceleur, vert pour le
 /// Rôdeur, orange pour le Forgebraise. Les personnages gardent leurs couleurs.

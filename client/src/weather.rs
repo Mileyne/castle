@@ -3,12 +3,13 @@
 //! tout d'un coup, très brièvement, deux fois de suite.
 
 use bevy::{
+    camera::visibility::RenderLayers,
     prelude::*,
     render::render_resource::AsBindGroup,
     shader::ShaderRef,
     sprite_render::{AlphaMode2d, Material2d, Material2dPlugin, MeshMaterial2d},
 };
-use castle_shared::{Expedition, Region};
+use castle_shared::{Expedition, Region, TILE_SIZE};
 
 /// Vitesse de chute (unités du monde par seconde) et dérive du vent. Le trait mesure 0,35 x 7 unités (voir `rain.wesl`).
 const FALL_SPEED: f32 = 300.0;
@@ -26,7 +27,9 @@ const GLOOM: [(Region, f32); 2] = [(Region::Forest, 0.12), (Region::Marsh, 0.36)
 /// sur les petits appareils, pour alléger le calcul.
 const MIST_SCALE: f32 = 220.0;
 const MIST_DRIFT: Vec2 = Vec2::new(0.03, 0.012);
-const MIST_DENSITY: f32 = 0.4;
+const MIST_DENSITY: f32 = 0.3;
+/// Clarté de la brume par rapport à la lumière ambiante: à 0,26 (la forêt), elle vaut environ 0,36 de sa couleur pâle.
+const MIST_BRIGHTNESS: f32 = 1.4;
 const MIST_LAYERS: f32 = 4.0;
 const MIST_LAYERS_LITE: f32 = 2.0;
 const FLASH_STRENGTH: f32 = 1.0;
@@ -65,8 +68,8 @@ pub struct WeatherPlugin;
 impl Plugin for WeatherPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Weather>()
-            .add_plugins((Material2dPlugin::<RainMaterial>::default(), Material2dPlugin::<MistMaterial>::default()))
-            .add_systems(Update, (update_storm, update_sky).chain());
+            .add_plugins((Material2dPlugin::<RainMaterial>::default(), MaterialPlugin::<MistMaterial>::default()))
+            .add_systems(Update, (update_storm, update_sky, follow_camera).chain());
     }
 }
 
@@ -144,27 +147,55 @@ impl Material2d for RainMaterial {
     }
 }
 
-/// La brume: un seul rectangle qui couvre la vue, dessiné par `assets/shaders/mist.wesl`.
+/// La brume: un grand plan posé sur le sol de la scène 3D du décor (les murs et les personnages passent devant ou derrière), dessiné
+/// par `assets/shaders/mist.wesl`. Il suit la caméra; les nappes, elles, sont ancrées dans le monde.
 #[derive(Component)]
-struct Mist;
+struct Mist(f32);
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 struct MistMaterial {
     /// (échelle, vent x, vent y, densité maximale).
     #[uniform(0)]
     data: Vec4,
-    /// (nombre de couches de bruit, -, -, -).
+    /// (nombre de couches de bruit, luminosité de la brume, -, -).
     #[uniform(1)]
     params: Vec4,
 }
 
-impl Material2d for MistMaterial {
+impl Material for MistMaterial {
     fn fragment_shader() -> ShaderRef {
         "shaders/mist.wesl".into()
     }
 
-    fn alpha_mode(&self) -> AlphaMode2d {
-        AlphaMode2d::Blend
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Blend
+    }
+
+    // Les nappes se dessinent après les personnages (qui sont aussi translucides): sinon la brume ne couvrirait que ceux qui sont
+    // derrière le centre de la vue.
+    fn depth_bias(&self) -> f32 {
+        1000.0
+    }
+}
+
+/// Côté du plan de brume, en unités du monde: plus que ce que la vue la plus éloignée peut montrer du sol.
+const MIST_PLANE: f32 = 5000.0;
+/// Hauteur des murs de la vue 3D, en unités du monde.
+const WALL_HEIGHT: f32 = crate::settings::VIEW_WALL_TILES * TILE_SIZE;
+/// Deux nappes superposées, vues de biais: tout ce qui est sous une nappe en reçoit la brume. La basse, au quart de la hauteur des murs,
+/// donne la brume dense au pied des murs, des personnages et du sol; la haute, à mi-hauteur des murs, ajoute le reste, plus légère. Rien
+/// au-dessus: la brume ne monte pas plus haut que la moitié des murs. Opacité de chacune, en part de `MIST_DENSITY`: la basse ajoutée à la
+/// haute (qui s'additionnent en se recouvrant) donne la densité pleine en bas, et `MIST_UPPER` de celle-ci entre le quart et la moitié.
+const MIST_UPPER: f32 = 0.4;
+const MIST_SHEETS: [(f32, f32); 2] = [(WALL_HEIGHT / 4.0, 1.0 - MIST_UPPER + 0.05), (WALL_HEIGHT / 2.0, MIST_UPPER)];
+
+/// Le plan de brume reste sous la caméra (position 2D → scène 3D: le nord est -z).
+fn follow_camera(camera: Single<&Transform, With<Camera2d>>, mut mist: Query<(&Mist, &mut Transform), Without<Camera2d>>) {
+    for (Mist(height), mut transform) in &mut mist {
+        let target = Vec3::new(camera.translation.x, *height, -camera.translation.y);
+        if transform.translation != target {
+            transform.translation = target;
+        }
     }
 }
 
@@ -180,6 +211,7 @@ fn update_sky(
     mut meshes: ResMut<Assets<Mesh>>,
     mut rain_materials: ResMut<Assets<RainMaterial>>,
     mut mist_materials: ResMut<Assets<MistMaterial>>,
+    active: Res<crate::decor3d::look::ActiveLight>,
 ) {
     let region = expeditions.iter().last().map(|e| e.region).filter(|r| sky(*r).is_some());
     let weather_now = region.and_then(sky);
@@ -221,17 +253,21 @@ fn update_sky(
     }
     if weather_now == Some(Sky::Mist) && mist.is_empty() {
         let layers = if lite { MIST_LAYERS_LITE } else { MIST_LAYERS };
-        commands.entity(*camera).with_children(|camera| {
-            camera.spawn((
-                Mist,
-                Mesh2d(meshes.add(Rectangle::new(2400.0, 1600.0))),
-                MeshMaterial2d(mist_materials.add(MistMaterial {
-                    data: Vec4::new(MIST_SCALE, MIST_DRIFT.x, MIST_DRIFT.y, MIST_DENSITY),
-                    params: Vec4::new(layers, 0.0, 0.0, 0.0),
+        // La brume ne brille pas: sa clarté suit la lumière ambiante de la région (dans une forêt sombre, elle est grise et terne).
+        let brightness = (active.0.ambient * MIST_BRIGHTNESS).clamp(0.1, 1.0);
+        let plane = meshes.add(Plane3d::default().mesh().size(MIST_PLANE, MIST_PLANE));
+        for (height, share) in MIST_SHEETS {
+            commands.spawn((
+                Mist(height),
+                Mesh3d(plane.clone()),
+                MeshMaterial3d(mist_materials.add(MistMaterial {
+                    data: Vec4::new(MIST_SCALE, MIST_DRIFT.x, MIST_DRIFT.y, MIST_DENSITY * share),
+                    params: Vec4::new(layers, brightness, 0.0, 0.0),
                 })),
-                Transform::from_xyz(0.0, 0.0, RAIN_Z),
+                RenderLayers::layer(crate::decor3d::LAYER),
+                Transform::from_xyz(0.0, height, 0.0),
             ));
-        });
+        }
     }
 }
 
