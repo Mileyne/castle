@@ -21,6 +21,7 @@ mod boss;
 mod camera;
 mod controls;
 mod dialogue;
+mod dialogue_script;
 #[cfg(target_os = "ios")]
 mod gamecontroller;
 mod gore;

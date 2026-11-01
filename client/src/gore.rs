@@ -121,7 +121,7 @@ fn move_drops(mut commands: Commands, time: Res<Time>, mut drops: Query<(Entity,
 
 /// Un ennemi ou un générateur qui disparaît laisse une grande mare de sang.
 fn blood_on_death(
-    removed: On<Remove, Monster>,
+    removed: On<Remove<Monster>>,
     mut commands: Commands,
     theme: Res<ArtTheme>,
     art: Res<Art>,

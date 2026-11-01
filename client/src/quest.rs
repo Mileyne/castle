@@ -125,7 +125,7 @@ const HALO_RADIUS: f32 = 46.0;
 struct Departing(f32);
 
 fn on_guide_gone(
-    gone: On<Remove, Guide>,
+    gone: On<Remove<Guide>>,
     guides: Query<(&Sprite, &Anchor, &Transform), Without<Captive>>,
     mut commands: Commands,
 ) {

@@ -1,18 +1,15 @@
-//! Dialogues: Yarn Spinner gère le déroulé des scènes, Fluent fournit les textes dans la langue du joueur.
+//! Dialogues: `dialogue_script` gère le déroulé des scènes, Fluent fournit les textes dans la langue du joueur.
 //!
 //! Le serveur déclenche les scènes, fait avancer tout le monde en même temps et compte les votes.
-//! Chaque client joue la même scène localement; une réplique `#line:intro_01` se lit dans la clé Fluent `dlg-intro_01`.
+//! Chaque client joue la même scène localement; la réplique `intro_01` se lit dans la clé Fluent `dlg-intro_01`.
 
 use bevy::{color::palettes::css, prelude::*};
 use bevy_fluent::prelude::Localization;
 use bevy_replicon::prelude::*;
-use bevy_yarnspinner::{
-    events::{DialogueCompleted, PresentLine, PresentOptions},
-    prelude::{DialogueRunner, OptionId, YarnProject, YarnSpinnerPlugin},
-};
 use castle_shared::*;
 use fluent_content::Content;
 
+use crate::dialogue_script::{Runner, Script, Shown};
 use crate::i18n::Tr;
 use crate::ui::ui_font;
 
@@ -39,7 +36,8 @@ pub struct DialoguePlugin;
 
 impl Plugin for DialoguePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(YarnSpinnerPlugin::new())
+        app.insert_resource(Script::builtin())
+            .init_resource::<Runner>()
             .init_resource::<DialogueState>()
             .init_resource::<SkipHold>()
             .add_systems(Startup, (spawn_panel, spawn_prologue_screen))
@@ -48,7 +46,6 @@ impl Plugin for DialoguePlugin {
             .add_systems(
                 Update,
                 (
-                    spawn_runner.run_if(resource_added::<YarnProject>),
                     (dialogue_input, dialogue_skip_hold)
                         .run_if(in_state(ClientState::Connected))
                         .run_if(crate::level_intro::player_can_act)
@@ -63,22 +60,17 @@ impl Plugin for DialoguePlugin {
             .add_systems(Update, purge_on_new_level)
             .add_observer(on_advance)
             .add_observer(on_select)
-            .add_observer(on_present_line)
-            .add_observer(on_present_options)
-            .add_observer(on_completed);
+            ;
     }
 }
 
 struct ShownLine {
     speaker: Option<String>,
     key: String,
-    fallback: String,
 }
 
 struct ShownOption {
-    id: OptionId,
     key: String,
-    fallback: String,
 }
 
 /// Ce que le joueur voit en ce moment.
@@ -91,6 +83,7 @@ pub struct DialogueState {
     revealed: f32,
     /// Une réplique du prologue de Samélia est à l'écran.
     in_prologue: bool,
+
 }
 
 impl DialogueState {
@@ -277,85 +270,80 @@ struct BodyText;
 #[derive(Component)]
 struct PromptText;
 
-fn spawn_runner(mut commands: Commands, project: Res<YarnProject>) {
-    let runner = project.create_dialogue_runner(&mut commands);
-    commands.spawn(runner);
-}
-
-/// L'identifiant d'une réplique `line:intro_01` devient la clé Fluent `dlg-intro_01`.
+/// Un identifiant de réplique `intro_01` devient la clé Fluent `dlg-intro_01`.
 fn fluent_key(id: &str) -> String {
-    format!("dlg-{}", id.strip_prefix("line:").unwrap_or(id))
+    format!("dlg-{id}")
 }
 
-fn on_begin(begin: On<DialogueBegin>, mut runners: Query<&mut DialogueRunner>) {
-    let Ok(mut runner) = runners.single_mut() else {
-        warn!("dialogue '{}' requested before the dialogue runner is ready", begin.0);
-        return;
-    };
+/// Met à l'écran ce que l'interpréteur vient de rendre. Une scène terminée prévient le serveur, qui attend qu'on la lui dise.
+/// La dernière réplique avant des choix reste affichée avec eux, sans attendre d'avancement.
+fn show(shown: Shown, runner: &mut Runner, state: &mut DialogueState, commands: &mut Commands) {
+    let is_line = matches!(shown, Shown::Line { .. });
+    match shown {
+        Shown::Line { speaker, id } => {
+            state.line = Some(ShownLine { speaker: Some(speaker), key: fluent_key(&id) });
+            state.revealed = 0.0;
+        }
+        Shown::Options(ids) => {
+            state.options = ids.iter().map(|id| ShownOption { key: fluent_key(id) }).collect();
+            state.voted = false;
+        }
+        Shown::Finished => {
+            // Une scène qui se termine d'elle-même a encore sa dernière réplique à l'écran. Une scène abandonnée (purge,
+            // nouveau niveau) a déjà été effacée et le serveur l'a oubliée: l'annoncer pourrait fermer la scène suivante.
+            if take_finished_scene(state) {
+                commands.client_trigger(DialogueFinished);
+            }
+        }
+    }
+    if is_line && runner.next_is_choice() {
+        let options = runner.advance();
+        show(options, runner, state, commands);
+    }
+}
+
+fn on_begin(
+    begin: On<DialogueBegin>,
+    script: Res<Script>,
+    mut runner: ResMut<Runner>,
+    mut state: ResMut<DialogueState>,
+    mut commands: Commands,
+) {
     if runner.is_running() {
         return;
     }
-    if let Err(err) = runner.try_start_node(&begin.0) {
-        warn!("cannot start dialogue '{}': {err}", begin.0);
+    match runner.start(&script, &begin.0) {
+        Some(shown) => show(shown, &mut runner, &mut state, &mut commands),
+        None => warn!("cannot start dialogue '{}': unknown scene", begin.0),
     }
 }
 
-fn on_advance(_advance: On<DialogueAdvance>, mut runners: Query<&mut DialogueRunner>) {
-    if let Ok(mut runner) = runners.single_mut() {
-        if runner.is_running() && !runner.is_waiting_for_option_selection() {
-            runner.continue_in_next_update();
-        }
+fn on_advance(
+    _advance: On<DialogueAdvance>,
+    mut runner: ResMut<Runner>,
+    mut state: ResMut<DialogueState>,
+    mut commands: Commands,
+) {
+    if runner.is_running() && !runner.is_waiting_for_option() {
+        let shown = runner.advance();
+        show(shown, &mut runner, &mut state, &mut commands);
     }
 }
 
 fn on_select(
     select: On<DialogueSelect>,
+    mut runner: ResMut<Runner>,
     mut state: ResMut<DialogueState>,
-    mut runners: Query<&mut DialogueRunner>,
+    mut commands: Commands,
 ) {
-    let Ok(mut runner) = runners.single_mut() else {
+    if !runner.is_waiting_for_option() {
         return;
-    };
-    if let Some(option) = state.options.get(select.0 as usize) {
-        if let Err(err) = runner.select_option(option.id) {
-            warn!("cannot select option: {err}");
-        }
     }
     state.options.clear();
     state.voted = false;
-}
-
-fn on_present_line(
-    line: On<PresentLine>,
-    mut state: ResMut<DialogueState>,
-    mut runners: Query<&mut DialogueRunner>,
-) {
-    let id = line.line.id.to_string();
-    state.line = Some(ShownLine {
-        speaker: line.line.character_name().map(str::to_string),
-        key: fluent_key(&id),
-        fallback: line.line.text_without_character_name(),
-    });
-    state.revealed = 0.0;
-    // La dernière réplique avant des choix reste affichée avec eux, sans attendre d'avancement.
-    if line.line.is_last_line_before_options() {
-        if let Ok(mut runner) = runners.single_mut() {
-            runner.continue_in_next_update();
-        }
-    }
-}
-
-fn on_present_options(options: On<PresentOptions>, mut state: ResMut<DialogueState>) {
-    state.options = options
-        .options
-        .iter()
-        .map(|option| ShownOption {
-            id: option.id,
-            key: fluent_key(&option.line.id.to_string()),
-            fallback: option.line.text_without_character_name(),
-        })
-        .collect();
-    state.voted = false;
+    runner.select(select.0 as usize);
+    let shown = runner.advance();
+    show(shown, &mut runner, &mut state, &mut commands);
 }
 
 /// Efface la scène affichée; vrai si elle s'est terminée d'elle-même (sa dernière réplique était encore à l'écran).
@@ -363,15 +351,6 @@ fn take_finished_scene(state: &mut DialogueState) -> bool {
     let finished_by_itself = state.line.is_some();
     *state = DialogueState::default();
     finished_by_itself
-}
-
-fn on_completed(_done: On<DialogueCompleted>, mut commands: Commands, mut state: ResMut<DialogueState>) {
-    // Une scène qui se termine d'elle-même a encore sa dernière réplique à l'écran, et le serveur attend qu'on la lui dise.
-    // Une scène que nous avons abandonnée (purge, nouveau niveau) a déjà été effacée, et le serveur l'a oubliée: l'annoncer
-    // maintenant pourrait fermer la scène suivante.
-    if take_finished_scene(&mut state) {
-        commands.client_trigger(DialogueFinished);
-    }
 }
 
 /// Entrée maintenu: au bout de `SKIP_HOLD_TIME`, on demande au serveur de purger les dialogues (celui en cours et ceux qui
@@ -398,30 +377,26 @@ fn dialogue_skip_hold(
 /// couvre le cas où l'ordre d'arrivée des messages aurait changé.
 fn purge_on_new_level(
     fresh: Query<(), Added<Expedition>>,
-    mut runners: Query<&mut DialogueRunner>,
+    mut runner: ResMut<Runner>,
     mut state: ResMut<DialogueState>,
     mut hold: ResMut<SkipHold>,
 ) {
     if fresh.is_empty() {
         return;
     }
-    abandon_scene(&mut runners, &mut state);
+    abandon_scene(&mut runner, &mut state);
     *hold = SkipHold::default();
 }
 
 /// Arrête la scène en cours et efface ce qu'elle affichait.
-fn abandon_scene(runners: &mut Query<&mut DialogueRunner>, state: &mut DialogueState) {
+fn abandon_scene(runner: &mut Runner, state: &mut DialogueState) {
     *state = DialogueState::default();
-    if let Ok(mut runner) = runners.single_mut() {
-        if runner.is_running() {
-            runner.stop();
-        }
-    }
+    runner.stop();
 }
 
 /// Le serveur a purgé les dialogues: la scène en cours s'arrête net.
-fn on_abort(_: On<DialogueAbort>, mut runners: Query<&mut DialogueRunner>, mut state: ResMut<DialogueState>) {
-    abandon_scene(&mut runners, &mut state);
+fn on_abort(_: On<DialogueAbort>, mut runner: ResMut<Runner>, mut state: ResMut<DialogueState>) {
+    abandon_scene(&mut runner, &mut state);
 }
 
 /// Entrée: affiche la réplique en entier, puis demande la suivante. 1 à 4: vote pour un choix.
@@ -467,7 +442,7 @@ fn dialogue_input(
 fn line_text(localization: Option<&Localization>, line: &ShownLine, mode: crate::controls::InputMode) -> String {
     let text = localization
         .and_then(|l| l.content(line.key.as_str()))
-        .unwrap_or_else(|| line.fallback.clone());
+        .unwrap_or_else(|| line.key.clone());
     // Les noms de commandes (`%action%`...) sont ceux de l'appareil utilisé.
     match localization {
         Some(l) => crate::i18n::resolve_controls(text, l, mode),
@@ -643,7 +618,7 @@ fn update_panel(
         for (i, option) in state.options.iter().enumerate() {
             let text = loc
                 .and_then(|l| l.content(option.key.as_str()))
-                .unwrap_or_else(|| option.fallback.clone());
+                .unwrap_or_else(|| option.key.clone());
             let text = match loc {
                 Some(l) => crate::i18n::resolve_controls(text, l, *mode),
                 None => text,
@@ -679,17 +654,8 @@ fn reset_dialogue(_: On<crate::title::ReturnToTitle>, mut state: ResMut<Dialogue
 mod tests {
     use super::*;
 
-    const YARN: &str = include_str!("../assets/dialogue/castle.yarn");
     const FR: &str = include_str!("../assets/locales/fr-FR/main.ftl");
     const EN: &str = include_str!("../assets/locales/en-US/main.ftl");
-
-    /// Identifiants `#line:xxx` du script.
-    fn yarn_ids() -> Vec<String> {
-        YARN.split("#line:")
-            .skip(1)
-            .map(|rest| rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect())
-            .collect()
-    }
 
     fn ftl_ids(text: &str) -> Vec<String> {
         text.lines().filter_map(|l| l.strip_prefix("dlg-")).filter_map(|l| l.split_once(" =")).map(|(id, _)| id.to_string()).collect()
@@ -697,7 +663,7 @@ mod tests {
 
     #[test]
     fn every_line_is_translated_in_both_languages_and_nothing_is_orphaned() {
-        let ids = yarn_ids();
+        let ids = Script::builtin().ids();
         for first in ["intro_01", "royal_door_06", "puzzle_rune_01", "puzzle_gears_01", "puzzle_target_01", "alcove_01"] {
             assert!(ids.iter().any(|id| id == first), "la réplique {first} manque au script");
         }
@@ -718,25 +684,26 @@ mod tests {
 
     #[test]
     fn puzzle_dialogues_exist_and_name_each_colour() {
+        let script = Script::builtin();
         for node in ["royal_door", "puzzle_rune", "puzzle_gears", "puzzle_target"] {
-            assert!(YARN.contains(&format!("title: {node}")), "scène {node} manquante");
+            assert!(script.has_scene(node), "scène {node} manquante");
         }
         // La scène de la porte annonce les couleurs des trois classes qui agissent, et l'acier du Chevalier.
-        let door = &YARN[YARN.find("title: royal_door").unwrap()..YARN.find("title: puzzle_rune").unwrap()];
+        let door: String = FR.lines().filter(|l| l.starts_with("dlg-royal_door_")).collect();
         for word in ["violet", "orange", "vert", "acier"] {
             assert!(door.contains(word), "la scène de la porte ne parle pas de {word}");
         }
     }
 
     fn shown_line() -> ShownLine {
-        ShownLine { speaker: Some("knight".into()), key: "dlg-intro_01".into(), fallback: "Bonjour".into() }
+        ShownLine { speaker: Some("knight".into()), key: "dlg-intro_01".into() }
     }
 
     /// Un dialogue laissé à l'écran disparaît au nouveau niveau, avec ses choix en attente.
     #[test]
     fn a_new_level_clears_an_unfinished_scene() {
         let mut app = App::new();
-        app.init_resource::<SkipHold>();
+        app.init_resource::<SkipHold>().init_resource::<Runner>();
         app.insert_resource(DialogueState { line: Some(shown_line()), voted: true, revealed: 12.0, ..default() });
         app.add_systems(Update, purge_on_new_level);
         // Sans nouveau château, la scène reste.
