@@ -41,12 +41,12 @@ impl Plugin for DialoguePlugin {
             .init_resource::<SkipHold>()
             .add_systems(Startup, (spawn_panel, spawn_prologue_screen))
             .init_resource::<Prologue>()
-            .add_systems(Update, (play_voice, drive_prologue))
+            .add_systems(Update, (play_voice, drive_prologue, finish_opening, fit_prologue_photos))
             .add_systems(
                 Update,
                 (
                     (dialogue_input, dialogue_skip_hold)
-                        .run_if(crate::sim::in_game)
+                        .run_if(can_talk)
                         .run_if(crate::level_intro::player_can_act)
                         .run_if(crate::pause::not_paused),
                     update_panel,
@@ -82,7 +82,9 @@ pub struct DialogueState {
     revealed: f32,
     /// Une réplique du prologue de Samélia est à l'écran.
     in_prologue: bool,
-
+    /// La scène se joue avant que la partie n'existe (le prologue, joué avant le chargement du niveau): rien ne passe par la
+    /// simulation, les répliques avancent d'elles-mêmes.
+    pub offline: bool,
 }
 
 impl DialogueState {
@@ -130,6 +132,8 @@ pub struct Prologue {
     seen: bool,
     /// L'écran est parti (ou n'a pas lieu d'être): l'annonce du niveau peut commencer.
     pub done: bool,
+    /// Le prologue est lancé avant la partie (voir `PendingGame`): l'écran apparaît tout de suite, sans attendre Samélia.
+    pub started: bool,
     /// La photo de celui qui parle, et l'opacité de chaque photo.
     speaker: usize,
     weights: [f32; 5],
@@ -148,6 +152,30 @@ enum ProloguePhase {
 const PROLOGUE_FADE_IN: f32 = 1.5;
 const PROLOGUE_FADE_OUT: f32 = 1.2;
 const PROLOGUE_WAIT: f32 = 12.0;
+
+/// La partie à commencer une fois le prologue joué: l'écran reste noir pendant le prologue, puis le niveau se charge.
+#[derive(Resource)]
+pub struct PendingGame(pub String);
+
+/// Les dialogues peuvent avancer: en partie, ou pendant le prologue qui la précède.
+fn can_talk(game: Option<Res<crate::sim::Campaign>>, state: Res<DialogueState>) -> bool {
+    game.is_some() || state.offline
+}
+
+/// Le prologue est fini (la photo s'est fondue au noir): c'est seulement maintenant que la partie se charge. L'annonce du niveau, sur
+/// fond noir, couvre le chargement.
+fn finish_opening(mut commands: Commands, pending: Option<Res<PendingGame>>, prologue: Res<Prologue>, mut state: ResMut<DialogueState>) {
+    let Some(pending) = pending else {
+        return;
+    };
+    if !prologue.done {
+        return;
+    }
+    let name = pending.0.clone();
+    commands.remove_resource::<PendingGame>();
+    state.offline = false;
+    commands.queue(move |world: &mut World| crate::sim::begin_game(world, &name, true));
+}
 
 /// Mène l'écran du prologue. Il apparaît dès que Samélia est dans le niveau (à la toute première arrivée), avant même ses
 /// premières paroles, pour cacher le tracé du premier niveau.
@@ -183,7 +211,7 @@ fn drive_prologue(
                 }
                 return;
             }
-            if guides.is_empty() {
+            if guides.is_empty() && !prologue.started {
                 return;
             }
             prologue.phase = ProloguePhase::FadeIn;
@@ -290,9 +318,11 @@ fn show(shown: Shown, runner: &mut Runner, state: &mut DialogueState, commands: 
         Shown::Finished => {
             // Une scène qui se termine d'elle-même a encore sa dernière réplique à l'écran. Une scène abandonnée (purge,
             // nouveau niveau) a déjà été effacée et le serveur l'a oubliée: l'annoncer pourrait fermer la scène suivante.
-            if take_finished_scene(state) {
+            let offline = state.offline;
+            if take_finished_scene(state) && !offline {
                 commands.trigger(DialogueFinished);
             }
+            state.offline = offline;
         }
     }
     if is_line && runner.next_is_choice() {
@@ -358,13 +388,18 @@ fn dialogue_skip_hold(
     mut commands: Commands,
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
+    state: Res<DialogueState>,
     mut hold: ResMut<SkipHold>,
 ) {
     if keys.any_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
         hold.held += time.delta_secs();
         if hold.held >= SKIP_HOLD_TIME && !hold.sent {
             hold.sent = true;
-            commands.trigger(DialogueSkip);
+            if state.offline {
+                commands.trigger(DialogueAbort);
+            } else {
+                commands.trigger(DialogueSkip);
+            }
         }
     } else if hold.held > 0.0 || hold.sent {
         *hold = SkipHold::default();
@@ -389,7 +424,9 @@ fn purge_on_new_level(
 
 /// Arrête la scène en cours et efface ce qu'elle affichait.
 fn abandon_scene(runner: &mut Runner, state: &mut DialogueState) {
+    let offline = state.offline;
     *state = DialogueState::default();
+    state.offline = offline;
     runner.stop();
 }
 
@@ -432,6 +469,8 @@ fn dialogue_input(
             .unwrap_or(0) as f32;
         if state.revealed < length {
             state.revealed = length;
+        } else if state.offline {
+            commands.trigger(DialogueAdvance);
         } else {
             commands.trigger(DialogueRequestAdvance);
         }
@@ -462,6 +501,23 @@ fn speaker_color(speaker: &str) -> Color {
     .into()
 }
 
+/// Où le visage se trouve dans une photo, de haut en bas (0 le haut, 1 le bas): quand la photo est rognée en hauteur, on garde cette partie.
+const PHOTO_FOCUS: f32 = 0.3;
+
+/// Chaque photo remplit toute la fenêtre, en largeur comme en hauteur: elle est agrandie jusqu'à couvrir l'écran, et ce qui dépasse
+/// est rogné (le visage reste dans le cadre).
+fn fit_prologue_photos(window: Single<&Window, With<bevy::window::PrimaryWindow>>, mut photos: Query<(&ProloguePhoto, &mut Node)>) {
+    let (w, h) = (window.width(), window.height());
+    for (photo, mut node) in &mut photos {
+        let ratio = PROLOGUE_PHOTOS[photo.0].2;
+        let (pw, ph) = if w / h > ratio { (w, w / ratio) } else { (h * ratio, h) };
+        node.width = Val::Px(pw);
+        node.height = Val::Px(ph);
+        node.left = Val::Px((w - pw) / 2.0);
+        node.top = Val::Px(-(ph - h) * PHOTO_FOCUS);
+    }
+}
+
 fn spawn_prologue_screen(mut commands: Commands, assets: Res<AssetServer>) {
     commands
         .spawn((
@@ -478,21 +534,22 @@ fn spawn_prologue_screen(mut commands: Commands, assets: Res<AssetServer>) {
             Visibility::Hidden,
         ))
         .with_children(|screen| {
-            for (index, (_, file, ratio)) in PROLOGUE_PHOTOS.iter().enumerate() {
+            for (index, (_, file, _)) in PROLOGUE_PHOTOS.iter().enumerate() {
                 // Chaque photo occupe tout l'écran (centrée), les unes sur les autres.
                 screen
                     .spawn(Node {
                         position_type: PositionType::Absolute,
                         width: Val::Percent(100.0),
                         height: Val::Percent(100.0),
-                        justify_content: JustifyContent::Center,
+                        overflow: Overflow::clip(),
                         ..default()
                     })
                     .with_children(|slot| {
+                        // La taille et la place de la photo sont réglées chaque image par `fit_prologue_photos` (elle remplit l'écran).
                         slot.spawn((
                             ProloguePhoto(index),
                             ImageNode::new(assets.load(*file)).with_color(Color::srgba(1.0, 1.0, 1.0, 0.0)),
-                            Node { height: Val::Percent(100.0), aspect_ratio: Some(*ratio), ..default() },
+                            Node { position_type: PositionType::Absolute, ..default() },
                         ));
                     });
             }

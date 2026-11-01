@@ -42,6 +42,7 @@ impl Plugin for TitlePlugin {
             .add_systems(Startup, spawn_title)
             .add_observer(return_to_title)
             .add_observer(start_game)
+            .add_systems(Update, autostart)
             .add_systems(
                 Update,
                 (
@@ -771,6 +772,17 @@ fn menu_input(
     }
 }
 
+/// `CASTLE_AUTOSTART=<nom>`: lance directement la partie de ce nom, sans passer par le menu (pour les essais).
+fn autostart(mut commands: Commands, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+    *done = true;
+    if let Ok(name) = std::env::var("CASTLE_AUTOSTART") {
+        commands.trigger(StartGame(name));
+    }
+}
+
 /// Démarre la partie et ferme l'écran titre.
 fn start_game(
     request: On<StartGame>,
@@ -780,7 +792,17 @@ fn start_game(
     screens: Query<Entity, With<TitleScreen>>,
 ) {
     let name = request.0.clone();
-    commands.queue(move |world: &mut World| crate::sim::begin_game(world, &name));
+    if crate::sim::needs_prologue(&name) {
+        // D'abord le noir et le prologue de Samélia; la partie ne se charge qu'après (voir `dialogue::finish_opening`).
+        commands.insert_resource(crate::dialogue::PendingGame(name));
+        commands.queue(|world: &mut World| {
+            world.resource_mut::<crate::dialogue::DialogueState>().offline = true;
+            world.resource_mut::<crate::dialogue::Prologue>().started = true;
+            world.trigger(castle_shared::DialogueBegin("prologue".into()));
+        });
+    } else {
+        commands.queue(move |world: &mut World| crate::sim::begin_game(world, &name, false));
+    }
     menu.error = None;
     title.0 = false;
     for screen in &screens {

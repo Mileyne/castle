@@ -154,7 +154,8 @@ fn context(
 ) -> Context {
     if title.0 {
         Context::Title { saves: mode.saves }
-    } else if !in_game {
+    } else if !in_game && !dialogue.showing() {
+        // Hors partie, seul le prologue (avant le chargement du niveau) a des commandes: OK pour avancer.
         Context::Nothing
     } else if summary {
         Context::Summary

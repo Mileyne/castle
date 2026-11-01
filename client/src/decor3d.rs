@@ -88,6 +88,7 @@ impl Plugin for Decor3dPlugin {
             .init_resource::<Torches>()
             .init_resource::<Lights>()
             .init_resource::<Mood>()
+            .add_observer(forget_walls)
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
@@ -140,7 +141,16 @@ struct Decor3d {
 
 /// Les murs du niveau.
 #[derive(Component)]
-struct Decor3dWalls;
+pub(crate) struct Decor3dWalls;
+
+/// Au retour au titre, le décor de la partie quittée n'est plus là: on n'attend pas la prochaine partie pour le savoir (l'interface de la
+/// partie suivante ne se construit qu'une fois ses murs construits).
+fn forget_walls(_: On<crate::title::ReturnToTitle>, mut commands: Commands, walls: Query<Entity, With<Decor3dWalls>>) {
+    for entity in &walls {
+        commands.entity(entity).despawn();
+    }
+}
+
 
 /// Les blocs de sprite déjà transformés.
 #[derive(Component)]

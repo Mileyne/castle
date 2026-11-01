@@ -301,6 +301,7 @@ pub struct SimPlugin;
 impl Plugin for SimPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DialogueSession>()
+            .init_resource::<ProloguePlayed>()
             .init_resource::<Paused>()
             .init_resource::<NextParty>()
             .insert_resource(LevelRegion(Region::Crypts))
@@ -380,8 +381,14 @@ pub fn in_game(campaign: Option<Res<Campaign>>) -> bool {
     campaign.is_some()
 }
 
+/// Faut-il jouer le prologue de Samélia avant d'entrer dans la partie de ce nom? Oui pour une partie neuve, ou dont l'introduction du
+/// premier niveau n'a pas été vue.
+pub fn needs_prologue(save_name: &str) -> bool {
+    save::load(save_name).is_none_or(|save| save.level == 1 && !save.intro_done)
+}
+
 /// Commence (ou reprend) la partie de ce nom: charge la sauvegarde, génère le niveau et donne une équipe au joueur.
-pub fn begin_game(world: &mut World, save_name: &str) {
+pub fn begin_game(world: &mut World, save_name: &str, prologue_played: bool) {
     let campaign = open_campaign(save_name);
     info!("campaign '{}', level {}", campaign.0.name, campaign.0.level);
     world.insert_resource(Rng(campaign.0.entry_rng));
@@ -391,6 +398,7 @@ pub fn begin_game(world: &mut World, save_name: &str) {
     world.insert_resource(NextParty::default());
     world.insert_resource(LevelStats::default());
     world.insert_resource(Transition::default());
+    world.insert_resource(ProloguePlayed(prologue_played));
     let _ = world.run_system_cached(start_first_expedition);
     world.flush();
     world.trigger(Join);
@@ -1285,6 +1293,7 @@ fn check_wipe(
     mut rng: ResMut<Rng>,
     mut session: ResMut<DialogueSession>,
     campaign: Res<Campaign>,
+    played: Res<ProloguePlayed>,
     mut players: Query<
         (Entity, &mut Position, &mut Health, &mut Gold, &mut Keys, &PartyId, Has<Downed>),
         With<Player>,
@@ -1296,7 +1305,7 @@ fn check_wipe(
         return;
     }
     info!("all heroes down, back to the start of level {}", campaign.0.level);
-    let dungeon = generate_level(&mut commands, &mut rng, &campaign, &mut session, world.iter().chain(triggers.iter()));
+    let dungeon = generate_level(&mut commands, &mut rng, &campaign, &mut session, &played, world.iter().chain(triggers.iter()));
     // La n-ième équipe retrouve la bourse qu'elle portait en entrant; son premier héros la tient.
     let mut order: Vec<u32> = players.iter().map(|(.., party, _)| party.0).collect();
     order.sort_unstable();
@@ -1365,6 +1374,7 @@ fn generate_level(
     rng: &mut Rng,
     campaign: &Campaign,
     session: &mut DialogueSession,
+    prologue_played: &ProloguePlayed,
     old: impl IntoIterator<Item = Entity>,
 ) -> Dungeon {
     for entity in old {
@@ -1378,7 +1388,7 @@ fn generate_level(
     let first = level == 1 && !campaign.0.intro_done;
     // Les décors au sol tirent leurs détails de cette graine: elle ne dépend que du niveau.
     let seed = u64::from(level).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
-    spawn_level(commands, def, level, first, seed);
+    spawn_level(commands, def, level, first, !prologue_played.0, seed);
     dungeon
 }
 
@@ -1387,12 +1397,17 @@ fn start_first_expedition(
     mut rng: ResMut<Rng>,
     campaign: Res<Campaign>,
     mut session: ResMut<DialogueSession>,
+    played: Res<ProloguePlayed>,
 ) {
-    let dungeon = generate_level(&mut commands, &mut rng, &campaign, &mut session, []);
+    let dungeon = generate_level(&mut commands, &mut rng, &campaign, &mut session, &played, []);
     commands.insert_resource(Level(campaign.0.level));
     commands.insert_resource(dungeon.room);
     commands.insert_resource(dungeon.layout);
 }
+
+/// Le prologue de Samélia a déjà été joué avant l'arrivée dans le niveau: la simulation ne le rejoue pas.
+#[derive(Resource, Default)]
+pub struct ProloguePlayed(pub bool);
 
 /// Numéro du niveau en cours.
 #[derive(Resource)]
@@ -1573,7 +1588,7 @@ fn plan_level(dungeon: &Dungeon, name: &str, region: Region, level: u32, rng: &m
 }
 
 /// Pose un niveau dans le monde: ses éléments, ses portes et son objectif.
-fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool, seed: u64) {
+fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool, prologue: bool, seed: u64) {
     info!("new expedition: level {level} ({}), region {:?}", def.name, def.region);
     commands.spawn((WorldEntity, Expedition { seed, region: def.region, level }));
     commands.insert_resource(LevelRegion(def.region));
@@ -1734,11 +1749,14 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
 
     if first {
         let start = def.layout.rooms[def.layout.start].center();
-        // Le prologue de Samélia, sur un écran à part, avant l'annonce du niveau; l'introduction suit une fois le niveau affiché.
-        commands.spawn((
-            Position(center_of(start)),
-            DialogueTrigger { node: "prologue", radius: 400.0, delay: 0.2, fired: false },
-        ));
+        // Le prologue de Samélia se joue avant le chargement du niveau (voir `title::start_game`), sauf s'il n'a pas eu lieu; l'introduction
+        // suit une fois le niveau affiché.
+        if prologue {
+            commands.spawn((
+                Position(center_of(start)),
+                DialogueTrigger { node: "prologue", radius: 400.0, delay: 0.2, fired: false },
+            ));
+        }
         commands.spawn((
             Position(center_of(start)),
             DialogueTrigger { node: "intro", radius: 200.0, delay: 3.8, fired: false },
@@ -1949,7 +1967,7 @@ pub fn decorate_levels(dir: &std::path::Path, force: bool) -> std::io::Result<()
 fn populate(commands: &mut Commands, dungeon: &Dungeon, seed: u64, level: u32, first: bool, rng: &mut Rng) {
     let region = Region::CASTLE[(rng.next_u64() % Region::CASTLE.len() as u64) as usize];
     let def = plan_level(dungeon, &format!("château {seed}"), region, level, rng);
-    spawn_level(commands, &def, level, first, seed);
+    spawn_level(commands, &def, level, first, true, seed);
 }
 
 /// Or et clés de chaque équipe, dans l'ordre d'arrivée des équipes.
@@ -1972,6 +1990,7 @@ fn run_exit(
     mut session: ResMut<DialogueSession>,
     mut level: ResMut<Level>,
     mut campaign: ResMut<Campaign>,
+    played: Res<ProloguePlayed>,
     mut countdown: Local<f32>,
     mut transition: ResMut<Transition>,
     mut stats: ResMut<LevelStats>,
@@ -2043,7 +2062,7 @@ fn run_exit(
     campaign.write();
     level.0 = campaign.0.level;
 
-    let dungeon = generate_level(&mut commands, &mut rng, &campaign, &mut session, world.iter().chain(triggers.iter()));
+    let dungeon = generate_level(&mut commands, &mut rng, &campaign, &mut session, &played, world.iter().chain(triggers.iter()));
     for (slot, (entity, mut pos, mut health, ..)) in players.iter_mut().enumerate() {
         pos.0 = spawn_point(slot, &dungeon.layout, &dungeon.room);
         health.current = health.max;
@@ -2820,6 +2839,7 @@ mod tests {
     fn app_with_time() -> App {
         let mut app = App::new();
         app.insert_resource(Time::<()>::default());
+        app.init_resource::<ProloguePlayed>();
         app
     }
 
@@ -3020,7 +3040,7 @@ mod tests {
             app.insert_resource(Level(level));
             app.init_resource::<LevelStats>().init_resource::<Transition>();
             app.add_systems(Startup, |mut commands: Commands, mut rng: ResMut<Rng>, campaign: Res<Campaign>, mut session: ResMut<DialogueSession>| {
-                generate_level(&mut commands, &mut rng, &campaign, &mut session, []);
+                generate_level(&mut commands, &mut rng, &campaign, &mut session, &ProloguePlayed(false), []);
             });
             app.add_systems(Update, (run_interactions, update_mechanism_quests, open_exit).chain());
             app.update();
@@ -3110,7 +3130,7 @@ mod tests {
                  mut rng: ResMut<Rng>,
                  campaign: Res<Campaign>,
                  mut session: ResMut<DialogueSession>| {
-                    generate_level(&mut commands, &mut rng, &campaign, &mut session, []);
+                    generate_level(&mut commands, &mut rng, &campaign, &mut session, &ProloguePlayed(false), []);
                 },
             );
             app.add_systems(Update, (reap_dead, open_exit).chain());
@@ -3202,7 +3222,7 @@ mod tests {
                  campaign: Res<Campaign>,
                  mut session: ResMut<DialogueSession>| {
                     let dungeon =
-                        generate_level(&mut commands, &mut rng, &campaign, &mut session, []);
+                        generate_level(&mut commands, &mut rng, &campaign, &mut session, &ProloguePlayed(false), []);
                     commands.insert_resource(dungeon.room);
                     commands.insert_resource(dungeon.layout);
                 },
@@ -3425,7 +3445,7 @@ mod tests {
         app.add_systems(
             Update,
             move |mut commands: Commands, mut rng: ResMut<Rng>, campaign: Res<Campaign>, mut session: ResMut<DialogueSession>| {
-                generate_level(&mut commands, &mut rng, &campaign, &mut session, [old_trigger]);
+                generate_level(&mut commands, &mut rng, &campaign, &mut session, &ProloguePlayed(false), [old_trigger]);
             },
         );
         app.update();
@@ -3449,7 +3469,7 @@ mod tests {
             app.insert_resource(Level(level));
             app.init_resource::<LevelStats>().init_resource::<Transition>();
             app.add_systems(Startup, |mut commands: Commands, mut rng: ResMut<Rng>, campaign: Res<Campaign>, mut session: ResMut<DialogueSession>| {
-                generate_level(&mut commands, &mut rng, &campaign, &mut session, []);
+                generate_level(&mut commands, &mut rng, &campaign, &mut session, &ProloguePlayed(false), []);
             });
             app.add_systems(Update, (open_exit, run_exit).chain());
             app.update();

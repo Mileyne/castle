@@ -160,6 +160,7 @@ const LEVEL_KEYS: [&str; 20] = [
 ];
 
 fn run_intro(
+    ready: Query<(), With<crate::decor3d::Decor3dWalls>>,
     mut commands: Commands,
     time: Res<Time>,
     mut intro: ResMut<LevelIntro>,
@@ -169,6 +170,10 @@ fn run_intro(
     let Some(elapsed) = intro.elapsed.as_mut() else {
         return;
     };
+    // L'écran reste noir tant que le niveau ne s'est pas chargé (le décor se construit sous lui).
+    if ready.is_empty() {
+        return;
+    }
     *elapsed += time.delta_secs();
     let alpha = (1.0 - (*elapsed - HOLD) / FADE).clamp(0.0, 1.0);
     for (entity, mut background) in &mut screens {

@@ -10,10 +10,11 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_ui)
+        app.add_observer(despawn_hud)
             .add_systems(
                 Update,
                 (
+                    spawn_ui.run_if(hud_wanted),
                     update_party_panel,
                     update_portraits,
                     update_loot_counters,
@@ -63,8 +64,24 @@ pub fn ui_font(assets: &AssetServer, size: f32) -> TextFont {
     }
 }
 
+/// Tout ce qui fait l'interface de la partie (équipe, or et clés, aide): construit une fois la partie chargée, retiré au retour au titre.
+#[derive(Component)]
+struct Hud;
+
+/// L'interface se construit quand le prologue est terminé et que le niveau est chargé (son décor existe): pas avant.
+fn hud_wanted(game: Option<Res<crate::sim::Campaign>>, walls: Query<(), With<crate::decor3d::Decor3dWalls>>, hud: Query<(), With<Hud>>) -> bool {
+    game.is_some() && !walls.is_empty() && hud.is_empty()
+}
+
+fn despawn_hud(_: On<crate::title::ReturnToTitle>, mut commands: Commands, hud: Query<Entity, With<Hud>>) {
+    for entity in &hud {
+        commands.entity(entity).despawn();
+    }
+}
+
 fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
     commands.spawn((
+        Hud,
         Text::default(),
         Tr::new("region-crypts"),
         RegionLabel,
@@ -81,7 +98,7 @@ fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
 
     // Or et clés du joueur, en haut à droite: le libellé est traduit, le nombre ne l'est pas.
     commands
-        .spawn(Node {
+        .spawn((Hud, Node {
             position_type: PositionType::Absolute,
             top: Val::Px(8.0),
             right: Val::Px(8.0),
@@ -89,7 +106,7 @@ fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
             align_items: AlignItems::FlexEnd,
             row_gap: Val::Px(6.0),
             ..default()
-        })
+        }))
         .with_children(|parent| {
             parent.spawn((Text::new(""), FpsText, ui_font(&assets, 10.0), TextColor(css::LIGHT_GRAY.into())));
             for (key, is_gold) in [("hud-gold", true), ("hud-keys", false)] {
@@ -111,7 +128,7 @@ fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
         });
 
     commands
-        .spawn(Node {
+        .spawn((Hud, Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(8.0),
             width: Val::Percent(100.0),
@@ -119,7 +136,7 @@ fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
             align_items: AlignItems::Center,
             row_gap: Val::Px(6.0),
             ..default()
-        })
+        }))
         .with_children(|parent| {
             parent.spawn((
                 Text::default(),
@@ -137,14 +154,14 @@ fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
         });
 
     commands
-        .spawn(Node {
+        .spawn((Hud, Node {
             position_type: PositionType::Absolute,
             left: Val::Px(8.0),
             top: Val::Px(64.0),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(14.0),
             ..default()
-        })
+        }))
         .with_children(|row| {
             for (i, (class, key)) in [
                 (HeroClass::Knight, "class-knight"),
