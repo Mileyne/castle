@@ -25,7 +25,6 @@ mod dialogue;
 mod dialogue_script;
 #[cfg(target_os = "ios")]
 mod gamecontroller;
-mod gore;
 mod host;
 #[cfg(target_os = "ios")]
 mod prefs;
@@ -35,6 +34,8 @@ mod decor3d;
 mod live3d;
 mod merged;
 mod prebake;
+// La fusion douce n'est pas encore dans le jeu: la visionneuse (`tools/model_viewer`) la montre.
+#[allow(dead_code)]
 mod smooth;
 mod pause;
 mod puzzle;
@@ -204,7 +205,6 @@ pub fn run() {
             art::ArtPlugin,
             camera::CameraPlugin,
             lighting::LightingPlugin,
-            gore::GorePlugin,
             dialogue::DialoguePlugin,
         ))
         .add_plugins((

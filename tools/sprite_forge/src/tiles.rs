@@ -36,10 +36,7 @@ pub(crate) struct Style {
     pub(crate) glow: u32,
 }
 
-fn style(region: usize, gore: bool) -> Style {
-    if gore {
-        return style_gore(region);
-    }
+fn style(region: usize) -> Style {
     // Ambiance de donjon: les pierres du mode manga sont assombries d'un cran (pas les décors extérieurs).
     let base = style_manga(region);
     if region >= 6 {
@@ -209,22 +206,21 @@ fn split(rng: &mut Rng, total: f32, lo: f32, hi: f32) -> Vec<f32> {
 /// Sol, vu d'en haut, sur un carré de 4x4 tuiles (4,8 m): de grandes dalles de pierre irrégulières, posées
 /// par assises de hauteurs différentes, avec des joints décalés. Les joints tombent sur les bords du carré, donc
 /// plusieurs motifs se raccordent sans coupure.
-pub fn floor_macro(region: usize, variant: usize, seed: u64, theme: Theme) -> Vec<Part> {
-    stone_macro(region, variant, seed, theme, false)
+pub fn floor_macro(region: usize, variant: usize, seed: u64, _theme: Theme) -> Vec<Part> {
+    stone_macro(region, variant, seed, _theme, false)
 }
 
 /// Dessus des murs épais, vu d'en haut: de très grosses pierres sombres, presque noires, sans détail, comme la masse
 /// brute d'un rempart. Même découpage que le sol (4x4 tuiles).
-pub fn roof_macro(region: usize, variant: usize, seed: u64, theme: Theme) -> Vec<Part> {
-    stone_macro(region, variant, seed, theme, true)
+pub fn roof_macro(region: usize, variant: usize, seed: u64, _theme: Theme) -> Vec<Part> {
+    stone_macro(region, variant, seed, _theme, true)
 }
 
-fn stone_macro(region: usize, variant: usize, seed: u64, theme: Theme, roof: bool) -> Vec<Part> {
-    let gore = theme == Theme::Gore;
-    let st = style(region, gore);
+fn stone_macro(region: usize, variant: usize, seed: u64, _theme: Theme, roof: bool) -> Vec<Part> {
+    let st = style(region);
     // Forêt et marais: herbe, vase, canopée et eau; les abords gardent le dallage (terre battue, rochers).
     if region == 6 || region == 7 {
-        return if roof { crate::outdoor::top(region, variant, seed, &st) } else { crate::outdoor::ground(region, variant, seed, &st, gore) };
+        return if roof { crate::outdoor::top(region, variant, seed, &st) } else { crate::outdoor::ground(region, variant, seed, &st) };
     }
     let palette = if roof { st.wall } else { st.slab };
     let mut rng = Rng(seed);
@@ -295,20 +291,13 @@ fn stone_macro(region: usize, variant: usize, seed: u64, theme: Theme, roof: boo
         }
         _ => {}
     }
-    if gore && rng.next() < 0.5 {
-        // Quelques os dans un coin, jamais de flaque: les grandes flaques sont posées par le jeu.
-        let (x, zz) = (rng.spread(half * 0.8), rng.spread(half * 0.8));
-        p.push(shiny(limb(Vec3::new(x, 0.1, zz), Vec3::new(x + 0.35, 0.1, zz + rng.spread(0.15)), 0.03, 0xdcd4bc), 0.4));
-        p.push(ball(Vec3::new(x + 0.38, 0.1, zz), 0.045, 0xdcd4bc));
-    }
     p
 }
 
 /// Face d'un mur, vue de face, sur 4 tuiles de large: de gros blocs de pierre irréguliers par assises de 0,4 m,
 /// avec un liseré clair en haut et de l'ombre en bas. En mode sanglant, des coulures de sang.
-pub fn wall_face_macro(region: usize, variant: usize, seed: u64, theme: Theme) -> Vec<Part> {
-    let gore = theme == Theme::Gore;
-    let st = style(region, gore);
+pub fn wall_face_macro(region: usize, variant: usize, seed: u64, _theme: Theme) -> Vec<Part> {
+    let st = style(region);
     if region == 6 || region == 7 {
         return crate::outdoor::face(region, variant, seed, &st);
     }
@@ -330,24 +319,13 @@ pub fn wall_face_macro(region: usize, variant: usize, seed: u64, theme: Theme) -
     p.push(shiny(block(Vec3::new(0.0, 0.54, 0.07), Vec3::new(half + 0.02, 0.07, 0.11), Mat3::IDENTITY, st.wall[1]), 0.8));
     p.push(shiny(block(Vec3::new(0.0, 0.485, 0.1), Vec3::new(half + 0.02, 0.012, 0.11), Mat3::IDENTITY, st.slab[0]), 0.9));
     p.push(block(Vec3::new(0.0, -0.57, 0.1), Vec3::new(half + 0.02, 0.05, 0.1), Mat3::IDENTITY, st.mortar));
-    if gore {
-        for _ in 0..4 {
-            if rng.next() < 0.6 {
-                let x = rng.spread(half * 0.95);
-                let len = 0.25 + rng.next() * 0.55;
-                p.push(shiny(cone(Vec3::new(x, 0.5, 0.1), Vec3::new(x, 0.5 - len, 0.1), 0.035, 0.012, 0x8a1018), 0.8));
-                p.push(shiny(ball(Vec3::new(x, 0.5 - len, 0.1), 0.026, 0x8a1018), 0.9));
-            }
-        }
-    }
     p
 }
 
 /// Face de mur décorée (une seule tuile): niche à crâne, lierre, étagères de livres, plaques de forge, runes, pilastre,
 /// ou en mode sanglant crâne, chaînes et crochet de boucher.
-pub fn wall_face_decor(region: usize, variant: usize, seed: u64, theme: Theme) -> Vec<Part> {
-    let gore = theme == Theme::Gore;
-    let st = style(region, gore);
+pub fn wall_face_decor(region: usize, variant: usize, seed: u64, _theme: Theme) -> Vec<Part> {
+    let st = style(region);
     if region == 6 || region == 7 {
         return crate::outdoor::decor(region, seed, &st);
     }
@@ -355,7 +333,7 @@ pub fn wall_face_decor(region: usize, variant: usize, seed: u64, theme: Theme) -
     let mut p = vec![block(Vec3::new(0.0, 0.0, -0.1), Vec3::new(H + 0.02, H + 0.02, 0.05), Mat3::IDENTITY, st.mortar)];
     let decorated = variant == 1;
     // Étagères de bibliothèque ou plaques de forge remplacent les briques sur la variante décorée.
-    if decorated && !gore && region == 2 {
+    if decorated && region == 2 {
         p.push(block(Vec3::new(0.0, 0.0, 0.0), Vec3::new(H, H, 0.05), Mat3::IDENTITY, 0x3a2412));
         for (k, y) in [-0.4f32, -0.02, 0.36].into_iter().enumerate() {
             p.push(shiny(block(Vec3::new(0.0, y - 0.12, 0.06), Vec3::new(H, 0.025, 0.08), Mat3::IDENTITY, 0x8a5a34), 0.3));
@@ -370,7 +348,7 @@ pub fn wall_face_decor(region: usize, variant: usize, seed: u64, theme: Theme) -
             }
             let _ = k;
         }
-    } else if decorated && !gore && region == 3 {
+    } else if decorated && region == 3 {
         for (x, y) in [(-0.3f32, -0.3f32), (0.3, -0.3), (-0.3, 0.3), (0.3, 0.3)] {
             p.push(shiny(block(Vec3::new(x, y, 0.0), Vec3::new(0.27, 0.27, 0.06), Mat3::IDENTITY, st.wall[((x + y) * 5.0) as i32 as usize % 3]), 0.7));
             for (dx, dy) in [(-0.2f32, -0.2f32), (0.2, -0.2), (-0.2, 0.2), (0.2, 0.2)] {
@@ -399,7 +377,7 @@ pub fn wall_face_decor(region: usize, variant: usize, seed: u64, theme: Theme) -
     p.push(shiny(block(Vec3::new(0.0, 0.54, 0.07), Vec3::new(H + 0.02, 0.07, 0.11), Mat3::IDENTITY, st.wall[1]), 0.8));
     p.push(shiny(block(Vec3::new(0.0, 0.485, 0.1), Vec3::new(H + 0.02, 0.012, 0.11), Mat3::IDENTITY, st.slab[0]), 0.9));
     p.push(block(Vec3::new(0.0, -0.57, 0.1), Vec3::new(H + 0.02, 0.05, 0.1), Mat3::IDENTITY, st.mortar));
-    if decorated && !gore {
+    if decorated {
         match region {
             0 => {
                 p.push(block(Vec3::new(0.0, -0.05, 0.08), Vec3::new(0.22, 0.24, 0.02), Mat3::IDENTITY, 0x0c0e14));
@@ -430,45 +408,6 @@ pub fn wall_face_decor(region: usize, variant: usize, seed: u64, theme: Theme) -
             _ => {}
         }
     }
-    if gore {
-        // Coulures de sang le long de la face; sur la variante décorée, un crâne planté, des chaînes et un crochet de boucher.
-        for _ in 0..3 {
-            if rng.next() < 0.6 {
-                let x = rng.spread(0.5);
-                let len = 0.2 + rng.next() * 0.5;
-                p.push(shiny(cone(Vec3::new(x, 0.5, 0.1), Vec3::new(x, 0.5 - len, 0.1), 0.035, 0.012, 0x8a1018), 0.8));
-                p.push(shiny(ball(Vec3::new(x, 0.5 - len, 0.1), 0.026, 0x8a1018), 0.9));
-            }
-        }
-        if decorated {
-            p.push(block(Vec3::new(-0.25, 0.0, 0.08), Vec3::new(0.2, 0.22, 0.02), Mat3::IDENTITY, 0x08060a));
-            p.push(shiny(ball(Vec3::new(-0.25, 0.0, 0.14), 0.13, 0xdcd4bc), 0.5));
-            for sg in [-1.0f32, 1.0] {
-                p.push(ball(Vec3::new(-0.25 + sg * 0.05, 0.02, 0.25), 0.032, 0x08060a));
-            }
-            for k in 0..5 {
-                let y = 0.5 - k as f32 * 0.17;
-                p.push(shiny(ball(Vec3::new(0.3, y, 0.1), 0.045, 0x6a6e78), 0.7));
-            }
-            p.push(shiny(limb(Vec3::new(0.3, 0.5, 0.1), Vec3::new(0.3, -0.35, 0.1), 0.02, 0x6a6e78), 0.7));
-            p.push(shiny(limb(Vec3::new(0.3, -0.35, 0.1), Vec3::new(0.18, -0.45, 0.1), 0.03, 0x8a8e98), 0.8));
-            p.push(shiny(ellipsoid(Vec3::new(0.18, -0.52, 0.11), Vec3::new(0.06, 0.1, 0.03), 0xa83a4c), 0.8));
-        }
-    }
     p
 }
 
-/// Palettes sombres et sales du thème sanglant: pierre grise ou brune, joints noirs, un peu de rouge.
-fn style_gore(region: usize) -> Style {
-    match region {
-        0 => Style { slab: [0x4a4c52, 0x54565e, 0x40424a], mortar: 0x0c0a0c, wall: [0x24222a, 0x2c2a34, 0x1c1a22], accent: 0xd8d0b8, glow: 0x6a8a5a },
-        1 => Style { slab: [0x3e4a38, 0x485442, 0x343e30], mortar: 0x0a0e0a, wall: [0x1e281e, 0x263226, 0x161e16], accent: 0x6a8a3a, glow: 0xa8c040 },
-        2 => Style { slab: [0x5a3e2a, 0x4e3422, 0x664832], mortar: 0x120a06, wall: [0x2e1c12, 0x241610, 0x3a2418], accent: 0x8a1c1c, glow: 0xd8a040 },
-        3 => Style { slab: [0x34303a, 0x3c3844, 0x2a2630], mortar: 0x0a080a, wall: [0x2a1c1c, 0x201414, 0x362424], accent: 0xff4010, glow: 0xff6a20 },
-        4 => Style { slab: [0x3a3c58, 0x444664, 0x303250], mortar: 0x0a0a1a, wall: [0x16182e, 0x1e203c, 0x101224], accent: 0x8aa0d8, glow: 0x6a90ff },
-        5 => Style { slab: [0x6a5a52, 0x5a4a44, 0x7a6860], mortar: 0x180c0c, wall: [0x3a1018, 0x2e0c14, 0x481420], accent: 0xb89030, glow: 0xff3040 },
-        6 => Style { slab: [0x3c4a2a, 0x344024, 0x465632], mortar: 0x10160a, wall: [0x1a2a18, 0x142214, 0x223416], accent: 0x8a1c1c, glow: 0xa8c040 },
-        7 => Style { slab: [0x3a4a2e, 0x303e28, 0x445636], mortar: 0x0c120c, wall: [0x14262a, 0x1a3234, 0x0e1c1e], accent: 0x6a8a3a, glow: 0x70e0a0 },
-        _ => Style { slab: [0x6a5e48, 0x5c5240, 0x76684e], mortar: 0x140e08, wall: [0x3e3a34, 0x32302a, 0x4a463e], accent: 0x8a1c1c, glow: 0xd8a040 },
-    }
-}

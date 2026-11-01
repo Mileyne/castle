@@ -10,18 +10,15 @@ mod decor;
 mod editor_api;
 mod effects;
 mod heroes;
-mod heroes_gore;
 mod heroes_medieval;
 mod landmarks;
 mod monsters;
 mod photo;
 mod monsters_boss;
-mod monsters_gore;
 mod monsters_more;
 mod outdoor;
 pub mod overrides;
 mod props;
-mod props_gore;
 mod render;
 mod shapes;
 mod tiles;
@@ -592,7 +589,7 @@ pub fn cli() {
         return;
     }
     let root = PathBuf::from(args.first().expect("usage: sprite_forge <dossier de sortie> [dossier d'aperçu]"));
-    // Un sous-dossier par thème: manga/ et gore/.
+    // Un sous-dossier par thème (il n'y a plus que medieval/).
     // Le jeu n'utilise que le style médiéval; `--all` régénère aussi les anciens styles.
     let themes: &[Theme] = if args.iter().any(|a| a == "--all") { &Theme::ALL } else { &[Theme::Medieval] };
     for &theme in themes {

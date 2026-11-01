@@ -862,11 +862,8 @@ fn drawbridge(lowered: bool, t: f32) -> Vec<Part> {
     p
 }
 
-pub fn build(prop: Prop, t: f32, theme: Theme) -> Vec<Part> {
-    let mut parts = match theme {
-        Theme::Manga | Theme::Medieval => build_manga(prop, t),
-        Theme::Gore => crate::props_gore::build(prop, t),
-    };
+pub fn build(prop: Prop, t: f32, _theme: Theme) -> Vec<Part> {
+    let mut parts = build_manga(prop, t);
     crate::tuning::apply(&crate::tuning::prop_key(prop), &mut parts);
     parts
 }

@@ -94,7 +94,6 @@ mod tests {
         save_tile(Theme::Medieval, 2, 17, &rgba).unwrap();
         assert_eq!(load_tile(Theme::Medieval, 2, 17).as_deref(), Some(rgba.as_slice()));
         assert!(load_all(Theme::Medieval).contains_key(&(2, 17)));
-        assert!(load_tile(Theme::Manga, 2, 17).is_none());
         delete_tile(Theme::Medieval, 2, 17);
         assert!(load_tile(Theme::Medieval, 2, 17).is_none());
         let _ = std::fs::remove_dir_all(dir);

@@ -54,30 +54,19 @@ pub(crate) fn shiny(mut p: Part, amount: f32) -> Part {
     p
 }
 
-/// Mèche de cheveux: cône effilé et brillant.
-pub(crate) fn lock(a: Vec3, b: Vec3, r: f32, color: u32) -> Part {
-    shiny(cone(a, b, r, r * 0.12, color), 0.85)
-}
-
-/// Direction artistique: le jeu propose deux jeux de sprites, d'animations et de décors.
+/// Direction artistique: le jeu n'en a qu'une, médiévale (héros réalistes inspirés des portraits fournis). Le type reste pour que
+/// les fonctions de rendu disent de quelle direction elles parlent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Theme {
-    /// Aventure colorée d'inspiration manga.
-    Manga,
-    /// Ambiance sombre et sanglante, personnages loufoques à la Gorillaz.
-    Gore,
-    /// Héros d'allure médiévale réaliste, inspirés des portraits fournis; le reste reprend la version manga.
     Medieval,
 }
 
 impl Theme {
-    pub const ALL: [Theme; 3] = [Theme::Manga, Theme::Gore, Theme::Medieval];
+    pub const ALL: [Theme; 1] = [Theme::Medieval];
 
     /// Nom du dossier de sortie.
     pub fn folder(self) -> &'static str {
         match self {
-            Theme::Manga => "manga",
-            Theme::Gore => "gore",
             Theme::Medieval => "medieval",
         }
     }
@@ -85,19 +74,10 @@ impl Theme {
 
 // Couleurs communes.
 pub(crate) const SKIN: u32 = 0xfad2b4;
-pub(crate) const SKIN_D: u32 = 0xd89c80;
-pub(crate) const STEEL: u32 = 0xc9d1e2;
-pub(crate) const STEEL_D: u32 = 0x7f8aa6;
-pub(crate) const LEATHER: u32 = 0x8a5630;
 pub(crate) const LEATHER_D: u32 = 0x4e2e18;
 pub(crate) const GOLD: u32 = 0xf6c93a;
 pub(crate) const WHITE: u32 = 0xf6f4ff;
 pub(crate) const DARK: u32 = 0x1a1424;
-pub(crate) const CYAN: u32 = 0x60e8f8;
-pub(crate) const BLUE: u32 = 0x3358c4;
-pub(crate) const BLUE_D: u32 = 0x1f3380;
-pub(crate) const RED: u32 = 0xcf3040;
-pub(crate) const RED_D: u32 = 0x8a1c2c;
 
 /// Petit générateur pseudo-aléatoire déterministe, pour varier les tuiles et les décors.
 pub(crate) struct Rng(pub u64);

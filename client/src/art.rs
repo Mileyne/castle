@@ -29,45 +29,8 @@ use castle_shared::tileart::{TILE_CELL, TILE_COLUMNS, TILE_ROWS, tile_column};
 /// Distance parcourue pendant un cycle de marche complet (8 images), en unités du monde.
 const HERO_STRIDE: f32 = 44.0;
 
-/// Jeu de sprites, d'animations et de décors en cours: aventure colorée (manga) ou ambiance sanglante.
-#[derive(Resource, Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ArtTheme {
-    Manga,
-    Gore,
-    Medieval,
-}
-
-impl ArtTheme {
-    fn folder(self) -> &'static str {
-        match self {
-            Self::Manga => "manga",
-            Self::Gore => "gore",
-            Self::Medieval => "medieval",
-        }
-    }
-
-    /// Le thème suivant dans le cycle de la touche F2: manga, sanglant, médiéval, puis retour au manga.
-    pub fn next(self) -> Self {
-        match self {
-            Self::Manga => Self::Gore,
-            Self::Gore => Self::Medieval,
-            Self::Medieval => Self::Manga,
-        }
-    }
-
-    /// Le jeu n'utilise que le mode médiéval; les autres jeux de sprites restent désactivés.
-    fn initial() -> Self {
-        Self::Medieval
-    }
-}
-
-/// Les planches de tous les thèmes, déjà chargées: F2 passe de l'un à l'autre sans attendre.
-#[derive(Resource)]
-pub struct ArtLibrary(Vec<(ArtTheme, Art)>);
-
-/// Marque une trace de sang posée au sol (effacée en quittant le mode sanglant).
-#[derive(Component)]
-pub struct Stain;
+/// Le jeu de sprites et de décors: un seul, médiéval (dossier `art/medieval`).
+const ART_FOLDER: &str = "medieval";
 
 /// Les systèmes qui animent les héros et les monstres (pose et image): l'essai de rendu 3D s'exécute après.
 #[derive(SystemSet, Hash, Eq, PartialEq, Clone, Debug)]
@@ -77,12 +40,10 @@ pub struct ArtPlugin;
 
 impl Plugin for ArtPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ThemeTransition>()
-            .add_systems(Startup, (load_art, spawn_transition_overlay))
-            .add_systems(
-                Update,
-                (log_big_images, start_transition, run_transition, rebuild_world, tint_tiles, (animate_heroes, animate_monsters).in_set(AnimateCharacters), animate_props).chain(),
-            );
+        app.add_systems(Startup, load_art).add_systems(
+            Update,
+            (log_big_images, rebuild_world, tint_tiles, (animate_heroes, animate_monsters).in_set(AnimateCharacters), animate_props).chain(),
+        );
     }
 }
 
@@ -111,7 +72,6 @@ impl Atlas {
 pub struct Art {
     pub tiles: Atlas,
     pub projectiles: Atlas,
-    pub fx: Atlas,
     pub decals: Atlas,
     /// Vignettes des quatre héros (une case de 128 px par classe).
     pub portraits: Atlas,
@@ -357,8 +317,8 @@ pub enum PoseKind {
     Attack,
 }
 
-fn load_set(assets: &AssetServer, layouts: &mut Assets<TextureAtlasLayout>, theme: ArtTheme) -> Art {
-    let folder = theme.folder();
+fn load_set(assets: &AssetServer, layouts: &mut Assets<TextureAtlasLayout>) -> Art {
+    let folder = ART_FOLDER;
     // Les appareils à peu de mémoire (Apple TV HD...) ont des planches moins grandes, dans `lite/`.
     let lite = crate::settings::low_memory();
     let (cell, metas, sprite_folder) = if lite {
@@ -399,7 +359,6 @@ fn load_set(assets: &AssetServer, layouts: &mut Assets<TextureAtlasLayout>, them
     Art {
         tiles: atlas("tiles.png", TILE_COLUMNS as u32, TILE_ROWS, TILE_CELL, false),
         projectiles: atlas("projectiles.png", 4, 1, 64, true),
-        fx: atlas("fx.png", 2, 1, 96, true),
         decals: atlas("decals.png", 13, 1, 128, true),
         portraits: atlas("portraits.png", 5, 1, 128, true),
         decor: assets.load(format!("art/{folder}/decor.png")),
@@ -422,158 +381,7 @@ fn log_big_images(mut events: MessageReader<AssetEvent<Image>>, images: Res<Asse
 }
 
 pub(crate) fn load_art(mut commands: Commands, assets: Res<AssetServer>, mut layouts: ResMut<Assets<TextureAtlasLayout>>) {
-    let theme = ArtTheme::initial();
-    let library: Vec<_> = [ArtTheme::Medieval]
-        .into_iter()
-        .map(|t| (t, load_set(&assets, &mut layouts, t)))
-        .collect();
-    let current = library.iter().find(|(t, _)| *t == theme).map(|(_, art)| art.clone()).expect("thème chargé");
-    commands.insert_resource(current);
-    commands.insert_resource(ArtLibrary(library));
-    commands.insert_resource(theme);
-}
-
-/// Animation de passage d'un mode à l'autre: l'écran se couvre (de sang qui coule vers le mode sanglant, d'un
-/// éclat clair vers le mode manga), les sprites sont échangés au plus fort, puis l'écran se découvre.
-#[derive(Resource, Default)]
-struct ThemeTransition {
-    elapsed: Option<f32>,
-    swapped: bool,
-}
-
-/// Durées en secondes: l'écran se couvre, puis la transition complète.
-const TRANSITION_COVER: f32 = 0.5;
-const TRANSITION_TOTAL: f32 = 1.2;
-/// Bandes verticales qui dessinent les coulures.
-const DRIP_BARS: usize = 16;
-
-#[derive(Component)]
-struct TransitionOverlay;
-
-#[derive(Component)]
-struct TransitionDrip(usize);
-
-fn spawn_transition_overlay(mut commands: Commands) {
-    commands
-        .spawn((
-            TransitionOverlay,
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            GlobalZIndex(1000),
-            Visibility::Hidden,
-        ))
-        .with_children(|root| {
-            for i in 0..DRIP_BARS {
-                root.spawn((
-                    TransitionDrip(i),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Percent(i as f32 * 100.0 / DRIP_BARS as f32),
-                        width: Val::Percent(100.0 / DRIP_BARS as f32 + 0.6),
-                        top: Val::Px(0.0),
-                        height: Val::Percent(0.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::NONE),
-                ));
-            }
-        });
-}
-
-/// F2: lance la transition entre le mode manga et le mode sanglant.
-fn start_transition(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<ThemeTransition>) {
-    // F2 est désactivé: un seul style (médiéval).
-    if false && keys.just_pressed(KeyCode::F2) && state.elapsed.is_none() {
-        state.elapsed = Some(0.0);
-        state.swapped = false;
-    }
-}
-
-/// Fait avancer la transition; à mi-parcours, échange les deux jeux de planches. Les deux jeux ont le même
-/// découpage: on remplace seulement l'image de chaque sprite existant.
-fn run_transition(
-    time: Res<Time>,
-    mut commands: Commands,
-    mut state: ResMut<ThemeTransition>,
-    mut art: ResMut<Art>,
-    library: Res<ArtLibrary>,
-    mut theme: ResMut<ArtTheme>,
-    mut sprites: Query<&mut Sprite>,
-    stains: Query<Entity, With<Stain>>,
-    mut overlay: Query<(&mut BackgroundColor, &mut Visibility), (With<TransitionOverlay>, Without<TransitionDrip>)>,
-    mut drips: Query<(&TransitionDrip, &mut Node, &mut BackgroundColor), Without<TransitionOverlay>>,
-) {
-    let Ok((mut background, mut visibility)) = overlay.single_mut() else {
-        return;
-    };
-    let Some(elapsed) = state.elapsed else {
-        if *visibility != Visibility::Hidden {
-            *visibility = Visibility::Hidden;
-        }
-        return;
-    };
-    let elapsed = elapsed + time.delta_secs();
-
-    if elapsed >= TRANSITION_COVER && !state.swapped {
-        state.swapped = true;
-        let target = theme.next();
-        let new = library.0.iter().find(|(t, _)| *t == target).map(|(_, art)| art.clone()).expect("thème chargé");
-        let old = std::mem::replace(&mut *art, new);
-        let new = &*art;
-        let pairs: Vec<(&Atlas, &Atlas)> = vec![
-            (&old.tiles, &new.tiles),
-            (&old.projectiles, &new.projectiles),
-            (&old.fx, &new.fx),
-            (&old.decals, &new.decals),
-        ];
-        for mut sprite in &mut sprites {
-            if let Some((_, to)) = pairs.iter().find(|(from, _)| from.image == sprite.image) {
-                sprite.image = to.image.clone();
-            }
-        }
-        *theme = target;
-        info!("theme: {:?}", *theme);
-        if *theme != ArtTheme::Gore {
-            for stain in &stains {
-                commands.entity(stain).despawn();
-            }
-        }
-        // Un à-coup au moment du changement.
-        commands.trigger(castle_shared::ScreenShake(0.45));
-    }
-    if elapsed >= TRANSITION_TOTAL {
-        state.elapsed = None;
-        return;
-    }
-    state.elapsed = Some(elapsed);
-
-    // Couleurs selon le mode vers lequel on va: du sang qui coule, un éclat clair, ou une lueur d'ambre pour le médiéval.
-    let target_theme = if state.swapped { *theme } else { theme.next() };
-    let (bar, fill) = match target_theme {
-        ArtTheme::Gore => (Color::srgb(0.5, 0.02, 0.04), Color::srgb(0.2, 0.0, 0.02)),
-        ArtTheme::Manga => (Color::srgb(0.92, 0.96, 1.0), Color::srgb(0.85, 0.9, 1.0)),
-        ArtTheme::Medieval => (Color::srgb(0.85, 0.62, 0.28), Color::srgb(0.35, 0.22, 0.08)),
-    };
-    let cover = (elapsed / TRANSITION_COVER).min(1.0);
-    let alpha = if elapsed < TRANSITION_COVER {
-        1.0
-    } else {
-        1.0 - (elapsed - TRANSITION_COVER) / (TRANSITION_TOTAL - TRANSITION_COVER)
-    };
-    *visibility = Visibility::Inherited;
-    background.0 = fill.with_alpha(0.75 * cover * cover * alpha);
-    for (drip, mut node, mut color) in &mut drips {
-        // Chaque bande descend à son rythme (retard selon son rang), comme du sang qui coule.
-        let delay = ((drip.0 * 7) % DRIP_BARS) as f32 / DRIP_BARS as f32 * 0.55;
-        let reach = ((cover * 1.55 - delay) / 1.0).clamp(0.0, 1.0);
-        node.height = Val::Percent(110.0 * reach * reach.sqrt());
-        color.0 = bar.with_alpha(alpha);
-    }
+    commands.insert_resource(load_set(&assets, &mut layouts));
 }
 
 /// Débordement maximal, en pixels, de la lisière irrégulière entre une clairière et sa forêt.
@@ -905,15 +713,14 @@ fn bake_chunk(def: &LevelDef, room: &Room, sources: &BakeSources, chunk_x: u32, 
 pub(crate) fn rebuild_world(
     mut commands: Commands,
     art: Res<Art>,
-    theme: Res<ArtTheme>,
     expeditions: Query<&Expedition>,
     fresh: Query<(), Changed<Expedition>>,
     old_tiles: Query<Entity, With<WorldTile>>,
     mut images: ResMut<Assets<Image>>,
     mut waiting: Local<bool>,
 ) {
-    // Le décor se reconstruit quand un nouveau château arrive, ou quand on change de mode.
-    if fresh.is_empty() && !theme.is_changed() && !*waiting {
+    // Le décor se reconstruit quand un nouveau château arrive.
+    if fresh.is_empty() && !*waiting {
         return;
     }
     let Some(expedition) = expeditions.iter().last() else {
@@ -974,7 +781,7 @@ pub(crate) fn rebuild_world(
             ));
         }
     }
-    spawn_decals(&mut commands, &art, &dungeon, region_row, expedition.seed, *theme == ArtTheme::Gore);
+    spawn_decals(&mut commands, &art, &dungeon, region_row, expedition.seed);
     commands.insert_resource(dungeon.room);
     commands.insert_resource(dungeon.layout);
 }
@@ -1085,15 +892,10 @@ fn decal_palette(region_row: usize) -> [Color; 2] {
 
 /// Pose l'usure du sol: de grandes marques douces qui s'étendent sur plusieurs tuiles (taches, traînées de passage
 /// le long des couloirs, fissures), plus rares et plus discrètes que les défauts d'une tuile isolée.
-fn spawn_decals(commands: &mut Commands, art: &Art, dungeon: &Dungeon, region_row: usize, seed: u64, gore: bool) {
+fn spawn_decals(commands: &mut Commands, art: &Art, dungeon: &Dungeon, region_row: usize, seed: u64) {
     let (room, layout) = (&dungeon.room, &dungeon.layout);
     let mut rng = castle_shared::Rng::new(seed ^ 0xDECA15);
-    // Mode sanglant: du sang séché, deux fois plus de marques, avec des éclaboussures.
-    let [dark, special] = if gore {
-        [Color::srgba(0.32, 0.02, 0.04, 0.4), Color::srgba(0.1, 0.01, 0.02, 0.45)]
-    } else {
-        decal_palette(region_row)
-    };
+    let [dark, special] = decal_palette(region_row);
     // Cases de la planche des marques: 0..4 taches, 4..7 traînées, 7..10 fissures.
     let place = |commands: &mut Commands, index: usize, center: Vec2, size: Vec2, angle: f32, color: Color| {
         let mut sprite = art.decals.sprite_sized(index, size);
@@ -1112,13 +914,12 @@ fn spawn_decals(commands: &mut Commands, art: &Art, dungeon: &Dungeon, region_ro
     // Taches et fissures dans les salles, en vérifiant qu'aucun mur (pilier) ne se trouve dessous.
     for info in &layout.rooms {
         let dims = info.size();
-        let count = (rng.range(0, 1) + (dims.x * dims.y) / 110) * if gore { 2 } else { 1 };
+        let count = rng.range(0, 1) + (dims.x * dims.y) / 110;
         for _ in 0..count {
             for _attempt in 0..8 {
                 let kind = rng.range(0, 10);
                 // Des taches sombres de deux à trois tuiles, et de fines fissures: rien de large ni de clair.
                 let (index, color, tiles) = match kind {
-                    0..=4 if gore => (10 + rng.range(0, 2) as usize, dark, 2.5 + rng.range(0, 1) as f32 * 1.5),
                     0..=4 => (rng.range(0, 3) as usize, dark, 2.0 + rng.range(0, 1) as f32 * 1.5),
                     5..=7 => (rng.range(0, 3) as usize, special, 2.5 + rng.range(0, 1) as f32),
                     _ => (7 + rng.range(0, 2) as usize, Color::srgba(0.02, 0.02, 0.05, 0.3), 3.0),
@@ -1180,7 +981,7 @@ mod tests {
             for &(dir, name, _, _, w, h) in metas.iter().filter(|meta| meta.0 == "objects") {
                 let path = root.join(folder).join(dir).join(format!("{name}.basis"));
                 let data = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-                let mut transcoder = Transcoder::new();
+                let transcoder = Transcoder::new();
                 let info = transcoder.image_info(&data, 0).unwrap_or_else(|| panic!("{}: en-tête illisible", path.display()));
                 assert_eq!((info.m_orig_width, info.m_orig_height), (PROP_FRAMES as u32 * w, h), "{}", path.display());
             }

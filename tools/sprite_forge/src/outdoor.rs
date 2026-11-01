@@ -38,7 +38,7 @@ fn blade(p: &mut Vec<Part>, x: f32, z: f32, angle: f32, len: f32, color: u32) {
 /// ressemblent assez pour que les raccords entre motifs ne se voient pas). Variante 1: trèfles et petites fleurs;
 /// variante 2: feuilles mortes et brindilles. Dans le marais: de la vase moussue, des flaques irrégulières et des
 /// touffes de roseaux.
-pub fn ground(region: usize, variant: usize, seed: u64, st: &Style, gore: bool) -> Vec<Part> {
+pub fn ground(region: usize, variant: usize, seed: u64, st: &Style) -> Vec<Part> {
     let mut rng = Rng(seed);
     let side = MACRO as f32 * 1.2;
     let half = side / 2.0;
@@ -175,12 +175,6 @@ pub fn ground(region: usize, variant: usize, seed: u64, st: &Style, gore: bool) 
                 }
             }
         }
-    }
-    if gore && rng.next() < 0.6 {
-        // Quelques os dans l'herbe, comme dans les salles du château.
-        let (x, z) = (rng.spread(half * 0.8), rng.spread(half * 0.8));
-        p.push(shiny(limb(Vec3::new(x, 0.08, z), Vec3::new(x + 0.35, 0.08, z + rng.spread(0.15)), 0.03, 0xdcd4bc), 0.4));
-        p.push(ball(Vec3::new(x + 0.38, 0.08, z), 0.045, 0xdcd4bc));
     }
     p
 }

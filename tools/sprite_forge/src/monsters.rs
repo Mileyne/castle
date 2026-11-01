@@ -175,17 +175,14 @@ pub(crate) fn bat(pose: Pose) -> Vec<Part> {
     p
 }
 
-pub fn build(monster: Monster, pose: Pose, theme: Theme) -> Vec<Part> {
+pub fn build(monster: Monster, pose: Pose, _theme: Theme) -> Vec<Part> {
     // Les ennemis n'ont pas de geste d'arme: pour l'attaque, ils prennent une posture de marche (les bras et les jambes
     // s'élancent) puis tout le corps recule, bondit et se penche en avant (`lunge`).
     let base = match pose {
         Pose::Attack(t) => Pose::Walk(0.1 + 0.5 * t),
         other => other,
     };
-    let mut parts = match theme {
-        Theme::Manga | Theme::Medieval => build_manga(monster, base),
-        Theme::Gore => crate::monsters_gore::build(monster, base),
-    };
+    let mut parts = build_manga(monster, base);
     crate::tuning::apply(&crate::tuning::monster_key(monster), &mut parts);
     if let Pose::Attack(t) = pose {
         lunge(&mut parts, monster, t);

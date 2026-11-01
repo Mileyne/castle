@@ -28,7 +28,7 @@ use bevy::window::PrimaryWindow;
 use castle_shared::{Expedition, Projectile, Region, Room, TILE_SIZE, Tile};
 
 use crate::LocalPlayer;
-use crate::art::{Prop, Stain, TileMark, WorldTile, object};
+use crate::art::{Prop, TileMark, WorldTile, object};
 
 /// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2). Le stick droit de la manette principale la règle.
 fn elevation() -> f32 {
@@ -543,7 +543,7 @@ fn mirror_sprites(
             Option<&Anchor>,
             &InheritedVisibility,
             Option<&mut Mirror>,
-            (Has<WorldTile>, Has<Stain>),
+            Has<WorldTile>,
             (Option<&Prop>, Option<&Projectile>, Option<&crate::Lift>),
         ),
         (Without<TileMark>, Without<ChildOf>, Without<Billboard>),
@@ -565,7 +565,7 @@ fn mirror_sprites(
         }
     }
     let quad = quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0))).clone();
-    for (entity, mut sprite, transform, anchor, visible, mirror, (decal, stain), (prop, projectile, lift)) in &mut sources {
+    for (entity, mut sprite, transform, anchor, visible, mirror, decal, (prop, projectile, lift)) in &mut sources {
         // La taille d'origine: celle que le sprite porte, ou celle que nous avons gardée quand nous l'avons mis à zéro.
         let size = match (sprite.custom_size, mirror.as_deref()) {
             (Some(size), _) if size != Vec2::ZERO => size,
@@ -583,7 +583,7 @@ fn mirror_sprites(
         let data = BillboardData { rect, tint: Vec4::new(tint.red, tint.green, tint.blue, tint.alpha) };
         // Le centre du sprite dans le monde 2D, et son bas.
         let center = transform.translation.truncate() - anchor.map_or(Vec2::ZERO, |anchor| anchor.as_vec()) * size;
-        let place = if decal || stain {
+        let place = if decal {
             // À plat sur le sol, un peu au-dessus (plus haut pour les marques que le jeu dessine plus tard).
             Transform {
                 translation: Vec3::new(center.x, 0.3 + transform.translation.z * 0.05, -center.y),

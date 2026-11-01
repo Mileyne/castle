@@ -43,8 +43,6 @@ struct App {
 fn theme_label(theme: Theme) -> &'static str {
     match theme {
         Theme::Medieval => "Médiéval (le style du jeu)",
-        Theme::Manga => "Manga",
-        Theme::Gore => "Sanglant",
     }
 }
 
