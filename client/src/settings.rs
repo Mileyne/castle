@@ -99,7 +99,7 @@ pub fn view3d_enabled() -> bool {
 pub const VIEW_WALL_TILES: f32 = 3.0;
 /// Cadrage de la vue 3D: la part de terrain montrée, 1 étant celle de la version 2D.
 pub const VIEW_ZOOM: f32 = 1.25;
-/// Inclinaison et angle de la vue par défaut, en degrés. Une seconde manette les modifie en jouant (voir `turn_view`).
+/// Inclinaison et angle de la vue par défaut, en degrés. Le stick droit de la manette principale les modifie en jouant (voir `turn_view`).
 pub const VIEW_TILT_DEFAULT: f32 = 52.0;
 pub const VIEW_ANGLE_DEFAULT: f32 = -15.0;
 /// Limites de l'inclinaison: de presque à l'horizontale à presque vue d'en haut.

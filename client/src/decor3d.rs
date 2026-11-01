@@ -31,12 +31,12 @@ use crate::LocalPlayer;
 use crate::live3d::Direct3d;
 use crate::art::{Stain, TileMark, WorldTile};
 
-/// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2). Une seconde manette la règle.
+/// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2). Le stick droit de la manette principale la règle.
 fn elevation() -> f32 {
     crate::settings::view_tilt().to_radians()
 }
 
-/// Angle de la caméra autour du décor, en radians (0: elle est au sud et regarde vers le nord). Une seconde manette le règle.
+/// Angle de la caméra autour du décor, en radians (0: elle est au sud et regarde vers le nord). Le stick droit de la manette principale le règle.
 fn yaw() -> f32 {
     crate::settings::view_yaw()
 }

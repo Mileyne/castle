@@ -341,12 +341,13 @@ fn read_controls(
         })
         .collect();
     let mut pad_stick = Vec2::ZERO;
-    // Avec la vue 3D, la première manette (dans l'ordre de branchement) est celle du joueur et la deuxième règle la caméra.
+    // Avec la vue 3D, la manette principale (la première branchée) règle aussi l'orientation de la caméra, avec son stick droit.
     let mut pads: Vec<(Entity, &Gamepad)> = gamepads.iter().collect();
     pads.sort_by_key(|(entity, _)| *entity);
-    if crate::settings::view3d_enabled() && pads.len() >= 2 {
-        steer_camera(pads[1].1, time.delta_secs());
-        pads.truncate(1);
+    if crate::settings::view3d_enabled() && matches!(context, Context::Game { .. }) {
+        if let Some((_, main)) = pads.first() {
+            steer_camera(main, time.delta_secs());
+        }
     }
     for (_, gamepad) in pads {
         let left = gamepad.left_stick();
@@ -412,11 +413,11 @@ fn type_key(typed: &mut MessageWriter<KeyboardInput>, window: Entity, logical_ke
     }
 }
 
-/// Vitesse de rotation et d'inclinaison de la vue avec le stick de la seconde manette, en degrés par seconde à fond.
+/// Vitesse de rotation et d'inclinaison de la vue avec le stick droit de la manette principale, en degrés par seconde à fond.
 const CAMERA_TURN_RATE: f32 = 70.0;
 const CAMERA_TILT_RATE: f32 = 40.0;
 
-/// Le déplacement de la vue (angle, inclinaison, en degrés) pour un stick et une durée: à droite la vue tourne dans le sens des
+/// Le déplacement de la vue (angle, inclinaison, en degrés) pour le stick droit et une durée: à droite la vue tourne dans le sens des
 /// aiguilles d'une montre, en haut elle monte vers une vue de dessus. Rien sous la zone morte.
 fn camera_step(stick: Vec2, dt: f32) -> (f32, f32) {
     if stick.length() < PAD_DEAD_ZONE {
@@ -425,15 +426,15 @@ fn camera_step(stick: Vec2, dt: f32) -> (f32, f32) {
     (stick.x * CAMERA_TURN_RATE * dt, stick.y * CAMERA_TILT_RATE * dt)
 }
 
-/// La seconde manette règle la caméra (vue 3D): les sticks tournent et inclinent la vue, A la remet par défaut.
+/// La manette principale règle la caméra (vue 3D): le stick droit tourne et incline la vue (le gauche et les boutons restent au
+/// joueur), et les deux gâchettes d'épaule ensemble la remettent par défaut.
 fn steer_camera(gamepad: &Gamepad, dt: f32) {
-    let (right, left) = (gamepad.right_stick(), gamepad.left_stick());
-    let stick = if right.length() >= left.length() { right } else { left };
-    let (angle, tilt) = camera_step(stick, dt);
+    let (angle, tilt) = camera_step(gamepad.right_stick(), dt);
     if angle != 0.0 || tilt != 0.0 {
         crate::settings::turn_view(angle, tilt);
     }
-    if gamepad.just_pressed(GamepadButton::South) {
+    let (left, right) = (GamepadButton::LeftTrigger, GamepadButton::RightTrigger);
+    if gamepad.pressed(left) && gamepad.pressed(right) && (gamepad.just_pressed(left) || gamepad.just_pressed(right)) {
         crate::settings::reset_view();
     }
 }
