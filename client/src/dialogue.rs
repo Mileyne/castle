@@ -501,20 +501,19 @@ fn speaker_color(speaker: &str) -> Color {
     .into()
 }
 
-/// Où le visage se trouve dans une photo, de haut en bas (0 le haut, 1 le bas): quand la photo est rognée en hauteur, on garde cette partie.
-const PHOTO_FOCUS: f32 = 0.3;
-
-/// Chaque photo remplit toute la fenêtre, en largeur comme en hauteur: elle est agrandie jusqu'à couvrir l'écran, et ce qui dépasse
-/// est rogné (le visage reste dans le cadre).
+/// La photo de Samélia (en paysage) remplit toute la fenêtre, en largeur comme en hauteur: elle est agrandie jusqu'à couvrir l'écran,
+/// centrée, et ce qui dépasse est rogné. Les photos des héros (en portrait) gardent toute leur hauteur, centrées.
+/// Tailles et places en pourcentages de la fenêtre: elles ne dépendent pas de l'échelle de l'interface.
 fn fit_prologue_photos(window: Single<&Window, With<bevy::window::PrimaryWindow>>, mut photos: Query<(&ProloguePhoto, &mut Node)>) {
     let (w, h) = (window.width(), window.height());
     for (photo, mut node) in &mut photos {
         let ratio = PROLOGUE_PHOTOS[photo.0].2;
-        let (pw, ph) = if w / h > ratio { (w, w / ratio) } else { (h * ratio, h) };
-        node.width = Val::Px(pw);
-        node.height = Val::Px(ph);
-        node.left = Val::Px((w - pw) / 2.0);
-        node.top = Val::Px(-(ph - h) * PHOTO_FOCUS);
+        let cover = ratio >= 1.0;
+        let (pw, ph) = if cover && w / h <= ratio { (h * ratio, h) } else if cover { (w, w / ratio) } else { (h * ratio, h) };
+        node.width = Val::Percent(pw / w * 100.0);
+        node.height = Val::Percent(ph / h * 100.0);
+        node.left = Val::Percent((w - pw) / 2.0 / w * 100.0);
+        node.top = Val::Percent((h - ph) / 2.0 / h * 100.0);
     }
 }
 
