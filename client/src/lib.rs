@@ -30,12 +30,10 @@ mod host;
 mod prefs;
 mod i18n;
 mod lighting;
-#[cfg(feature = "live3d")]
 mod decor3d;
-#[cfg(feature = "live3d")]
 mod live3d;
-#[cfg(feature = "live3d")]
 mod merged;
+mod prebake;
 mod pause;
 mod puzzle;
 mod settings;
@@ -212,10 +210,9 @@ pub fn run() {
             controls::ControlsPlugin,
             puzzle::PuzzlePlugin,
             boss::BossPlugin,
-            #[cfg(feature = "live3d")]
             live3d::Live3dPlugin,
-            #[cfg(feature = "live3d")]
             decor3d::Decor3dPlugin,
+            prebake::PrebakePlugin,
             touch::TouchPlugin,
             music::MusicPlugin,
             sfx::SfxPlugin,

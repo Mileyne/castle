@@ -90,11 +90,6 @@ pub fn cycle_volume(channel: Channel) {
     save();
 }
 
-/// La vue 3D est-elle active? (Le décor en 3D est un prototype: `CASTLE_DECOR3D=1`.)
-pub fn view3d_enabled() -> bool {
-    std::env::var_os("CASTLE_DECOR3D").is_some()
-}
-
 /// Hauteur des murs de la vue 3D, en tuiles.
 pub const VIEW_WALL_TILES: f32 = 3.0;
 /// Cadrage de la vue 3D par défaut: la part de terrain montrée, 1 étant celle de la version 2D (plus grand: plus loin).
@@ -137,9 +132,9 @@ pub fn view_angle() -> f32 {
     f32::from_bits(VIEW_ANGLE.load(Ordering::Relaxed))
 }
 
-/// Angle de la caméra autour du décor, en radians; zéro sans la vue 3D. Les commandes de direction en tiennent compte.
+/// Angle de la caméra autour du décor, en radians. Les commandes de direction en tiennent compte.
 pub fn view_yaw() -> f32 {
-    if view3d_enabled() { view_angle().to_radians() } else { 0.0 }
+    view_angle().to_radians()
 }
 
 /// Tourne la vue de `angle` degrés et l'incline de `tilt` degrés (l'angle fait le tour, l'inclinaison reste bornée).

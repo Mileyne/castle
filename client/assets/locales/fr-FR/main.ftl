@@ -270,3 +270,5 @@ dlg-samelia_freed_03 = Le plus dur reste à faire : Lord Muldant est tout en hau
 settings-music = Volume de la musique :
 settings-voice = Volume des voix :
 settings-sfx = Volume des bruitages :
+
+loading-wait = Veuillez patienter

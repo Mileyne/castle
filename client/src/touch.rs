@@ -344,7 +344,7 @@ fn read_controls(
     // Avec la vue 3D, la manette principale (la première branchée) règle aussi l'orientation de la caméra, avec son stick droit.
     let mut pads: Vec<(Entity, &Gamepad)> = gamepads.iter().collect();
     pads.sort_by_key(|(entity, _)| *entity);
-    if crate::settings::view3d_enabled() && matches!(context, Context::Game { .. }) {
+    if matches!(context, Context::Game { .. }) {
         if let Some((_, main)) = pads.first() {
             steer_camera(main, time.delta_secs());
         }

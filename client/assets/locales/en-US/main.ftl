@@ -270,3 +270,5 @@ dlg-samelia_freed_03 = The hardest part is still ahead: Lord Muldant is at the v
 settings-music = Music volume:
 settings-voice = Voice volume:
 settings-sfx = Sound effects volume:
+
+loading-wait = Please wait

@@ -1,38 +1,34 @@
-//! Visionneuse des modèles 3D des personnages (héros, monstres, objets): un exécutable à part du jeu, pour voir comment ils sont
-//! rendus et comment le rendu évolue, étape après étape, sous tous les angles.
+//! Visionneuse des modèles 3D du jeu (héros, monstres, objets, grands motifs, sorties): un exécutable à part, qui montre exactement ce que
+//! le jeu dessine (le code de fusion est le sien, voir `client/src/merged.rs`), sous tous les angles.
 //!
-//! `cargo run --release -p model_viewer` (ou `scripts/models.sh`).
-//!
-//! Chaque étape est une façon de dessiner le même modèle; on en ajoute une à chaque avancée du travail. Le mode comparaison en montre
-//! deux côte à côte, avec leur coût (entités, appels de dessin, sommets).
+//! `scripts/models.sh` (ou `cargo run --release -p model_viewer`). Au lancement, comme le jeu au début d'un niveau, toutes les poses de
+//! tous les modèles sont construites à l'avance, derrière un écran « Veuillez patienter » avec son avancement.
 //!
 //! Manette: stick droit = tourner autour; gâchettes L / R (ou ZL / ZR) = éloigner / rapprocher; croix gauche / droite = modèle précédent
-//! / suivant; croix haut / bas = animation (repos, marche, coup); A = étape suivante (à droite); X = comparer deux étapes; Y = rotation
-//! automatique; Select = recentrer la vue.
-//! Clavier: flèches = tourner; Q / E = zoom; A / D = modèle; W / S = animation; Tab = étape; C = comparer; Espace = rotation; R = recentrer.
+//! / suivant; croix haut / bas = action (repos, marche, coup); Y = rotation automatique; Select = recentrer la vue.
+//! Clavier: flèches = tourner; Q / E = zoom; A / D = modèle; W / S = action; Espace = rotation; R = recentrer.
 
-use std::collections::HashMap;
-use std::time::Instant;
+use std::time::Duration;
 
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
-    mesh::VertexAttributeValues,
     prelude::*,
-    render::render_resource::{AsBindGroup, ShaderType},
+    render::render_resource::AsBindGroup,
     shader::ShaderRef,
     window::PresentMode,
 };
-use sprite_forge::{Anim, LivePart, LiveShape, Theme, live_parts, models};
+use sprite_forge::{Anim, models};
 
 // Le code de fusion est celui du jeu: la visionneuse montre ce que le jeu dessine.
+#[allow(dead_code)]
 #[path = "../../../client/src/merged.rs"]
 mod merged;
 
-/// Les étapes du rendu, de la première à la plus récente: (nom, ce que ça change).
-const STAGES: [(&str, &str); 2] = [
-    ("1. Primitives superposées", "une entité par pièce (sphères, cubes, capsules, cônes), repositionnées à chaque image"),
-    ("2. Maillage fusionné", "toutes les pièces d'une pose dans un seul maillage, gardé en cache: une entité par personnage"),
-];
+use merged::{Baking, ModelSource, PoseCache};
+
+/// Les grands motifs du décor et les sorties de niveau, après les modèles réglables.
+const LANDMARKS: [&str; 4] = ["rocher", "colonne", "statue", "fontaine"];
+const EXITS: [&str; 7] = ["escalier", "barrière fermée", "barrière ouverte", "pont brisé", "pont réparé", "pont-levis levé", "pont-levis baissé"];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Motion {
@@ -52,6 +48,15 @@ impl Motion {
         }
     }
 
+    /// La famille d'action du modèle fusionné (voir `ModelSource::families`).
+    fn family(self) -> u8 {
+        match self {
+            Self::Idle => 0,
+            Self::Walk => 1,
+            Self::Attack => 2,
+        }
+    }
+
     /// Durée d'une boucle, en secondes.
     fn period(self) -> f32 {
         match self {
@@ -68,26 +73,20 @@ impl Motion {
             Self::Attack => Anim::Attack(t),
         }
     }
+}
 
-    /// Nombre d'images de la boucle de sa planche: le rendu fusionné n'en construit pas davantage.
-    fn frames(self) -> usize {
-        match self {
-            Self::Idle => 25,
-            Self::Walk => 16,
-            Self::Attack => 10,
-        }
-    }
+/// Un modèle à montrer: son nom et d'où il vient.
+struct Entry {
+    label: String,
+    source: ModelSource,
 }
 
 /// Ce que montre la visionneuse, et la caméra.
 #[derive(Resource)]
 struct Viewer {
-    keys: Vec<String>,
+    entries: Vec<Entry>,
     model: usize,
     motion: Motion,
-    compare: bool,
-    left: usize,
-    right: usize,
     yaw: f32,
     pitch: f32,
     distance: f32,
@@ -96,82 +95,48 @@ struct Viewer {
 
 const DEFAULT_YAW: f32 = 0.5;
 const DEFAULT_PITCH: f32 = 0.35;
-const DEFAULT_DISTANCE: f32 = 7.5;
+const DEFAULT_DISTANCE: f32 = 4.5;
 
-impl Viewer {
-    fn reset_camera(&mut self) {
-        self.yaw = DEFAULT_YAW;
-        self.pitch = DEFAULT_PITCH;
-        self.distance = DEFAULT_DISTANCE;
-    }
-}
-
-/// Un exemplaire du modèle dans la scène: à gauche ou à droite, avec l'étape qui le dessine.
-#[derive(Component)]
-struct Instance {
-    side: usize,
-    /// Ce qui est construit en ce moment: (modèle, étape, mouvement).
-    built: Option<(usize, usize, usize)>,
-    /// Les entités de pièces (étape 1) ou le corps (étape 2).
-    children: Vec<Entity>,
-    /// La pose montrée par le maillage fusionné, pour ne le changer que quand elle change.
-    pose: Option<usize>,
-    /// Coût de cette étape, pour l'affichage.
-    stats: Stats,
-}
-
-#[derive(Default, Clone, Copy)]
-struct Stats {
-    parts: usize,
-    entities: usize,
-    vertices: usize,
-    /// Dernier temps de construction d'une pose, en microsecondes.
-    build_micros: f64,
+/// Le maillage fusionné de chaque pose, construit à l'avance.
+#[derive(Resource, Default)]
+struct Poses {
+    cache: PoseCache,
+    material: Option<Handle<ToonMaterial>>,
+    /// La construction à l'avance, tant qu'elle n'est pas finie, et son temps (en secondes).
+    baking: Option<Baking>,
+    baking_secs: f32,
 }
 
 #[derive(Component)]
 struct Hud;
 
-#[derive(ShaderType, Clone, Debug)]
-struct PartData {
-    color: Vec4,
-    params: Vec4,
+#[derive(Component)]
+struct WaitScreen;
+
+#[derive(Component)]
+struct WaitPercent;
+
+/// Le modèle montré, et la pose qu'il affiche.
+#[derive(Component, Default)]
+struct Shown {
+    pose: Option<(ModelSource, u8, u16)>,
 }
 
-/// Étape 1: un matériau par couleur de pièce.
-#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
-struct PartMaterial {
-    #[uniform(0)]
-    data: PartData,
-}
-
-impl Material for PartMaterial {
-    fn fragment_shader() -> ShaderRef {
-        "shaders/toon_parts.wesl".into()
-    }
-}
-
-/// Étape 2: un seul matériau, la couleur est dans les sommets.
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug, Default)]
-struct MergedMaterial {}
+struct ToonMaterial {}
 
-impl Material for MergedMaterial {
+impl Material for ToonMaterial {
     fn fragment_shader() -> ShaderRef {
-        "shaders/toon_merged.wesl".into()
+        "shaders/toon.wesl".into()
     }
-}
-
-#[derive(Resource, Default)]
-struct Caches {
-    shapes: HashMap<(u8, i32, i32), Handle<Mesh>>,
-    parts: HashMap<[u8; 6], Handle<PartMaterial>>,
-    merged_material: Option<Handle<MergedMaterial>>,
-    /// Les maillages fusionnés déjà construits: (modèle, mouvement, image).
-    poses: HashMap<(usize, usize, usize), (Handle<Mesh>, usize)>,
 }
 
 fn main() {
-    let keys: Vec<String> = models().into_iter().map(|model| model.key).collect();
+    let mut entries: Vec<Entry> = models().into_iter().map(|model| Entry { label: model.key.clone(), source: ModelSource::Key(model.key) }).collect();
+    entries.extend(LANDMARKS.iter().enumerate().map(|(index, name)| Entry { label: format!("motif:{name}"), source: ModelSource::Landmark(index) }));
+    entries.extend(EXITS.iter().enumerate().map(|(row, name)| Entry { label: format!("sortie:{name}"), source: ModelSource::Exit(row) }));
+    let sources: Vec<ModelSource> = entries.iter().map(|entry| entry.source.clone()).collect();
+    let baking = Baking::plan(sources, &PoseCache::default());
     App::new()
         .add_plugins((
             DefaultPlugins
@@ -185,64 +150,105 @@ fn main() {
                     ..default()
                 })
                 .set(AssetPlugin { file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/assets").into(), ..default() }),
-            MaterialPlugin::<PartMaterial>::default(),
-            MaterialPlugin::<MergedMaterial>::default(),
+            MaterialPlugin::<ToonMaterial>::default(),
             FrameTimeDiagnosticsPlugin::default(),
         ))
         .insert_resource(ClearColor(Color::srgb(0.16, 0.2, 0.17)))
         .insert_resource(Viewer {
-            keys,
+            entries,
             model: 0,
             motion: Motion::Idle,
-            compare: false,
-            left: 0,
-            right: STAGES.len() - 1,
             yaw: DEFAULT_YAW,
             pitch: DEFAULT_PITCH,
             distance: DEFAULT_DISTANCE,
             auto_rotate: false,
         })
-        .init_resource::<Caches>()
+        .insert_resource(Poses { baking: Some(baking), ..default() })
         .add_systems(Startup, setup)
-        .add_systems(Update, (input, place_camera, update_instances, update_hud).chain())
+        .add_systems(Update, (bake, input, place_camera, update_model, update_hud).chain())
         .run();
 }
 
 fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut standard: ResMut<Assets<StandardMaterial>>, assets: Res<AssetServer>) {
     commands.spawn((Camera3d::default(), Projection::from(PerspectiveProjection { fov: 0.5, ..default() }), Transform::default()));
-    // Un sol pour se repérer: un disque et un repère de 1 mètre.
+    // Un sol pour se repérer.
     let ground = standard.add(StandardMaterial { base_color: Color::srgb(0.24, 0.3, 0.24), unlit: true, ..default() });
     commands.spawn((Mesh3d(meshes.add(Circle::new(3.5))), MeshMaterial3d(ground), Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))));
-    for side in 0..2 {
-        commands.spawn((Instance { side, built: None, children: Vec::new(), pose: None, stats: Stats::default() }, Transform::default(), Visibility::default()));
-    }
+    commands.spawn((Shown::default(), Transform::default(), Visibility::default()));
+    let font = TextFont { font: assets.load("fonts/PressStart2P-Regular.ttf").into(), font_size: 11.0.into(), ..default() };
     commands.spawn((
         Hud,
         Text::new(""),
-        TextFont { font: assets.load("fonts/PressStart2P-Regular.ttf").into(), font_size: 11.0.into(), ..default() },
+        font.clone(),
         TextColor(Color::WHITE),
         BackgroundColor(Color::BLACK.with_alpha(0.55)),
         Node { position_type: PositionType::Absolute, bottom: Val::Px(8.0), left: Val::Px(8.0), padding: UiRect::all(Val::Px(8.0)), ..default() },
     ));
+    // L'écran d'attente, comme celui du jeu au début d'un niveau.
+    commands
+        .spawn((
+            WaitScreen,
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(20.0),
+                ..default()
+            },
+            BackgroundColor(Color::BLACK),
+            GlobalZIndex(10),
+        ))
+        .with_children(|screen| {
+            screen.spawn((Text::new("Veuillez patienter"), TextFont { font_size: 24.0.into(), ..font.clone() }, TextColor(Color::WHITE)));
+            screen.spawn((Text::new("0 %"), WaitPercent, TextFont { font_size: 24.0.into(), ..font }, TextColor(Color::srgb(1.0, 0.84, 0.0))));
+        });
+}
+
+/// La construction à l'avance de toutes les poses, par morceaux, derrière l'écran d'attente.
+fn bake(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut poses: ResMut<Poses>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    screen: Query<Entity, With<WaitScreen>>,
+    mut percent: Query<&mut Text, With<WaitPercent>>,
+) {
+    let poses = &mut *poses;
+    let Some(baking) = poses.baking.as_mut() else {
+        return;
+    };
+    baking.run(Duration::from_millis(10), &mut poses.cache, &mut meshes);
+    poses.baking_secs += time.delta_secs();
+    let shown = format!("{} %", baking.percent());
+    for mut text in &mut percent {
+        if text.0 != shown {
+            text.0 = shown.clone();
+        }
+    }
+    if baking.is_finished() {
+        poses.baking = None;
+        for entity in &screen {
+            commands.entity(entity).despawn();
+        }
+    }
 }
 
 /// Manette et clavier.
 fn input(mut viewer: ResMut<Viewer>, keys: Res<ButtonInput<KeyCode>>, time: Res<Time>, pads: Query<&Gamepad>) {
     let dt = time.delta_secs();
-    let count = viewer.keys.len();
+    let count = viewer.entries.len();
     let (mut turn, mut tilt, mut zoom) = (0.0f32, 0.0f32, 0.0f32);
-    let (mut next, mut motion, mut stage, mut compare, mut auto, mut reset) = (0i32, 0i32, false, false, false, false);
-    // Le clavier.
+    let (mut next, mut motion, mut auto, mut reset) = (0i32, 0i32, false, false);
     turn += f32::from(keys.pressed(KeyCode::ArrowRight)) - f32::from(keys.pressed(KeyCode::ArrowLeft));
     tilt += f32::from(keys.pressed(KeyCode::ArrowUp)) - f32::from(keys.pressed(KeyCode::ArrowDown));
     zoom += f32::from(keys.pressed(KeyCode::KeyQ)) - f32::from(keys.pressed(KeyCode::KeyE));
     next += i32::from(keys.just_pressed(KeyCode::KeyD)) - i32::from(keys.just_pressed(KeyCode::KeyA));
     motion += i32::from(keys.just_pressed(KeyCode::KeyS)) - i32::from(keys.just_pressed(KeyCode::KeyW));
-    stage |= keys.just_pressed(KeyCode::Tab);
-    compare |= keys.just_pressed(KeyCode::KeyC);
     auto |= keys.just_pressed(KeyCode::Space);
     reset |= keys.just_pressed(KeyCode::KeyR);
-    // La manette (toutes celles qui sont branchées).
     for pad in &pads {
         let right = pad.right_stick();
         if right.length() > 0.15 {
@@ -253,14 +259,12 @@ fn input(mut viewer: ResMut<Viewer>, keys: Res<ButtonInput<KeyCode>>, time: Res<
         zoom += trigger(GamepadButton::LeftTrigger, GamepadButton::LeftTrigger2) - trigger(GamepadButton::RightTrigger, GamepadButton::RightTrigger2);
         next += i32::from(pad.just_pressed(GamepadButton::DPadRight)) - i32::from(pad.just_pressed(GamepadButton::DPadLeft));
         motion += i32::from(pad.just_pressed(GamepadButton::DPadDown)) - i32::from(pad.just_pressed(GamepadButton::DPadUp));
-        stage |= pad.just_pressed(GamepadButton::South);
-        compare |= pad.just_pressed(GamepadButton::West);
         auto |= pad.just_pressed(GamepadButton::North);
         reset |= pad.just_pressed(GamepadButton::Select);
     }
     viewer.yaw += turn.clamp(-1.0, 1.0) * 1.8 * dt;
-    viewer.pitch = (viewer.pitch + tilt.clamp(-1.0, 1.0) * 1.0 * dt).clamp(-0.15, 1.45);
-    viewer.distance = (viewer.distance * (zoom.clamp(-1.0, 1.0) * 0.9 * dt).exp()).clamp(1.5, 14.0);
+    viewer.pitch = (viewer.pitch + tilt.clamp(-1.0, 1.0) * dt).clamp(-0.15, 1.45);
+    viewer.distance = (viewer.distance * (zoom.clamp(-1.0, 1.0) * 0.9 * dt).exp()).clamp(1.2, 14.0);
     if viewer.auto_rotate {
         viewer.yaw += 0.6 * dt;
     }
@@ -271,218 +275,75 @@ fn input(mut viewer: ResMut<Viewer>, keys: Res<ButtonInput<KeyCode>>, time: Res<
         let at = Motion::ALL.iter().position(|m| *m == viewer.motion).unwrap_or(0) as i32;
         viewer.motion = Motion::ALL[(at + motion).rem_euclid(Motion::ALL.len() as i32) as usize];
     }
-    if stage {
-        // L'étape de droite passe à la suivante; en comparaison, celle de gauche est la précédente.
-        viewer.right = (viewer.right + 1) % STAGES.len();
-        viewer.left = (viewer.right + STAGES.len() - 1) % STAGES.len();
-    }
-    if compare {
-        viewer.compare = !viewer.compare;
-        viewer.left = (viewer.right + STAGES.len() - 1) % STAGES.len();
-    }
     if auto {
         viewer.auto_rotate = !viewer.auto_rotate;
     }
     if reset {
-        viewer.reset_camera();
+        viewer.yaw = DEFAULT_YAW;
+        viewer.pitch = DEFAULT_PITCH;
+        viewer.distance = DEFAULT_DISTANCE;
     }
 }
 
-/// La caméra tourne autour du personnage (ou des deux), à hauteur de poitrine.
+/// La caméra tourne autour du modèle, à hauteur de poitrine.
 fn place_camera(viewer: Res<Viewer>, mut camera: Single<&mut Transform, With<Camera3d>>) {
-    let target = Vec3::new(0.0, 0.75, 0.0);
+    let target = Vec3::new(0.0, 0.8, 0.0);
     let offset = Vec3::new(viewer.yaw.sin() * viewer.pitch.cos(), viewer.pitch.sin(), viewer.yaw.cos() * viewer.pitch.cos());
     **camera = Transform::from_translation(target + offset * viewer.distance).looking_at(target, Vec3::Y);
 }
 
-fn shape_key(shape: LiveShape) -> (u8, i32, i32) {
-    match shape {
-        LiveShape::Sphere => (0, 0, 0),
-        LiveShape::Cube => (1, 0, 0),
-        LiveShape::Capsule(_) => (2, 0, 0),
-        LiveShape::Frustum(a, b) => (3, (a * 50.0).round() as i32, (b * 50.0).round() as i32),
-    }
-}
-
-/// Étape 1: la forme d'une pièce, avec la finesse d'origine.
-fn shape_mesh(caches: &mut Caches, meshes: &mut Assets<Mesh>, shape: LiveShape) -> Handle<Mesh> {
-    caches
-        .shapes
-        .entry(shape_key(shape))
-        .or_insert_with(|| {
-            meshes.add(match shape {
-                LiveShape::Sphere => Sphere::new(1.0).mesh().uv(20, 12),
-                LiveShape::Cube => Cuboid::new(2.0, 2.0, 2.0).into(),
-                LiveShape::Capsule(_) => Capsule3d::new(1.0, 2.0).mesh().rings(4).latitudes(8).longitudes(16).build(),
-                LiveShape::Frustum(a, b) => ConicalFrustum { radius_top: b, radius_bottom: a, height: 2.0 }.mesh().resolution(20).build(),
-            })
-        })
-        .clone()
-}
-
-fn part_material(caches: &mut Caches, materials: &mut Assets<PartMaterial>, part: &LivePart) -> Handle<PartMaterial> {
-    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let key = [byte(part.color[0]), byte(part.color[1]), byte(part.color[2]), part.glow as u8, byte(part.shine), 0];
-    caches
-        .parts
-        .entry(key)
-        .or_insert_with(|| {
-            materials.add(PartMaterial {
-                data: PartData {
-                    color: Vec4::new(part.color[0], part.color[1], part.color[2], 1.0),
-                    params: Vec4::new(if part.glow { 1.0 } else { 0.0 }, part.shine, 1.0, 0.0),
-                },
-            })
-        })
-        .clone()
-}
-
-fn vertex_count(mesh: &Mesh) -> usize {
-    match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
-        Some(VertexAttributeValues::Float32x3(values)) => values.len(),
-        _ => 0,
-    }
-}
-
-/// Construit ou met à jour ce que montre chaque exemplaire.
-fn update_instances(
+/// Montre la pose du moment du modèle choisi: l'image de la boucle de son action, prise dans les poses déjà construites.
+fn update_model(
     mut commands: Commands,
     time: Res<Time>,
     viewer: Res<Viewer>,
-    mut instances: Query<(Entity, &mut Instance, &mut Transform, &mut Visibility)>,
-    mut transforms: Query<&mut Transform, Without<Instance>>,
-    mut caches: ResMut<Caches>,
+    mut poses: ResMut<Poses>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut part_materials: ResMut<Assets<PartMaterial>>,
-    mut merged_materials: ResMut<Assets<MergedMaterial>>,
+    mut materials: ResMut<Assets<ToonMaterial>>,
+    mut shown: Single<(Entity, &mut Shown)>,
+    mut body: Local<Option<Entity>>,
 ) {
-    let merged_material = caches.merged_material.get_or_insert_with(|| merged_materials.add(MergedMaterial::default())).clone();
-    let phase = (time.elapsed_secs() / viewer.motion.period()).fract();
-    let motion_index = Motion::ALL.iter().position(|m| *m == viewer.motion).unwrap_or(0);
-    for (entity, mut instance, mut transform, mut visibility) in &mut instances {
-        // Une seule étape en vue normale (à droite, au centre); deux en comparaison.
-        let shown = viewer.compare || instance.side == 1;
-        let wanted = if shown { Visibility::Inherited } else { Visibility::Hidden };
-        if *visibility != wanted {
-            *visibility = wanted;
-        }
-        transform.translation = Vec3::new(if !viewer.compare { 0.0 } else if instance.side == 0 { -1.3 } else { 1.3 }, 0.0, 0.0);
-        if !shown {
-            continue;
-        }
-        let stage = if instance.side == 0 { viewer.left } else { viewer.right };
-        let key = &viewer.keys[viewer.model];
-        let want = (viewer.model, stage, motion_index);
-        if instance.built != Some(want) {
-            for child in instance.children.drain(..) {
-                commands.entity(child).despawn();
-            }
-            instance.built = Some(want);
-            instance.pose = None;
-            instance.stats = Stats::default();
-        }
-        let anim = viewer.motion.anim(phase);
-        if stage == 0 {
-            // Étape 1: des pièces, repositionnées à chaque image.
-            let started = Instant::now();
-            let parts = live_parts(key, Theme::Medieval, anim);
-            instance.stats.build_micros = started.elapsed().as_secs_f64() * 1e6;
-            if instance.children.len() != parts.len() {
-                for child in instance.children.drain(..) {
-                    commands.entity(child).despawn();
-                }
-                instance.children = parts
-                    .iter()
-                    .map(|part| {
-                        commands
-                            .spawn((
-                                Mesh3d(shape_mesh(&mut caches, &mut meshes, part.shape)),
-                                MeshMaterial3d(part_material(&mut caches, &mut part_materials, part)),
-                                merged::part_transform(part),
-                                ChildOf(entity),
-                            ))
-                            .id()
-                    })
-                    .collect();
-                let handles: Vec<Handle<Mesh>> = parts.iter().map(|part| shape_mesh(&mut caches, &mut meshes, part.shape)).collect();
-                let vertices: usize = handles.iter().map(|handle| meshes.get(handle).map_or(0, vertex_count)).sum();
-                instance.stats.vertices = vertices;
-            } else {
-                for (child, part) in instance.children.iter().zip(&parts) {
-                    if let Ok(mut place) = transforms.get_mut(*child) {
-                        *place = merged::part_transform(part);
-                    }
-                }
-            }
-            instance.stats.parts = parts.len();
-            instance.stats.entities = parts.len();
-        } else {
-            // Étape 2: un maillage par image de la boucle, construit une fois.
-            let frames = viewer.motion.frames();
-            let frame = ((phase * frames as f32) as usize).min(frames - 1);
-            if instance.pose != Some(frame) {
-                let cache_key = (viewer.model, motion_index, frame);
-                let (handle, vertices) = match caches.poses.get(&cache_key) {
-                    Some(found) => found.clone(),
-                    None => {
-                        let started = Instant::now();
-                        let t = frame as f32 / frames as f32;
-                        let parts = live_parts(key, Theme::Medieval, viewer.motion.anim(t));
-                        let mesh = merged::merge(&parts);
-                        instance.stats.build_micros = started.elapsed().as_secs_f64() * 1e6;
-                        let vertices = vertex_count(&mesh);
-                        instance.stats.parts = parts.len();
-                        let handle = meshes.add(mesh);
-                        caches.poses.insert(cache_key, (handle.clone(), vertices));
-                        (handle, vertices)
-                    }
-                };
-                instance.stats.vertices = vertices;
-                instance.stats.entities = 1;
-                match instance.children.first().copied() {
-                    Some(body) => {
-                        commands.entity(body).insert(Mesh3d(handle));
-                    }
-                    None => {
-                        let body = commands.spawn((Mesh3d(handle), MeshMaterial3d(merged_material.clone()), ChildOf(entity))).id();
-                        instance.children.push(body);
-                    }
-                }
-                instance.pose = Some(frame);
-            }
-        }
+    if poses.baking.is_some() {
+        return;
     }
+    let poses = &mut *poses;
+    let material = poses.material.get_or_insert_with(|| materials.add(ToonMaterial::default())).clone();
+    let source = &viewer.entries[viewer.model].source;
+    let phase = (time.elapsed_secs() / viewer.motion.period()).fract();
+    // Un objet, un motif ou une sortie n'ont que leur repos.
+    let (family, index) = source.pose(viewer.motion.anim(phase));
+    let wanted = (source.clone(), family, index);
+    let (root, shown) = &mut *shown;
+    if shown.pose.as_ref() == Some(&wanted) {
+        return;
+    }
+    let handle = poses.cache.get_or_build(&wanted, &mut meshes);
+    match *body {
+        Some(entity) => {
+            commands.entity(entity).insert(Mesh3d(handle));
+        }
+        None => *body = Some(commands.spawn((Mesh3d(handle), MeshMaterial3d(material), ChildOf(*root))).id()),
+    }
+    shown.pose = Some(wanted);
 }
 
-fn update_hud(
-    viewer: Res<Viewer>,
-    diagnostics: Res<DiagnosticsStore>,
-    instances: Query<&Instance>,
-    mut hud: Single<&mut Text, With<Hud>>,
-) {
+fn update_hud(viewer: Res<Viewer>, poses: Res<Poses>, diagnostics: Res<DiagnosticsStore>, mut hud: Single<&mut Text, With<Hud>>) {
     let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|d| d.smoothed()).unwrap_or(0.0);
-    let mut text = format!(
-        "{}   [{}]   {} / {}   {fps:.0} FPS\n",
-        viewer.keys[viewer.model],
+    let entry = &viewer.entries[viewer.model];
+    let own = entry.source.all_poses().len();
+    let actions: Vec<&str> = Motion::ALL.iter().filter(|m| entry.source.families().contains(&m.family())).map(|m| m.label()).collect();
+    let text = format!(
+        "{}   [{}]   {} / {}   {fps:.0} FPS\n\n{} poses pour ce modèle (actions: {})\n{} poses construites au lancement en {:.2} s: {:.1} Mo de sommets\n\nStick droit: tourner   L / R: zoom   croix: modèle / action   Y: rotation   Select: recentrer",
+        entry.label,
         viewer.motion.label(),
         viewer.model + 1,
-        viewer.keys.len()
+        viewer.entries.len(),
+        own,
+        actions.join(", "),
+        poses.cache.len(),
+        poses.baking_secs,
+        poses.cache.bytes() as f64 / 1e6,
     );
-    let mut sides: Vec<&Instance> = instances.iter().collect();
-    sides.sort_by_key(|instance| instance.side);
-    for instance in sides {
-        if !viewer.compare && instance.side == 0 {
-            continue;
-        }
-        let stage = if instance.side == 0 { viewer.left } else { viewer.right };
-        let stats = instance.stats;
-        let (name, what) = STAGES[stage];
-        text += &format!(
-            "\n{name}\n   {what}\n   {} pièces, {} entités, {} sommets, mise en pose {:.0} µs\n",
-            stats.parts, stats.entities, stats.vertices, stats.build_micros
-        );
-    }
-    text += "\nStick droit: tourner   L / R: zoom   croix: modèle / animation   A: étape   X: comparer   Y: rotation   Select: recentrer";
     if text != hud.0 {
         hud.0 = text;
     }

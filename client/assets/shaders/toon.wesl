@@ -1,5 +1,5 @@
 // Ombrage « toon » comme celui de sprite_forge: lumière par paliers, hachures dans l'ombre moyenne, reflet net, contour sombre.
-// Couleur sRGB, éclat et reflet viennent des sommets du maillage fusionné (`client/src/merged.rs`).
+// Couleur sRGB, éclat et reflet viennent de la couleur des sommets du maillage fusionné (`client/src/merged.rs`).
 import bevy_pbr::{
     render::forward_io::VertexOutput,
     render::mesh_view_bindings::view,
@@ -7,10 +7,10 @@ import bevy_pbr::{
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    // La couleur (sRGB) vient des sommets; l'éclat et le reflet sont dans leurs coordonnées de texture.
+    // La couleur (sRGB) vient des sommets; l'éclat et le reflet partagent leur canal alpha (2 + reflet pour une pièce qui brille).
     let base_color = in.color.rgb;
-    let glow = in.uv.x;
-    let shine = in.uv.y;
+    let glow = select(0.0, 1.0, in.color.a >= 2.0);
+    let shine = in.color.a - 2.0 * glow;
     let n = normalize(in.world_normal);
     let light = normalize(vec3<f32>(-0.45, 0.7, 0.55));
     let ndl = dot(n, light);

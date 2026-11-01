@@ -1,4 +1,4 @@
-//! Prototype (`CASTLE_DECOR3D=1`): le monde est une vraie scène 3D, vue de biais par une caméra qui suit la caméra 2D.
+//! Le monde est une vraie scène 3D, vue de biais par une caméra qui suit la caméra 2D.
 //!
 //! - Le sol: les blocs de décor déjà assemblés (`art::rebuild_world`) servent de texture, un maillage par bloc.
 //! - Les murs: des cubes complets (six faces, la matière projetée sur chacune, calculée par le shader selon la région: briques de
@@ -67,18 +67,10 @@ const LANTERN_COLOR: Vec3 = Vec3::new(1.0, 0.72, 0.4);
 /// caméra du décor les personnages.
 pub const LAYER: usize = 1;
 
-/// Le prototype est-il demandé (`CASTLE_DECOR3D=1`)?
-pub fn enabled() -> bool {
-    std::env::var_os("CASTLE_DECOR3D").is_some()
-}
-
 pub struct Decor3dPlugin;
 
 impl Plugin for Decor3dPlugin {
     fn build(&self, app: &mut App) {
-        if !enabled() {
-            return;
-        }
         app.add_plugins((MaterialPlugin::<DecorMaterial>::default(), MaterialPlugin::<BillboardMaterial>::default()))
             .add_systems(Startup, setup)
             .add_systems(

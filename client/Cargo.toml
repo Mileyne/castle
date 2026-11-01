@@ -4,19 +4,14 @@ version = "0.6.0"
 edition = "2024"
 
 [features]
-# Les héros et les monstres sont dessinés en 3D par défaut (sauf sur Apple TV HD et les appareils à peu de mémoire, voir `live3d::enabled`).
-# Les builds d'Apple TV et de mobile passent `--no-default-features` tant que la 3D n'y est pas essayée sur appareil.
-default = ["live3d"]
 # Trace des systèmes du moteur (fichier JSON pour chrome://tracing ou Perfetto): `cargo run --release -p castle_client --features profile`
 profile = ["bevy/trace_chrome"]
-# Les héros et les monstres dessinés en 3D par la carte graphique: `CASTLE_LIVE3D=0` pour revenir aux sprites.
-live3d = ["bevy/3d", "dep:sprite_forge"]
 
 [dependencies]
 castle_shared = { path = "../shared" }
 castle_server = { path = "../server" }
-# Pas de rendu 3D (« 3d »): le jeu est en 2D, et le regroupement de lumières 3D de Bevy ne tient pas sur l'Apple TV HD (A8).
-bevy = { workspace = true, default-features = false, features = ["2d", "ui", "audio", "basis-universal"] }
+# Le jeu est une scène 3D (voir `decor3d`); le regroupement de lumières 3D de Bevy est remplacé sur iOS et tvOS (voir `vendor/bevy_pbr`).
+bevy = { workspace = true, default-features = false, features = ["2d", "3d", "ui", "audio", "basis-universal"] }
 bevy_replicon.workspace = true
 bevy_replicon_renet.workspace = true
 bevy_fluent.workspace = true
@@ -25,7 +20,7 @@ ron = "0.12"
 fluent_content = "0.0.5"
 unic-langid = { version = "0.9", features = ["macros"] }
 sys-locale = "0.3"
-sprite_forge = { path = "../tools/sprite_forge", optional = true }
+sprite_forge = { path = "../tools/sprite_forge" }
 
 # Manettes sur iOS / tvOS (framework GameController): voir gamecontroller.rs.
 [target.'cfg(target_os = "ios")'.dependencies]

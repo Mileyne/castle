@@ -374,7 +374,7 @@ fn update_fps(
     let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|d| d.smoothed()).unwrap_or(0.0);
     let mut shown = format!("{fps:.0} FPS");
     // Avec la vue 3D, l'inclinaison, l'angle et le cadrage de la caméra (la manette principale les change).
-    if crate::settings::view3d_enabled() {
+    {
         shown.push_str(&format!(
             "  {:.0}° {:.0}° {:.0} %",
             crate::settings::view_tilt(),

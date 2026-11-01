@@ -49,7 +49,7 @@ for arch in $ARCHS; do
 
   # La cible iOS de Rust s'installe d'elle-même la première fois.
   rustup target add "$TARGET" >/dev/null 2>&1 || true
-  (cd "$SRCROOT/.." && cargo build $RELFLAG --target "$TARGET" -p castle_client --bin castle_client --no-default-features)
+  (cd "$SRCROOT/.." && cargo build $RELFLAG --target "$TARGET" -p castle_client --bin castle_client)
 
   EXECUTABLES="$EXECUTABLES $CARGO_TARGET_DIR/$TARGET/$PROFILE/castle_client"
 done
