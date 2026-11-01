@@ -15,9 +15,10 @@ use bevy::{
     asset::RenderAssetUsages,
     camera::{ClearColorConfig, visibility::RenderLayers},
     core_pipeline::tonemapping::Tonemapping,
+    image::ImageSampler,
     mesh::{Indices, PrimitiveTopology},
     prelude::*,
-    render::render_resource::{AsBindGroup, ShaderType},
+    render::render_resource::{AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat},
     shader::ShaderRef,
 };
 use castle_shared::{Room, TILE_SIZE, Tile};
@@ -26,9 +27,9 @@ use crate::LocalPlayer;
 use crate::art::WorldTile;
 
 /// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2).
-const ELEVATION: f32 = 1.0;
+const ELEVATION: f32 = 0.9;
 /// Hauteur des murs, en unités du monde (une tuile en mesure `TILE_SIZE`).
-const WALL_HEIGHT: f32 = TILE_SIZE * 0.9;
+const WALL_HEIGHT: f32 = TILE_SIZE * 1.4;
 /// Nombre maximal de lampes par bloc.
 const MAX_LIGHTS: usize = 8;
 /// Lanterne du héros dirigé: hauteur, rayon, couleur (linéaire).
@@ -79,8 +80,10 @@ struct Built;
 struct DecorData {
     /// Couleur de teinte du décor (celle du héros dirigé).
     tint: Vec4,
-    /// (1 / sin de l'élévation: l'étirement du sol, nombre de lampes, -, -).
+    /// (1 / sin de l'élévation: l'étirement du sol, nombre de lampes, hauteur des murs, côté d'une tuile).
     params: Vec4,
+    /// (largeur et hauteur de la salle en tuiles, -, -).
+    room: Vec4,
     /// Lampes: position (x, hauteur, z étiré) et rayon; couleur.
     light_pos: [Vec4; MAX_LIGHTS],
     light_color: [Vec4; MAX_LIGHTS],
@@ -93,6 +96,11 @@ struct DecorMaterial {
     image: Handle<Image>,
     #[uniform(2)]
     data: DecorData,
+    /// Où sont les murs dans tout le niveau (255 = mur, une tuile par pixel, la ligne 0 est la plus au sud): le shader y cherche
+    /// l'ombre des murs sur le sol.
+    #[texture(3)]
+    #[sampler(4)]
+    walls: Handle<Image>,
 }
 
 impl Material for DecorMaterial {
@@ -143,6 +151,7 @@ fn build_chunks(
     mut tiles: Query<(Entity, &mut Visibility, &Sprite, &Transform), (With<WorldTile>, Without<Built>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<DecorMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     built: Query<(Entity, &Decor3d)>,
     alive: Query<(), With<WorldTile>>,
 ) {
@@ -155,6 +164,10 @@ fn build_chunks(
     let Some(room) = room else {
         return;
     };
+    if tiles.is_empty() {
+        return;
+    }
+    let walls = images.add(wall_mask(&room));
     // La version à plat dessine les blocs dans l'ordre de leurs entités: le dernier est devant.
     let mut order: Vec<Entity> = tiles.iter().map(|(entity, ..)| entity).collect();
     order.sort();
@@ -174,15 +187,35 @@ fn build_chunks(
             image: sprite.image.clone(),
             data: DecorData {
                 tint: Vec4::ONE,
-                params: Vec4::new(1.0 / ELEVATION.sin(), 0.0, 0.0, 0.0),
+                params: Vec4::new(1.0 / ELEVATION.sin(), 0.0, WALL_HEIGHT, TILE_SIZE),
+                room: Vec4::new(room.size().x as f32, room.size().y as f32, 0.0, 0.0),
                 light_pos: [Vec4::ZERO; MAX_LIGHTS],
                 light_color: [Vec4::ZERO; MAX_LIGHTS],
             },
+            walls: walls.clone(),
         });
         commands.spawn((Decor3d { source: entity, material: material.clone() }, Mesh3d(mesh), MeshMaterial3d(material), RenderLayers::layer(LAYER), Transform::default()));
         *visibility = Visibility::Hidden;
         commands.entity(entity).insert(Built);
     }
+}
+
+/// Les murs du niveau, une tuile par pixel (voir `DecorMaterial::walls`).
+fn wall_mask(room: &Room) -> Image {
+    let size = room.size();
+    let data = (0..size.y as i32)
+        .flat_map(|y| (0..size.x as i32).map(move |x| (x, y)))
+        .map(|(x, y)| if room.tile(x, y) == Tile::Wall { 255 } else { 0 })
+        .collect();
+    let mut image = Image::new(
+        Extent3d { width: size.x, height: size.y, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        data,
+        TextureFormat::R8Unorm,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.sampler = ImageSampler::nearest();
+    image
 }
 
 /// Le maillage d'un bloc: le sol en un seul rectangle (texturé par l'image du bloc), et, pour chaque tuile de mur, un dessus
