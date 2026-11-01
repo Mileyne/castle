@@ -132,14 +132,21 @@ pub fn run() {
                     primary_window: Some(Window {
                         title: "Castle: réglage de la lumière".into(),
                         resolution: WindowResolution::new(1400, 860),
+                        // `LUMIERE_BENCH=1`: sans synchronisation verticale, pour mesurer le coût du rendu (voir `bench`).
+                        present_mode: if std::env::var_os("LUMIERE_BENCH").is_some() { bevy::window::PresentMode::AutoNoVsync } else { default() },
                         ..default()
                     }),
                     ..default()
                 }),
         )
-        .add_plugins((MaterialPlugin::<DecorMaterial>::default(), MaterialPlugin::<FlameMaterial>::default(), crate::live3d::Live3dPlugin))
+        .add_plugins((
+            MaterialPlugin::<DecorMaterial>::default(),
+            MaterialPlugin::<FlameMaterial>::default(),
+            MaterialPlugin::<crate::weather::MistMaterial>::default(),
+            crate::live3d::Live3dPlugin,
+        ))
         .add_systems(Startup, setup)
-        .add_systems(Update, (input, rebuild, walk, pulse, apply, super::apply_mood, super::drive_lamps, panel, shot).chain())
+        .add_systems(Update, (input, rebuild, walk, pulse, apply, super::apply_mood, super::drive_lamps, panel, shot, bench).chain())
         .run();
 }
 
@@ -147,15 +154,32 @@ pub fn run() {
 fn setup(mut commands: Commands, assets: Res<AssetServer>, options: Res<Options>) {
     let mut projection = OrthographicProjection { near: -2000.0, far: 2000.0, ..OrthographicProjection::default_2d() };
     projection.scale = VIEW_HEIGHT * options.zoom / 860.0;
-    commands.spawn((
-        TunerCamera,
-        Camera3d::default(),
-        Camera { clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() },
-        Projection::from(projection),
-        Tonemapping::None,
-        RenderLayers::layer(LAYER),
-        Transform::default(),
-    ));
+    // `LUMIERE_MSAA=0|2|4|8` change l'anticrénelage de la caméra (le jeu garde celui de Bevy, 4 échantillons).
+    let msaa = match std::env::var("LUMIERE_MSAA").as_deref() {
+        Ok("0") => Msaa::Off,
+        Ok("2") => Msaa::Sample2,
+        Ok("8") => Msaa::Sample8,
+        _ => Msaa::Sample4,
+    };
+    // `LUMIERE_LOAD=N` fait dessiner la scène N fois par image (N caméras identiques): pour mesurer sur un Mac, plus rapide que
+    // l'Apple TV, ce qui plafonne autrement à la fréquence de l'écran.
+    let load: isize = std::env::var("LUMIERE_LOAD").ok().and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
+    for order in 0..load {
+        commands.spawn((
+            TunerCamera,
+            msaa,
+            Camera3d::default(),
+            Camera {
+                order,
+                clear_color: if order == 0 { ClearColorConfig::Custom(Color::BLACK) } else { ClearColorConfig::None },
+                ..default()
+            },
+            Projection::from(projection.clone()),
+            Tonemapping::None,
+            RenderLayers::layer(LAYER),
+            Transform::default(),
+        ));
+    }
     super::spawn_sun_and_lamps(&mut commands);
     commands.spawn((
         Panel,
@@ -200,6 +224,7 @@ fn rebuild(
     mut standard: ResMut<Assets<StandardMaterial>>,
     mut flames: ResMut<Assets<FlameMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    mut mists: ResMut<Assets<crate::weather::MistMaterial>>,
 ) {
     if !level.is_changed() {
         return;
@@ -220,6 +245,7 @@ fn rebuild(
     let foliage = if kinds.contains(&2) { 2.0 } else { 0.0 };
     let yaw = options.yaw.to_radians();
     let wall_texture = images.add(wall_mask(&room, &kinds));
+    let foliage_pattern = super::foliage::pattern(&mut images);
     let floor = options.floor.clone().unwrap_or_else(|| match region {
         castle_shared::Region::Gardens => "herbe".into(),
         _ => "terre".into(),
@@ -229,6 +255,7 @@ fn rebuild(
         image: images.add(floor_image(size, &floor)),
         data: decor_data(&room, 0.0, foliage, &palette, mood, yaw),
         walls: wall_texture.clone(),
+        foliage: foliage_pattern.clone(),
     });
     commands.spawn((
         LevelEntity,
@@ -240,11 +267,16 @@ fn rebuild(
         image: images.add(Image::default()),
         data: decor_data(&room, 1.0, foliage, &palette, mood, yaw),
         walls: wall_texture,
+        foliage: foliage_pattern,
     });
     commands.spawn((LevelEntity, Mesh3d(meshes.add(walls_mesh(&room))), MeshMaterial3d(walls.clone()), RenderLayers::layer(LAYER)));
     // Les torches des niveaux sombres, sur les murs de pierre (comme le jeu).
     let torches = if mood.darkness() > 0.3 { look::torch_sites(&room, &kinds) } else { Vec::new() };
     spawn_torches(&mut commands, &mut meshes, &mut standard, &mut flames, &torches, yaw);
+    // `LUMIERE_MIST=1`: la brume de la forêt, comme dans le jeu.
+    if std::env::var_os("LUMIERE_MIST").is_some() {
+        crate::weather::spawn_mist(&mut commands, &mut meshes, &mut mists, mood.ambient, false);
+    }
 
     // Les modèles du jeu, posés près du départ du niveau, sur du sol: les héros au milieu, des ennemis et des objets plus ou moins loin.
     let start = dungeon.layout.rooms[dungeon.layout.start].center();
@@ -265,6 +297,8 @@ fn rebuild(
             entity.insert((class, Facing(Vec2::new(0.0, -1.0))));
         }))
     };
+    // `LUMIERE_HIDE_MODELS=1`: sans personnages ni objets (mesure du coût des modèles).
+    let models = std::env::var_os("LUMIERE_HIDE_MODELS").is_none();
     let lead = hero(&mut commands, HeroClass::Knight, origin);
     let followers: Vec<(Entity, Vec2)> = [
         (HeroClass::Sorcerer, Vec2::new(-20.0, -6.0)),
@@ -274,34 +308,34 @@ fn rebuild(
     .into_iter()
     .map(|(class, offset)| (hero(&mut commands, class, origin + offset), offset))
     .collect();
-    for (kind, offset) in [
+    for (kind, offset) in models.then_some([
         (MonsterKind::Wolf, Vec2::new(52.0, 6.0)),
         (MonsterKind::Goblin, Vec2::new(-60.0, 22.0)),
         (MonsterKind::Skeleton, Vec2::new(92.0, -20.0)),
         (MonsterKind::Ghoul, Vec2::new(-105.0, -12.0)),
         (MonsterKind::Orc, Vec2::new(140.0, 32.0)),
         (MonsterKind::Wolf, Vec2::new(-150.0, 30.0)),
-    ] {
+    ]).into_iter().flatten() {
         let at = floor_near(&room, origin + offset);
         character(&mut commands, at, Box::new(move |entity| {
             entity.insert(Monster(kind));
         }));
     }
-    for (row, offset) in [
+    for (row, offset) in models.then_some([
         (object::COIN, Vec2::new(40.0, -26.0)),
         (object::POTION, Vec2::new(-44.0, -30.0)),
         (object::KEY, Vec2::new(70.0, 34.0)),
         (object::FOOD, Vec2::new(-80.0, -34.0)),
         (object::CAPTIVE, Vec2::new(110.0, 6.0)),
         (object::INGREDIENT, Vec2::new(-125.0, 12.0)),
-    ] {
+    ]).into_iter().flatten() {
         let at = floor_near(&room, origin + offset);
         commands.spawn((LevelEntity, Prop(row), Transform::from_translation(at.extend(0.5)), Visibility::default()));
     }
 
     // La caméra du jeu: orthographique, inclinée, tournée; centrée sur les héros.
     let focus = origin + Vec2::new(0.0, 5.0);
-    if let Ok(mut transform) = camera.single_mut() {
+    for mut transform in &mut camera {
         let (elevation, camera_yaw) = (options.tilt.to_radians(), yaw);
         let target = Vec3::new(focus.x, 0.0, -focus.y);
         let towards = Vec3::new(camera_yaw.sin() * elevation.cos(), elevation.sin(), camera_yaw.cos() * elevation.cos());
@@ -514,6 +548,23 @@ fn shot(mut commands: Commands, time: Res<Time>, mut taken: Local<bool>, mut exi
         commands.spawn(bevy::render::view::window::screenshot::Screenshot::primary_window()).observe(bevy::render::view::window::screenshot::save_to_disk(path));
     }
     if time.elapsed_secs() > 9.5 {
+        exit.write(AppExit::Success);
+    }
+}
+
+/// `LUMIERE_BENCH=1`: mesure le temps moyen d'une image (sans synchronisation verticale), de la 5ᵉ à la 15ᵉ seconde, l'affiche sur la sortie
+/// d'erreur puis quitte. Sert à classer ce qui coûte le plus au rendu.
+fn bench(time: Res<Time>, mut window: Local<(f32, u32)>, mut exit: MessageWriter<AppExit>) {
+    if std::env::var_os("LUMIERE_BENCH").is_none() {
+        return;
+    }
+    let now = time.elapsed_secs();
+    if (5.0..15.0).contains(&now) {
+        window.0 += time.delta_secs();
+        window.1 += 1;
+    }
+    if now >= 15.0 {
+        eprintln!("BENCH {:.2} ms par image ({:.0} images/s, {} images)", 1000.0 * window.0 / window.1.max(1) as f32, window.1 as f32 / window.0.max(0.001), window.1);
         exit.write(AppExit::Success);
     }
 }

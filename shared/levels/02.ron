@@ -1,6 +1,6 @@
 (
   format: 1,
-  name: "Les marais hantés",
+  name: "Le sous-bois détrempé",
   region: Marsh,
   size: (132, 60),
   rows: [

@@ -131,6 +131,8 @@ impl LevelArt {
             (MonsterKind::Warg, "warg"),
             (MonsterKind::Troll, "troll"),
             (MonsterKind::Muldant, "muldant"),
+            (MonsterKind::Gardener, "gardener"),
+            (MonsterKind::Dragon, "dragon"),
         ]
         .into_iter()
         .map(|(kind, file)| {
@@ -203,7 +205,7 @@ impl LevelArt {
             MonsterKind::Orc => 2.8,
             MonsterKind::Wolf => 2.4,
             MonsterKind::Warg => 6.2,
-            MonsterKind::Troll => 6.0,
+            MonsterKind::Troll | MonsterKind::Gardener | MonsterKind::Dragon => 6.0,
             MonsterKind::Muldant => 6.0,
             _ => 2.0,
         };

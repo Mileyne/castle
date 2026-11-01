@@ -158,8 +158,20 @@ mod tests {
     #[test]
     fn the_embedded_script_parses_and_has_every_scene() {
         let script = Script::builtin();
-        assert_eq!(script.0.len(), 20);
-        for scene in ["prologue", "intro", "alcove", "boss_muldant"] {
+        assert_eq!(script.0.len(), 30);
+        for scene in [
+            "prologue",
+            "intro",
+            "alcove",
+            "boss_muldant",
+            // Le récit en cinq actes.
+            "samelia_taken",
+            "elves_dawn",
+            "boss_gardener",
+            "samelia_rescued",
+            "gate_farewell",
+            "heart_reveal",
+        ] {
             assert!(script.0.contains_key(scene), "scène {scene} manquante");
         }
     }

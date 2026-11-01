@@ -1185,6 +1185,7 @@ fn rescue_captives(
     mut captives: Query<(Entity, &Position, &mut RescueHold, Has<Guide>), (With<Captive>, Without<Player>)>,
     mut quests: Query<&mut Quest>,
     mut rng: ResMut<Rng>,
+    level: Res<Level>,
 ) {
     for (entity, captive_pos, mut hold, is_guide) in &mut captives {
         if players.iter().any(|pos| pos.0.distance(captive_pos.0) <= RESCUE_RANGE) {
@@ -1195,10 +1196,11 @@ fn rescue_captives(
         if hold.0 >= RESCUE_TIME {
             commands.entity(entity).despawn();
             if is_guide {
-                // Samélia délivrée remercie les héros à sa façon.
+                // Samélia délivrée remercie les héros à sa façon: à la fin de l'acte 2, elle ouvre la Porte des Racines.
+                let node = if castle_shared::act_of(level.0).0 == 2 { "samelia_rescued" } else { "samelia_freed" };
                 commands.spawn((
                     Position(captive_pos.0),
-                    DialogueTrigger { node: "samelia_freed", radius: 200.0, delay: 0.5, fired: false },
+                    DialogueTrigger { node, radius: 200.0, delay: 0.5, fired: false },
                 ));
             }
             // Un prisonnier délivré remercie: quelques pièces et de quoi se soigner.
@@ -1539,6 +1541,16 @@ fn dialogue_node(name: &str) -> Option<&'static str> {
         "boss_troll",
         "boss_muldant",
         "samelia_freed",
+        "samelia_taken",
+        "elves_dawn",
+        "boss_gardener",
+        "samelia_rescued",
+        "gate_farewell",
+        "heart_reveal",
+        "rope_intro",
+        "rope_panel",
+        "courtyard_intro",
+        "courtyard_panel",
     ]
     .into_iter()
     .find(|n| *n == name)
@@ -1659,7 +1671,6 @@ fn plan_level(dungeon: &Dungeon, name: &str, region: Region, level: u32, rng: &m
     // Une scène présente le niveau: celui du Chevalier, puis la première énigme complète.
     let intro = match level {
         KNIGHT_LEVEL => Some("knight_intro"),
-        6 => Some("castle_intro"),
         _ => None,
     };
     if let Some(node) = intro {
@@ -1847,91 +1858,139 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
     }
 }
 
-/// Région de chaque niveau de la campagne (les extérieurs d'abord, puis les régions du château).
-/// Le niveau où le Chevalier est à l'honneur: la porte royale n'a qu'à être poussée.
-const KNIGHT_LEVEL: u32 = 5;
+/// Le niveau où le Chevalier est à l'honneur: la porte royale n'a qu'à être poussée (les cryptes, au début de l'acte 3 intérieur).
+const KNIGHT_LEVEL: u32 = 11;
 
+/// Région de chaque niveau de la campagne, acte par acte: la forêt et ses brumes (acte 1), le monde des elfes (acte 2), les portes de
+/// Nareff et les cryptes (acte 3), les jardins, la bibliothèque et la forge (acte 4), la tour et les appartements royaux (acte 5).
 const CAMPAIGN_REGIONS: [Region; LEVEL_COUNT as usize] = [
     Region::Forest,
     Region::Marsh,
+    Region::Forest,
+    Region::Forest,
+    Region::Forest,
+    Region::Marsh,
+    Region::Marsh,
+    Region::Forest,
     Region::Approach,
     Region::Approach,
     Region::Crypts,
+    Region::Crypts,
     Region::Gardens,
     Region::Library,
-    Region::Library,
+    Region::Forge,
     Region::Forge,
     Region::Tower,
     Region::Royal,
     Region::Royal,
+    Region::Royal,
 ];
 
-/// Les niveaux extérieurs de la campagne: la forêt (chasser la meute pour ouvrir la barrière), le marais (retrouver les
-/// planches du pont), le chemin du château (délivrer les gardes qui baissent le pont-levis) et l'arène de la meute, devant
-/// la porte du château.
+/// Les bêtes du monde des elfes: de petits gobelins, des chauves-souris, et des goules à la place des créatures végétales (à venir).
+const ELF_FAUNA: &[(MonsterKind, f32)] = &[(MonsterKind::Goblin, 0.55), (MonsterKind::Bat, 0.2), (MonsterKind::Ghoul, 0.25)];
+
+/// Les niveaux extérieurs de la campagne, qui sont générés (les autres viennent de châteaux générés): chaque niveau commence dans le
+/// décor où le précédent s'est terminé (`arrival`), et le premier dans une clairière.
+///
+/// - Acte 1, la forêt: la brume (1), le sous-bois sous la pluie (2), le fortin du garde-chasse (3), la meute, de nuit (4).
+/// - Acte 2, le monde des elfes: les racines (5), le marais luminescent (6), la rivière et son pont de corde (7), la clairière du
+///   Jardinier Noir, qui retient Samélia (8).
+/// - Acte 3: les abords de Nareff (9, un niveau de fichier), la cour d'honneur (10), les cryptes (11, fichier), le tombeau du roi (12).
+/// - Acte 4: le combat du Dragon est dans la forge (16).
 fn outdoor_spec(level: u32) -> Option<outdoor::OutdoorSpec> {
+    use outdoor::{Mechanism, OutdoorSpec};
+    let base = |name, region, level, clearings, pack, quest, exit, arrival| OutdoorSpec {
+        name,
+        region,
+        level,
+        clearings,
+        pack,
+        extra_wolves: 0,
+        generators: true,
+        quest,
+        exit,
+        arena: false,
+        mechanism: None,
+        captives: 0,
+        boss: None,
+        filler: MonsterKind::Wolf,
+        fauna: None,
+        guide: false,
+        arrival,
+    };
     let spec = match level {
-        // Le premier niveau sert d'introduction: pas de mécanisme, juste la chasse.
-        1 => outdoor::OutdoorSpec {
-            name: "La forêt de brume",
-            region: Region::Forest,
-            level,
-            clearings: 3,
-            pack: 3,
-            // Douze loups en plus: la forêt est infestée.
-            extra_wolves: 12,
+        // Le premier niveau sert d'introduction: pas de mécanisme, juste la chasse, et il commence dans une clairière.
+        1 => OutdoorSpec {
             generators: false,
-            quest: Some((QuestKind::Hunt, 12)),
-            exit: ExitKind::Gate,
-            arena: false,
-            mechanism: None,
-            captives: 0,
+            extra_wolves: 12,
+            ..base("La forêt de brume", Region::Forest, level, 3, 3, Some((QuestKind::Hunt, 12)), ExitKind::Gate, None)
         },
         // Le Forgebraise répare le pont avec une pièce de rechange trouvée dans une clairière.
-        2 => outdoor::OutdoorSpec {
-            name: "Les marais hantés",
-            region: Region::Marsh,
-            level,
-            clearings: 4,
-            pack: 3,
-            extra_wolves: 0,
-            generators: true,
-            quest: Some((QuestKind::Repair, 1)),
-            exit: ExitKind::Bridge,
-            arena: false,
-            mechanism: Some(outdoor::Mechanism { kind: InteractKind::Mechanism, intro: "bridge_intro", panel: "bridge_panel" }),
-            captives: 0,
+        2 => OutdoorSpec {
+            mechanism: Some(Mechanism { kind: InteractKind::Mechanism, intro: "bridge_intro", panel: "bridge_panel" }),
+            ..base("Le sous-bois détrempé", Region::Marsh, level, 4, 3, Some((QuestKind::Repair, 1)), ExitKind::Bridge, Some(Region::Forest))
         },
-        // Le Rôdeur fixe le disque d'une cible puis la touche d'une flèche pour libérer le pont-levis; des gardes du château
-        // sont prisonniers dans des cages le long du chemin (délivrés, ils laissent du butin).
-        3 => outdoor::OutdoorSpec {
-            name: "Le chemin du château",
-            region: Region::Approach,
-            level,
-            clearings: 4,
-            pack: 4,
-            extra_wolves: 0,
-            generators: true,
-            quest: Some((QuestKind::Release, 1)),
-            exit: ExitKind::Drawbridge,
-            arena: false,
-            mechanism: Some(outdoor::Mechanism { kind: InteractKind::Target, intro: "drawbridge_intro", panel: "drawbridge_panel" }),
+        // Le Rôdeur fixe le disque d'une cible puis la touche d'une flèche pour lever la herse du fortin; des gardes sont prisonniers.
+        3 => OutdoorSpec {
+            mechanism: Some(Mechanism { kind: InteractKind::Target, intro: "drawbridge_intro", panel: "drawbridge_panel" }),
             captives: 2,
+            extra_wolves: 6,
+            ..base("Le fortin du garde-chasse", Region::Forest, level, 4, 4, Some((QuestKind::Release, 1)), ExitKind::Drawbridge, Some(Region::Marsh))
         },
-        // La meute garde la porte: l'Ensorceleur brise le sceau (trois ingrédients), une fois la meute vaincue.
-        4 => outdoor::OutdoorSpec {
-            name: "La meute",
-            region: Region::Approach,
-            level,
-            clearings: 1,
-            pack: 12,
-            extra_wolves: 0,
+        // La meute garde la porte, de nuit: l'Ensorceleur brise le sceau (trois ingrédients), une fois la meute vaincue.
+        4 => OutdoorSpec {
             generators: false,
-            quest: Some((QuestKind::Unseal, 1)),
-            exit: ExitKind::Gate,
             arena: true,
-            mechanism: Some(outdoor::Mechanism { kind: InteractKind::Rune, intro: "gate_intro", panel: "gate_panel" }),
-            captives: 0,
+            boss: Some(MonsterKind::Warg),
+            mechanism: Some(Mechanism { kind: InteractKind::Rune, intro: "gate_intro", panel: "gate_panel" }),
+            ..base("La meute", Region::Forest, level, 1, 12, Some((QuestKind::Unseal, 1)), ExitKind::Gate, Some(Region::Forest))
+        },
+        // Acte 2. Les racines: une chasse dans l'aube verte, parmi de petits gobelins.
+        5 => OutdoorSpec {
+            fauna: Some(ELF_FAUNA),
+            ..base("Les racines", Region::Forest, level, 3, 4, Some((QuestKind::Hunt, 14)), ExitKind::Gate, Some(Region::Forest))
+        },
+        // Le marais luminescent: le Forgebraise remet en marche l'écluse.
+        6 => OutdoorSpec {
+            fauna: Some(ELF_FAUNA),
+            mechanism: Some(Mechanism { kind: InteractKind::Mechanism, intro: "bridge_intro", panel: "bridge_panel" }),
+            ..base("Le marais luminescent", Region::Marsh, level, 4, 4, Some((QuestKind::Repair, 1)), ExitKind::Bridge, Some(Region::Forest))
+        },
+        // La rivière: le Chevalier tend le grand pont de corde.
+        7 => OutdoorSpec {
+            fauna: Some(ELF_FAUNA),
+            mechanism: Some(Mechanism { kind: InteractKind::Push, intro: "rope_intro", panel: "rope_panel" }),
+            ..base("La rivière et le pont de corde", Region::Marsh, level, 4, 5, Some((QuestKind::Breach, 1)), ExitKind::Bridge, Some(Region::Marsh))
+        },
+        // La clairière du Jardinier Noir, qui retient Samélia dans une cage de racines.
+        8 => OutdoorSpec {
+            generators: false,
+            arena: true,
+            boss: Some(MonsterKind::Gardener),
+            filler: MonsterKind::Goblin,
+            guide: true,
+            ..base("La clairière du trône vert", Region::Forest, level, 1, 8, Some((QuestKind::Rescue, 1)), ExitKind::Gate, Some(Region::Marsh))
+        },
+        // Acte 3. La cour d'honneur de Nareff: le Chevalier force la grande porte.
+        10 => OutdoorSpec {
+            mechanism: Some(Mechanism { kind: InteractKind::Push, intro: "courtyard_intro", panel: "courtyard_panel" }),
+            ..base("La cour d'honneur", Region::Approach, level, 3, 5, Some((QuestKind::Breach, 1)), ExitKind::Gate, Some(Region::Approach))
+        },
+        // Le tombeau du roi: le Roi Sans Visage et ses morts.
+        12 => OutdoorSpec {
+            generators: false,
+            arena: true,
+            boss: Some(MonsterKind::Troll),
+            filler: MonsterKind::Skeleton,
+            ..base("Le tombeau du roi", Region::Crypts, level, 1, 10, None, ExitKind::Stairs, Some(Region::Crypts))
+        },
+        // Acte 4. Le cœur de la forge: le Dragon et ses brasiers.
+        16 => OutdoorSpec {
+            generators: false,
+            arena: true,
+            boss: Some(MonsterKind::Dragon),
+            filler: MonsterKind::Orc,
+            ..base("Le cœur de la forge", Region::Forge, level, 1, 8, None, ExitKind::Stairs, Some(Region::Forge))
         },
         _ => return None,
     };
@@ -3065,8 +3124,15 @@ mod tests {
 
     /// Du début à la fin: le héros de la bonne classe actionne le mécanisme du niveau, puis la sortie s'ouvre.
     #[test]
-    fn the_featured_hero_can_open_the_exit_on_levels_two_four_and_five() {
-        for (level, class) in [(2, HeroClass::Forgebraise), (4, HeroClass::Sorcerer), (5, HeroClass::Knight)] {
+    fn the_featured_hero_can_open_the_exit_on_the_levels_that_feature_one() {
+        for (level, class) in [
+            (2, HeroClass::Forgebraise),
+            (4, HeroClass::Sorcerer),
+            (6, HeroClass::Forgebraise),
+            (7, HeroClass::Knight),
+            (10, HeroClass::Knight),
+            (11, HeroClass::Knight),
+        ] {
             let mut app = networked_app();
             let mut save = SaveGame::new("test", GameMode::Solo, 77);
             save.level = level;
@@ -3150,7 +3216,7 @@ mod tests {
     /// Dans un combat de boss, la sortie reste fermée tant que le boss est debout; sa mort l'ouvre et emporte ses renforts.
     #[test]
     fn the_exit_of_a_boss_level_opens_only_when_the_boss_is_dead() {
-        for level in [4, 8, 12] {
+        for level in [4, 8, 12, 16, 20] {
             let mut app = networked_app();
             let mut save = SaveGame::new("test", GameMode::Solo, 77);
             save.level = level;
@@ -3241,7 +3307,7 @@ mod tests {
     /// Chaque boss attaque l'équipe qui entre dans son arène: un héros qui reste devant lui finit par être touché.
     #[test]
     fn every_boss_hurts_a_hero_who_stays_in_the_arena() {
-        for level in [4, 8, 12] {
+        for level in [4, 8, 12, 16, 20] {
             let mut app = networked_app();
             let mut save = SaveGame::new("test", GameMode::Solo, 77);
             save.level = level;
@@ -3583,13 +3649,16 @@ mod tests {
         assert_eq!(app.world().resource::<DialogueSession>().active.as_deref(), Some("bridge_intro"));
     }
 
-    /// Les niveaux 2 à 5 mettent chacun une classe à l'honneur; le niveau 1 n'a pas de mécanisme; le 6 est l'énigme complète.
+    /// Les niveaux d'extérieur mettent chacun une classe à l'honneur; le niveau 1 n'a pas de mécanisme; le 13 est l'énigme complète.
     #[test]
-    fn levels_two_to_five_each_feature_one_hero() {
+    fn the_outdoor_levels_each_feature_one_hero() {
         let expected = [
             (2, QuestKind::Repair, InteractKind::Mechanism, PickupKind::GearPart),
             (3, QuestKind::Release, InteractKind::Target, PickupKind::TargetDisc),
             (4, QuestKind::Unseal, InteractKind::Rune, PickupKind::Ingredient),
+            (6, QuestKind::Repair, InteractKind::Mechanism, PickupKind::GearPart),
+            (7, QuestKind::Breach, InteractKind::Push, PickupKind::Coin),
+            (10, QuestKind::Breach, InteractKind::Push, PickupKind::Coin),
         ];
         for (level, quest, kind, supply) in expected {
             let def = level_def(level);
@@ -3607,12 +3676,12 @@ mod tests {
         }
         // Niveau 1: une introduction, sans mécanisme.
         assert!(!level_def(1).things.iter().any(|t| matches!(t, Thing::Panel { .. })));
-        // Niveau 5: le Chevalier pousse la porte royale, sans garde ni herse; niveau 6: l'énigme complète.
-        let knight = level_def(5);
+        // Niveau 11: le Chevalier pousse la porte royale, sans garde ni herse; niveau 13: l'énigme complète.
+        let knight = level_def(11);
         assert_eq!(knight.quest.map(|(k, _)| k), Some(QuestKind::Breach));
         assert!(!knight.things.iter().any(|t| matches!(t, Thing::Ward { .. } | Thing::Panel { .. } | Thing::Portcullis { .. })));
         assert!(knight.layout.connections.iter().any(|c| c.door == Some(DoorKind::Royal)));
-        let full = level_def(6);
+        let full = level_def(13);
         assert!(full.things.iter().any(|t| matches!(t, Thing::Ward { .. })));
         assert_eq!(full.things.iter().filter(|t| matches!(t, Thing::Panel { .. })).count(), 3);
     }

@@ -29,10 +29,14 @@ pub enum Monster {
     Troll,
     /// Boss: Lord Muldant.
     Muldant,
+    /// Boss de l'acte 2: le Jardinier Noir (modèle provisoire: le troll, verdi).
+    Gardener,
+    /// Boss de l'acte 4: le Dragon de la Forge (modèle provisoire: le troll, rougi).
+    Dragon,
 }
 
 /// Ordre des lignes dans la planche (le client utilise les mêmes indices).
-pub const MONSTERS: [Monster; 9] = [
+pub const MONSTERS: [Monster; 11] = [
     Monster::Skeleton,
     Monster::Bat,
     Monster::Goblin,
@@ -42,6 +46,8 @@ pub const MONSTERS: [Monster; 9] = [
     Monster::Warg,
     Monster::Troll,
     Monster::Muldant,
+    Monster::Gardener,
+    Monster::Dragon,
 ];
 
 pub(crate) fn skeleton_dims() -> Dims {
@@ -207,7 +213,7 @@ fn lunge(parts: &mut [Part], monster: Monster, t: f32) {
     // La chauve-souris pique du haut vers l'avant; les autres bondissent.
     let (back, forward, lean_back, lean_forward, hop) = match monster {
         Monster::Bat => (0.1, 0.55, 0.15, 0.55, 0.0),
-        Monster::Orc | Monster::Troll => (0.06, 0.28, 0.12, 0.38, 0.02),
+        Monster::Orc | Monster::Troll | Monster::Gardener | Monster::Dragon => (0.06, 0.28, 0.12, 0.38, 0.02),
         _ => (0.08, 0.38, 0.18, 0.5, 0.06),
     };
     let angle = lean_forward * strike - lean_back * windup;
@@ -231,5 +237,7 @@ pub(crate) fn build_manga(monster: Monster, pose: Pose) -> Vec<Part> {
         Monster::Warg => crate::monsters_boss::warg(pose),
         Monster::Troll => crate::monsters_boss::troll(pose),
         Monster::Muldant => crate::monsters_boss::muldant(pose),
+        Monster::Gardener => crate::monsters_boss::gardener(pose),
+        Monster::Dragon => crate::monsters_boss::dragon(pose),
     }
 }

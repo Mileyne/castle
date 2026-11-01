@@ -39,6 +39,10 @@ struct Decor {
 @group(constants::MATERIAL_BIND_GROUP) @binding(2) var<uniform> decor: Decor;
 @group(constants::MATERIAL_BIND_GROUP) @binding(3) var walls: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(4) var walls_samp: sampler;
+// Le motif du feuillage, cuit une fois (client/src/decor3d/foliage.rs): un texel par pixel de l'art, (x, hauteur, y du monde 2D),
+// qui se répète. R: position dans le dégradé feuillage; G: ombrage ÷ 1,5.
+@group(constants::MATERIAL_BIND_GROUP) @binding(5) var foliage_tex: texture_3d<f32>;
+const FOLIAGE_DIMS: vec3<i32> = vec3<i32>(192, 96, 192);
 
 // La matière du mur que l'on dessine (1 pierre, 2 feuillage), lue sur la carte des murs: chaque tuile a la sienne.
 var<private> wall_kind: f32 = 1.0;
@@ -212,52 +216,13 @@ fn vnoise3(p: vec3<f32>) -> f32 {
     return mix(a, b, u.z);
 }
 
-// Le motif cellulaire en trois dimensions: le centre le plus proche parmi des centres jetés au hasard (un par case de `size`
-// unités). Renvoie la distance à ce centre (en cases), un nombre propre à la case, et le vecteur vers le centre.
-struct Cell {
-    dist: f32,
-    id: f32,
-    toward: vec3<f32>,
-};
-
-fn cell_of(p: vec3<f32>, size: f32) -> Cell {
-    let g = p / size;
-    let i = floor(g);
-    let f = fract(g);
-    var best = Cell(8.0, 0.0, vec3<f32>(0.0));
-    for (var dz = -1; dz <= 1; dz = dz + 1) {
-        for (var dy = -1; dy <= 1; dy = dy + 1) {
-            for (var dx = -1; dx <= 1; dx = dx + 1) {
-                let c = vec3<f32>(f32(dx), f32(dy), f32(dz));
-                let r = vec3<f32>(hash31(i + c), hash31(i + c + vec3<f32>(31.7, 17.3, 5.9)), hash31(i + c + vec3<f32>(7.1, 53.3, 23.7)));
-                let to = c + r - f;
-                let d = length(to);
-                if d < best.dist {
-                    best = Cell(d, hash31(i + c + vec3<f32>(5.1, 9.7, 41.3)), to);
-                }
-            }
-        }
-    }
-    return best;
-}
-
 // Feuillage: des touffes arrondies, éclairées par le soleil, sombres entre elles. Le motif est dans l'espace (x, hauteur, y du monde 2D):
 // il se poursuit d'une face au dessus et d'un côté à l'autre sans coupure, au lieu de changer à chaque arête du cube.
 fn leaves(p: vec3<f32>) -> vec3<f32> {
-    let px = pixel();
-    let q = floor(p / px) * px;
-    let big = cell_of(q, 8.0);
-    // Le soleil vient du nord-ouest et d'en haut (x, hauteur, y): la touffe est éclairée du côté qui lui fait face.
-    let sun = normalize(vec3<f32>(-0.45, 0.75, 0.5));
-    let lit = clamp(0.5 - 1.0 * dot(big.toward, sun), 0.0, 1.0);
-    var color = mix(decor.color_e.rgb, decor.color_d.rgb, clamp(big.id * 0.55 + lit * 0.6, 0.0, 1.0));
-    // Entre deux touffes, c'est l'ombre.
-    color = color * (1.0 - 0.55 * smoothstep(0.38, 0.72, big.dist));
-    // Quelques feuilles claires sur la partie éclairée.
-    if lit > 0.55 && hash31(q / px) > 0.93 {
-        color = color * 1.35;
-    }
-    return color * (0.94 + 0.12 * hash31(q / px + vec3<f32>(3.0, 1.0, 2.0)));
+    let k = vec3<i32>(floor(p / pixel()));
+    let at = ((k % FOLIAGE_DIMS) + FOLIAGE_DIMS) % FOLIAGE_DIMS;
+    let texel = textureLoad(foliage_tex, at, 0).rg;
+    return mix(decor.color_e.rgb, decor.color_d.rgb, texel.x) * (texel.y * 1.5);
 }
 
 // Herbe sous les arbres: des plaques et de petits brins, au pixel de l'art.

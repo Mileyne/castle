@@ -61,6 +61,20 @@ pub(crate) fn warg(pose: Pose) -> Vec<Part> {
     scaled(p, 1.25)
 }
 
+/// Le Jardinier Noir (modèle provisoire): le troll, verdi comme une écorce moussue.
+pub(crate) fn gardener(pose: Pose) -> Vec<Part> {
+    let mut p = troll(pose);
+    tint(&mut p, [0.62, 1.0, 0.55]);
+    p
+}
+
+/// Le Dragon de la Forge (modèle provisoire): le troll, rougi comme du métal chauffé.
+pub(crate) fn dragon(pose: Pose) -> Vec<Part> {
+    let mut p = troll(pose);
+    tint(&mut p, [1.35, 0.55, 0.4]);
+    p
+}
+
 /// Grogoth: l'orque en plus lourd, la peau grise-verte, une couronne de fer et d'or ébréchée sur la tête.
 pub(crate) fn troll(pose: Pose) -> Vec<Part> {
     let d = orc_dims();

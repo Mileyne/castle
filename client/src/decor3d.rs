@@ -64,6 +64,7 @@ const TORCH_LIGHT_HEIGHT: f32 = 21.0;
 const LANTERN_COLOR: Vec3 = Vec3::new(1.0, 0.87, 0.68);
 
 mod flame;
+mod foliage;
 pub(crate) mod look;
 #[cfg(not(any(target_os = "ios", target_os = "tvos")))]
 pub mod preview;
@@ -154,6 +155,9 @@ struct DecorMaterial {
     #[texture(3)]
     #[sampler(4)]
     walls: Handle<Image>,
+    /// Le motif du feuillage, cuit une fois (voir `foliage`).
+    #[texture(5, dimension = "3d")]
+    foliage: Handle<Image>,
 }
 
 impl Material for DecorMaterial {
@@ -167,6 +171,10 @@ impl Material for DecorMaterial {
         AlphaMode::Mask(0.5)
     }
 }
+
+/// L'antialiasing des deux caméras. Coupé sur Apple TV: le rendu y est déjà à moitié de la définition de l'écran, et le MSAA ×4 y
+/// coûte trop de bande passante.
+pub(crate) const MSAA: Msaa = if cfg!(target_os = "tvos") { Msaa::Off } else { Msaa::Sample4 };
 
 /// De combien chaque bloc est plus haut que le précédent, en unités du monde.
 const LAYER_LIFT: f32 = 0.01;
@@ -188,6 +196,7 @@ fn setup(mut commands: Commands) {
     commands.spawn((
         DecorCamera,
         Camera3d::default(),
+        MSAA,
         Camera { order: -1, clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() },
         Projection::from(OrthographicProjection { near: -2000.0, far: 2000.0, ..OrthographicProjection::default_2d() }),
         Tonemapping::None,
@@ -262,6 +271,7 @@ fn build_chunks(
     let def = expedition.and_then(|expedition| look::level_of(&room, expedition.level));
     let kinds = look::wall_kinds(&room, region, def);
     let walls = images.add(wall_mask(&room, &kinds));
+    let foliage_pattern = foliage::pattern(&mut images);
     let palette = look::palette(region, &room, def);
     // Les réglages de lumière de ce niveau (les siens, sinon ceux de sa région).
     let light = tuning.light(expedition.map_or(1, |expedition| expedition.level), region);
@@ -288,6 +298,7 @@ fn build_chunks(
             // Le sol sait s'il y a des arbres (y du style): il s'assombrit alors au pied des troncs.
             data: base(0.0),
             walls: walls.clone(),
+            foliage: foliage_pattern.clone(),
         });
         commands.spawn((Decor3d { source: Some(entity), material: material.clone() }, Mesh3d(mesh), MeshMaterial3d(material), RenderLayers::layer(LAYER), Transform::default()));
         *visibility = Visibility::Hidden;
@@ -296,7 +307,7 @@ fn build_chunks(
     // Les murs: un seul maillage pour tout le niveau.
     walls_entities.iter().for_each(|entity| commands.entity(entity).despawn());
     torch_entities.iter().for_each(|entity| commands.entity(entity).despawn());
-    let material = materials.add(DecorMaterial { image: images.add(Image::default()), data: base(1.0), walls });
+    let material = materials.add(DecorMaterial { image: images.add(Image::default()), data: base(1.0), walls, foliage: foliage_pattern });
     commands.spawn((
         Decor3dWalls,
         Decor3d { source: None, material: material.clone() },

@@ -63,7 +63,7 @@ enum Item {
 }
 
 impl Item {
-    const MONSTERS: [Item; 9] = [
+    const MONSTERS: [Item; 11] = [
         Item::Monster(MonsterKind::Skeleton),
         Item::Monster(MonsterKind::Bat),
         Item::Monster(MonsterKind::Goblin),
@@ -73,6 +73,8 @@ impl Item {
         Item::Monster(MonsterKind::Warg),
         Item::Monster(MonsterKind::Troll),
         Item::Monster(MonsterKind::Muldant),
+        Item::Monster(MonsterKind::Gardener),
+        Item::Monster(MonsterKind::Dragon),
     ];
 
     const ELEMENTS: [Item; 4] = [Item::Generator, Item::Trap, Item::Relic, Item::Captive];
@@ -113,6 +115,8 @@ impl Item {
             Item::Monster(MonsterKind::Warg) => "Boss: Croc-Noir (chef de meute)",
             Item::Monster(MonsterKind::Troll) => "Boss: Grogoth (roi-troll)",
             Item::Monster(MonsterKind::Muldant) => "Boss: Lord Muldant",
+            Item::Monster(MonsterKind::Gardener) => "Boss: le Jardinier Noir",
+            Item::Monster(MonsterKind::Dragon) => "Boss: le Dragon de la Forge",
             Item::Generator => "Générateur",
             Item::Trap => "Piège",
             Item::Pickup(PickupKind::Coin) => "Pièce",
@@ -158,7 +162,7 @@ fn marker(thing: &Thing) -> (&'static str, Color32) {
                 MonsterKind::Orc => "O",
                 MonsterKind::Ghoul => "H",
                 MonsterKind::Wolf => "L",
-                MonsterKind::Warg | MonsterKind::Troll | MonsterKind::Muldant => "☠",
+                MonsterKind::Warg | MonsterKind::Troll | MonsterKind::Muldant | MonsterKind::Gardener | MonsterKind::Dragon => "☠",
             },
             Color32::from_rgb(220, 70, 70),
         ),

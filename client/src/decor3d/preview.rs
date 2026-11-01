@@ -226,12 +226,14 @@ fn setup(
     let foliage = if kinds.contains(&2) { 2.0 } else { 0.0 };
     let yaw = options.yaw.to_radians();
     let walls = images.add(wall_mask(&room, &kinds));
+    let foliage_pattern = super::foliage::pattern(&mut images);
 
     // Le sol, puis les murs: comme dans le jeu.
     let ground = materials.add(DecorMaterial {
         image: images.add(floor_image(size, &options.floor)),
         data: decor_data(&room, 0.0, foliage, &palette, mood, yaw),
         walls: walls.clone(),
+        foliage: foliage_pattern.clone(),
     });
     let ground_entity = commands.spawn((Mesh3d(meshes.add(ground_mesh(&room, IVec2::ZERO, size.x, size.y, 0.0))), MeshMaterial3d(ground.clone()), RenderLayers::layer(LAYER))).id();
     let _ = ground_entity;
@@ -239,6 +241,7 @@ fn setup(
         image: images.add(Image::default()),
         data: decor_data(&room, 1.0, foliage, &palette, mood, yaw),
         walls,
+        foliage: foliage_pattern,
     });
     commands.spawn((Mesh3d(meshes.add(walls_mesh(&room))), MeshMaterial3d(wall_material.clone()), RenderLayers::layer(LAYER)));
 

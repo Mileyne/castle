@@ -34,6 +34,15 @@ pub struct OutdoorSpec {
     pub mechanism: Option<Mechanism>,
     /// Prisonniers en cage à délivrer (ils laissent du butin).
     pub captives: u32,
+    /// Le boss de l'arène (au milieu de la grande clairière), et les monstres ordinaires qui l'accompagnent.
+    pub boss: Option<MonsterKind>,
+    pub filler: MonsterKind,
+    /// Les monstres des clairières de combat, à la place de ceux de la région (les bêtes d'un monde particulier).
+    pub fauna: Option<&'static [(MonsterKind, f32)]>,
+    /// Samélia, en cage dans l'arène: elle remplace un des prisonniers de l'objectif « délivrer ».
+    pub guide: bool,
+    /// La région du niveau précédent: la clairière de départ en reprend le décor, pour que le passage d'un niveau à l'autre soit continu.
+    pub arrival: Option<Region>,
 }
 
 struct Grid {
@@ -181,6 +190,11 @@ pub fn outdoor_level(spec: &OutdoorSpec, seed: u64) -> LevelDef {
         }
     }
 
+    // Le boss, plus gros qu'une tuile, doit avoir de la place pour bouger: un disque est dégagé autour du centre de l'arène (les blocs de
+    // 2 x 2 tuiles posés au hasard peuvent empiéter sur la zone qu'on leur interdisait).
+    if spec.arena && spec.boss.is_some() {
+        grid.disc(centers[1].x, centers[1].y, 5, true);
+    }
     let size = UVec2::new(w as u32, h as u32);
     let rows: Vec<String> = (0..h).rev().map(|y| (0..w).map(|x| if grid.at(x, y) { '.' } else { '#' }).collect()).collect();
     let mut things = Vec::new();
@@ -202,8 +216,12 @@ pub fn outdoor_level(spec: &OutdoorSpec, seed: u64) -> LevelDef {
         let room = rooms[i].clone();
         let pack = if spec.arena { spec.pack } else { spec.pack + (n as u32 / 2) };
         for _ in 0..pack {
-            let kind = MonsterKind::pick_in(spec.region, spec.level, rng.next_f32());
-            things.push(Thing::Monster { kind: if spec.arena { MonsterKind::Wolf } else { kind }, at: free_point(&room, &grid, &mut rng) });
+            let roll = rng.next_f32();
+            let kind = match spec.fauna {
+                Some(table) => MonsterKind::pick_from_table(table, roll),
+                None => MonsterKind::pick_in(spec.region, spec.level, roll),
+            };
+            things.push(Thing::Monster { kind: if spec.arena { spec.filler } else { kind }, at: free_point(&room, &grid, &mut rng) });
         }
         if spec.generators && n >= 1 && !spec.arena {
             things.push(Thing::Generator { at: free_point(&room, &grid, &mut rng) });
@@ -233,6 +251,8 @@ pub fn outdoor_level(spec: &OutdoorSpec, seed: u64) -> LevelDef {
                 QuestKind::Retrieve => things.push(Thing::Relic {
                     at: free_point(&room, &grid, &mut rng),
                 }),
+                // Samélia, quand le niveau la retient, est la première prisonnière: elle a sa propre cage.
+                QuestKind::Rescue if spec.guide && k == 0 => {}
                 QuestKind::Rescue => things.push(Thing::Captive {
                     at: free_point(&room, &grid, &mut rng),
                 }),
@@ -248,6 +268,13 @@ pub fn outdoor_level(spec: &OutdoorSpec, seed: u64) -> LevelDef {
     for k in 0..spec.captives as usize {
         let room = rooms[combat[(combat.len() - 1 - k % combat.len().max(1)).min(combat.len() - 1)]].clone();
         things.push(Thing::Captive { at: free_point(&room, &grid, &mut rng) });
+    }
+    if let Some(boss) = spec.boss {
+        things.push(Thing::Monster { kind: boss, at: tile_at(centers[1].x, centers[1].y) });
+    }
+    if spec.guide {
+        let room = rooms[1].clone();
+        things.push(Thing::Guide { at: free_point(&room, &grid, &mut rng), caged: true });
     }
     let exit_room = rooms.last().cloned().expect("une zone de sortie");
     things.push(Thing::Exit { kind: spec.exit, at: tile_at(exit_room.center().x as i32, exit_room.center().y as i32) });
@@ -283,7 +310,8 @@ pub fn outdoor_level(spec: &OutdoorSpec, seed: u64) -> LevelDef {
         things.push(Thing::Trigger { node: mechanism.intro.to_string(), at: tile_at(start.x as i32, start.y as i32), radius: 200.0, delay: 2.0 });
     }
 
-    LevelDef {
+    let start = rooms[0].clone();
+    let mut def = LevelDef {
         style: Vec::new(),
         decor: Vec::new(),
         format: LEVEL_FORMAT,
@@ -295,7 +323,18 @@ pub fn outdoor_level(spec: &OutdoorSpec, seed: u64) -> LevelDef {
         quest: spec.quest,
         exit_area: false,
         things,
+    };
+    // Le départ prolonge la fin du niveau précédent: autour de la clairière de départ, les murs et le sol reprennent la matière de la
+    // région d'où l'on vient (le premier niveau, lui, commence dans une clairière de sa propre région).
+    if let Some(previous) = spec.arrival.filter(|previous| *previous != spec.region) {
+        let (min, max) = (start.min.as_ivec2() - IVec2::splat(5), start.max.as_ivec2() + IVec2::splat(5));
+        for y in min.y..=max.y {
+            for x in min.x..=max.x {
+                def.set_region_at(x, y, previous);
+            }
+        }
     }
+    def
 }
 
 #[cfg(test)]
@@ -316,6 +355,11 @@ mod tests {
             arena,
             mechanism: Some(Mechanism { kind: InteractKind::Rune, intro: "gate_intro", panel: "gate_panel" }),
             captives: 1,
+            boss: None,
+            filler: MonsterKind::Wolf,
+            fauna: None,
+            guide: false,
+            arrival: None,
         }
     }
 

@@ -11,6 +11,8 @@
         Line("sorcerer", "prologue_07"),
         Line("ranger", "prologue_08"),
         Line("forgebraise", "prologue_09"),
+        Line("samelia", "prologue_10"),
+        Line("knight", "prologue_11"),
     ]),
     (id: "intro", steps: [
         Line("samelia", "intro_e0"),
@@ -137,5 +139,67 @@
         Line("samelia", "samelia_freed_01"),
         Line("knight", "samelia_freed_02"),
         Line("samelia", "samelia_freed_03"),
+    ]),
+    // Le récit en cinq actes (voir CASTLE.md): Samélia est enlevée à la fin de l'acte 1, délivrée au bout de l'acte 2, puis elle attend aux
+    // portes de Nareff et ne revient qu'à l'acte 5. Ces scènes sont prêtes; les niveaux qui les appellent restent à écrire.
+    // Fin de l'acte 1, après la mort du Warg, en pleine nuit: sa voix s'éteint et les lanternes baissent.
+    (id: "samelia_taken", steps: [
+        Line("sorcerer", "samelia_taken_01"),
+        Line("samelia", "samelia_taken_02"),
+        Line("samelia", "samelia_taken_03"),
+        Line("ranger", "samelia_taken_04"),
+        Line("knight", "samelia_taken_05"),
+    ]),
+    // Acte 2, niveau 1: les objets rayonnent en vert, ce sont des fragments de sa magie.
+    (id: "elves_dawn", steps: [
+        Line("samelia", "elves_dawn_01"),
+        Line("ranger", "elves_dawn_02"),
+        Line("sorcerer", "elves_dawn_03"),
+    ]),
+    // Acte 2, niveau 4: l'elfe maléfique et sa prisonnière, avant le combat.
+    (id: "boss_gardener", steps: [
+        Line("gardener", "boss_gardener_01"),
+        Line("samelia", "boss_gardener_02"),
+        Line("sorcerer", "boss_gardener_03"),
+        Line("knight", "boss_gardener_04"),
+    ]),
+    // Acte 2, niveau 4: une fois délivrée, elle ouvre la Porte des Racines et rallume les lanternes.
+    (id: "samelia_rescued", steps: [
+        Line("samelia", "samelia_rescued_01"),
+        Line("knight", "samelia_rescued_02"),
+        Line("samelia", "samelia_rescued_03"),
+        Line("samelia", "samelia_rescued_04"),
+    ]),
+    // Acte 3, niveau 1: les murs de Nareff rejettent la magie des elfes, elle reste à la porte.
+    (id: "gate_farewell", steps: [
+        Line("samelia", "gate_farewell_01"),
+        Line("samelia", "gate_farewell_02"),
+        Line("forgebraise", "gate_farewell_03"),
+    ]),
+    // Acte 2, niveau 7: le Chevalier tend le grand pont de corde.
+    (id: "rope_intro", steps: [
+        Line("knight", "rope_01"),
+        Line("ranger", "rope_02"),
+        Line("knight", "rope_03"),
+    ]),
+    (id: "rope_panel", steps: [
+        Line("knight", "rope_panel_01"),
+        Line("knight", "rope_panel_02"),
+    ]),
+    // Acte 3, niveau 10: le Chevalier force la grande porte de la cour d'honneur.
+    (id: "courtyard_intro", steps: [
+        Line("knight", "courtyard_01"),
+        Line("ranger", "courtyard_02"),
+        Line("knight", "courtyard_03"),
+    ]),
+    (id: "courtyard_panel", steps: [
+        Line("knight", "courtyard_panel_01"),
+        Line("knight", "courtyard_panel_02"),
+    ]),
+    // Acte 5, niveau 3: le battement de la pierre, et la vérité sur Lord Muldant.
+    (id: "heart_reveal", steps: [
+        Line("samelia", "heart_reveal_01"),
+        Line("sorcerer", "heart_reveal_02"),
+        Line("knight", "heart_reveal_03"),
     ]),
 ]

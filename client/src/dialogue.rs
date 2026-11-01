@@ -457,6 +457,7 @@ fn speaker_color(speaker: &str) -> Color {
         "ranger" => css::FOREST_GREEN,
         "forgebraise" => css::ORANGE_RED,
         "samelia" => css::MEDIUM_SEA_GREEN,
+        "gardener" => css::OLIVE_DRAB,
         _ => css::CRIMSON,
     }
     .into()

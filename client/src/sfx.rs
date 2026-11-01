@@ -82,6 +82,8 @@ fn voice_of(kind: MonsterKind) -> (&'static str, f32) {
         MonsterKind::Wolf => ("wolf", 1.0),
         MonsterKind::Warg => ("wolf", 0.7),
         MonsterKind::Troll => ("orc", 0.72),
+        MonsterKind::Gardener => ("orc", 0.8),
+        MonsterKind::Dragon => ("wolf", 0.55),
         MonsterKind::Muldant => ("orc", 0.6),
     }
 }

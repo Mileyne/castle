@@ -247,7 +247,7 @@ pub fn monster_scale(kind: MonsterKind) -> f32 {
         MonsterKind::Orc => 1.15,
         // Les boss dominent l'écran.
         MonsterKind::Warg => 3.1,
-        MonsterKind::Troll => 3.0,
+        MonsterKind::Troll | MonsterKind::Gardener | MonsterKind::Dragon => 3.0,
         MonsterKind::Muldant => 3.0,
         _ => 1.0,
     }

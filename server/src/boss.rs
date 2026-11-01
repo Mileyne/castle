@@ -60,6 +60,9 @@ fn waves(kind: MonsterKind) -> (&'static [f32], MonsterKind, usize) {
     match kind {
         MonsterKind::Warg => (&[], MonsterKind::Wolf, 2),
         MonsterKind::Troll => (&[0.5], MonsterKind::Goblin, 3),
+        // Le Jardinier appelle de petits gobelins à deux tiers puis à un tiers de vie.
+        MonsterKind::Gardener => (&[0.66, 0.33], MonsterKind::Goblin, 4),
+        MonsterKind::Dragon => (&[0.5], MonsterKind::Skeleton, 3),
         _ => (&[0.66, 0.33], MonsterKind::Skeleton, 3),
     }
 }
@@ -68,7 +71,7 @@ fn waves(kind: MonsterKind) -> (&'static [f32], MonsterKind, usize) {
 fn special_interval(kind: MonsterKind, enraged: bool) -> f32 {
     let base = match kind {
         MonsterKind::Warg => 6.5,
-        MonsterKind::Troll => 4.0,
+        MonsterKind::Troll | MonsterKind::Gardener => 4.0,
         _ => 4.5,
     };
     if enraged { base * 0.7 } else { base }
@@ -78,7 +81,8 @@ fn special_interval(kind: MonsterKind, enraged: bool) -> f32 {
 fn special(kind: MonsterKind, enraged: bool) -> BossMove {
     match kind {
         MonsterKind::Warg => BossMove::Howl,
-        MonsterKind::Troll => BossMove::Slam,
+        MonsterKind::Troll | MonsterKind::Gardener => BossMove::Slam,
+        MonsterKind::Dragon => BossMove::Nova,
         // Muldant alterne la foudre noire et les coups de poing au sol une fois enragé.
         _ if enraged => BossMove::Slam,
         _ => BossMove::Nova,

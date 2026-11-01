@@ -132,19 +132,33 @@ fn start_intro(
             GlobalZIndex(90),
         ))
         .with_children(|screen| {
+            // « Acte 2 », le titre de l'acte, puis « Niveau 3 » et le nom du niveau.
+            let (act, rank) = castle_shared::act_of(expedition.level);
             screen.spawn(Node { column_gap: Val::Px(16.0), ..default() }).with_children(|line| {
-                line.spawn((Text::default(), Tr::new("level-word"), ui_font(&assets, 36.0), white, IntroText));
-                line.spawn((Text::new(expedition.level.to_string()), ui_font(&assets, 36.0), white, IntroText));
+                line.spawn((Text::default(), Tr::new("act-word"), ui_font(&assets, 36.0), white, IntroText));
+                line.spawn((Text::new(act.to_string()), ui_font(&assets, 36.0), white, IntroText));
+            });
+            screen.spawn((Text::default(), Tr::new(ACT_KEYS[act as usize - 1]), ui_font(&assets, 18.0), TextColor(css::SILVER.into()), IntroText));
+            screen.spawn(Node { column_gap: Val::Px(16.0), margin: UiRect::top(Val::Px(18.0)), ..default() }).with_children(|line| {
+                line.spawn((Text::default(), Tr::new("level-word"), ui_font(&assets, 24.0), white, IntroText));
+                line.spawn((Text::new(rank.to_string()), ui_font(&assets, 24.0), white, IntroText));
             });
             screen.spawn((
                 Text::default(),
-                Tr::new(expedition.region.name_key()),
+                Tr::new(LEVEL_KEYS[expedition.level.clamp(1, castle_shared::LEVEL_COUNT) as usize - 1]),
                 ui_font(&assets, 18.0),
                 TextColor(css::SILVER.into()),
                 IntroText,
             ));
         });
 }
+
+/// Les clés des titres d'acte, puis des noms des niveaux (dans l'ordre de la campagne).
+const ACT_KEYS: [&str; 5] = ["act-1", "act-2", "act-3", "act-4", "act-5"];
+const LEVEL_KEYS: [&str; 20] = [
+    "level-1", "level-2", "level-3", "level-4", "level-5", "level-6", "level-7", "level-8", "level-9", "level-10", "level-11", "level-12", "level-13",
+    "level-14", "level-15", "level-16", "level-17", "level-18", "level-19", "level-20",
+];
 
 fn run_intro(
     mut commands: Commands,

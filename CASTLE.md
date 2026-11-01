@@ -135,6 +135,37 @@ Thème central : quatre héros essaient de comprendre la volonté d'un château 
 
 ---
 
+## La campagne en cinq actes
+
+Vingt niveaux fixes (`shared/levels/01.ron` à `20.ron`), en cinq actes de quatre niveaux; le quatrième de chaque acte est un combat de boss. Chaque niveau a son heure du jour et sa lumière (`client/assets/lighting.ron`, réglable avec `./lumiere.sh`), et **commence dans le décor où le précédent s'est terminé**: la clairière de départ reprend la matière des murs et du sol de la région d'où l'on vient (le premier niveau, lui, commence dans une clairière). Le soleil ne revient qu'à la fin du jeu.
+
+| Acte | Niveau | Lieu | Objectif | Lumière |
+|---|---|---|---|---|
+| **1. La forêt de brume** | 1 | L'aube dans la brume | Chasser 12 loups | Aube grise, brume dense |
+| | 2 | Le sous-bois détrempé | Le Forgebraise répare la passerelle | Matinée pluvieuse |
+| | 3 | Le fortin du garde-chasse | Le Rôdeur lève la herse, deux gardes prisonniers | Crépuscule naissant |
+| | 4 | La meute (boss: le Warg) | L'Ensorceleur brise le sceau | Nuit noire; Samélia est enlevée (`samelia_taken`) |
+| **2. Le monde des elfes** | 5 | Les racines | Chasse, bêtes des elfes | Aube verte très sombre, les objets rayonnent |
+| | 6 | Le marais luminescent | Le Forgebraise remet l'écluse en marche | Plus vive, bioluminescente |
+| | 7 | La rivière et le pont de corde | Le Chevalier tend le pont | Heure bleue |
+| | 8 | La clairière du trône vert (boss: le Jardinier Noir) | Délivrer Samélia, qui ouvre la Porte des Racines | Clairière froide et verte |
+| **3. Les portes de Nareff** | 9 | Le chemin du château | Le Rôdeur lève le pont-levis | Gris d'avant l'aube |
+| | 10 | La cour d'honneur | Le Chevalier force la grande porte | Brasiers |
+| | 11 | Les cryptes | Le Chevalier pousse la porte royale | Torches |
+| | 12 | Le tombeau du roi (boss: Grogoth, le Roi Sans Visage) | Vaincre le boss | Torches, brume froide |
+| **4. Les entrailles** | 13 | Les jardins maudits | L'énigme complète à quatre classes, délivrer deux prisonniers | Lueur mourante |
+| | 14 | La bibliothèque vivante | Chasse | Chandelles |
+| | 15 | La forge infernale | Délivrer deux prisonniers | Rouge de forge |
+| | 16 | Le cœur de la forge (boss: le Dragon de la Forge) | Vaincre le boss | Lave |
+| **5. Le cœur de Castle** | 17 | La tour astrale | Chasse | Étoiles |
+| | 18 | Les appartements royaux | Retrouver des reliques | Lueurs de souvenirs |
+| | 19 | Les galeries royales | Objectif du niveau | Sombre |
+| | 20 | Le cœur de Nareff (boss: Lord Muldant, en attendant Castle) | Délivrer deux prisonniers, vaincre Muldant | Foudre noire |
+
+**Samélia** enlevée à la fin de l'acte 1, délivrée au bout de l'acte 2, reste ensuite aux portes de Nareff (`gate_farewell`) et ne revient qu'à l'acte 5 (`heart_reveal`). Ses lanternes, offertes au prologue, faiblissent pendant qu'elle est captive (niveaux 5 à 8).
+
+À faire pour boucler cette conception: modèles propres du Jardinier Noir et du Dragon (aujourd'hui le troll, verdi ou rougi), ennemis végétaux de l'acte 2 (aujourd'hui des goules), lumière colorée (vert des elfes, rouge de la forge), le boss final Castle, et les niveaux 14, 17 à 19 à écrire à la main (ce sont des châteaux générés).
+
 ## Plan de développement
 
 Chaque phase se termine par quelque chose de jouable et testable.

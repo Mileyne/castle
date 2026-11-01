@@ -78,6 +78,7 @@ impl Plugin for CameraPlugin {
 fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Camera2d,
+        crate::decor3d::MSAA,
         Projection::from(OrthographicProjection {
             scaling_mode: ScalingMode::WindowSize,
             ..OrthographicProjection::default_2d()

@@ -72,7 +72,8 @@ declare_class!(
             let screen = window.screen();
             let screen_space = screen.coordinateSpace();
             let screen_frame = self.convertRect_toCoordinateSpace(window_bounds, &screen_space);
-            let scale_factor = screen.scale();
+            // Le facteur de la vue (pas celui de l'écran): Castle peut rendre à une échelle plus basse (voir `WinitView::new`).
+            let scale_factor = self.contentScaleFactor();
             let size = crate::dpi::LogicalSize {
                 width: screen_frame.size.width as f64,
                 height: screen_frame.size.height as f64,
@@ -375,6 +376,9 @@ impl WinitView {
 
         if let Some(scale_factor) = window_attributes.platform_specific.scale_factor {
             this.setContentScaleFactor(scale_factor as _);
+        } else if cfg!(target_os = "tvos") {
+            // Castle: l'Apple TV 4K n'a pas le GPU pour dessiner en 3840x2160. On rend en 1920x1080, que la télévision met à l'échelle.
+            this.setContentScaleFactor(1.0);
         }
 
         this

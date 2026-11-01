@@ -9,7 +9,7 @@ pub mod level;
 pub mod save;
 pub mod tileart;
 pub use dungeon::*;
-pub use campaign::{BOSS_EVERY, LEVEL_COUNT, is_boss_level, level_def, level_file};
+pub use campaign::{ACT_COUNT, BOSS_EVERY, LEVEL_COUNT, act_of, is_boss_level, level_def, level_file};
 pub use decor::{DECOR_VARIANTS, Decor, DecorKind, Landmark, LandmarkKind};
 pub use level::{LEVEL_FORMAT, LevelDef, Thing};
 use bevy_replicon::prelude::*;
@@ -350,6 +350,10 @@ pub enum MonsterKind {
     Troll,
     /// Boss du niveau 12: Lord Muldant, un colosse à la peau orange et à la crinière blonde, qui lance de la foudre noire et appelle des squelettes.
     Muldant,
+    /// Boss de l'acte 2 (niveau 8): le Jardinier Noir, un elfe fondu à la forêt, qui frappe de ses racines et appelle des gobelins.
+    Gardener,
+    /// Boss de l'acte 4 (niveau 16): le Dragon de la Forge, gardien des profondeurs, qui lance des ondes de feu.
+    Dragon,
 }
 
 pub struct MonsterStats {
@@ -375,12 +379,14 @@ impl MonsterKind {
             Self::Warg => MonsterStats { max_hp: 1300.0, speed: 72.0, damage: 16.0, cooldown: 0.9, half_size: 18.0, sight: 600.0 },
             Self::Troll => MonsterStats { max_hp: 2200.0, speed: 34.0, damage: 26.0, cooldown: 1.3, half_size: 22.0, sight: 600.0 },
             Self::Muldant => MonsterStats { max_hp: 3000.0, speed: 40.0, damage: 28.0, cooldown: 1.2, half_size: 20.0, sight: 700.0 },
+            Self::Gardener => MonsterStats { max_hp: 2000.0, speed: 36.0, damage: 22.0, cooldown: 1.3, half_size: 22.0, sight: 600.0 },
+            Self::Dragon => MonsterStats { max_hp: 3400.0, speed: 38.0, damage: 30.0, cooldown: 1.2, half_size: 22.0, sight: 700.0 },
         }
     }
 
     /// Un boss: personnage unique du niveau, qu'il faut vaincre en groupe pour libérer la sortie.
     pub fn is_boss(self) -> bool {
-        matches!(self, Self::Warg | Self::Troll | Self::Muldant)
+        matches!(self, Self::Warg | Self::Troll | Self::Muldant | Self::Gardener | Self::Dragon)
     }
 
     /// Clé de traduction du nom d'un boss (barre de vie).
@@ -389,6 +395,8 @@ impl MonsterKind {
             Self::Warg => Some("boss-warg"),
             Self::Troll => Some("boss-troll"),
             Self::Muldant => Some("boss-muldant"),
+            Self::Gardener => Some("boss-gardener"),
+            Self::Dragon => Some("boss-dragon"),
             _ => None,
         }
     }
@@ -422,6 +430,11 @@ impl MonsterKind {
     /// Le monstre tiré par `roll` (entre 0 et 1) dans la table du niveau.
     pub fn pick(level: u32, roll: f32) -> MonsterKind {
         Self::pick_from(Self::spawn_table(level), roll)
+    }
+
+    /// Le monstre tiré par `roll` (entre 0 et 1) dans une table donnée.
+    pub fn pick_from_table(table: &'static [(MonsterKind, f32)], roll: f32) -> MonsterKind {
+        Self::pick_from(table, roll)
     }
 
     fn pick_from(table: &'static [(MonsterKind, f32)], roll: f32) -> MonsterKind {

@@ -153,7 +153,7 @@ impl Material2d for RainMaterial {
 struct Mist(f32);
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
-struct MistMaterial {
+pub(crate) struct MistMaterial {
     /// (échelle, vent x, vent y, densité maximale).
     #[uniform(0)]
     data: Vec4,
@@ -252,22 +252,27 @@ fn update_sky(
         });
     }
     if weather_now == Some(Sky::Mist) && mist.is_empty() {
-        let layers = if lite { MIST_LAYERS_LITE } else { MIST_LAYERS };
-        // La brume ne brille pas: sa clarté suit la lumière ambiante de la région (dans une forêt sombre, elle est grise et terne).
-        let brightness = (active.0.ambient * MIST_BRIGHTNESS).clamp(0.1, 1.0);
-        let plane = meshes.add(Plane3d::default().mesh().size(MIST_PLANE, MIST_PLANE));
-        for (height, share) in MIST_SHEETS {
-            commands.spawn((
-                Mist(height),
-                Mesh3d(plane.clone()),
-                MeshMaterial3d(mist_materials.add(MistMaterial {
-                    data: Vec4::new(MIST_SCALE, MIST_DRIFT.x, MIST_DRIFT.y, MIST_DENSITY * share),
-                    params: Vec4::new(layers, brightness, 0.0, 0.0),
-                })),
-                RenderLayers::layer(crate::decor3d::LAYER),
-                Transform::from_xyz(0.0, height, 0.0),
-            ));
-        }
+        spawn_mist(&mut commands, &mut meshes, &mut mist_materials, active.0.ambient, lite);
+    }
+}
+
+/// Pose les nappes de brume (voir `MIST_SHEETS`). La brume ne brille pas: sa clarté suit la lumière ambiante (dans une forêt sombre, elle
+/// est grise et terne).
+pub(crate) fn spawn_mist(commands: &mut Commands, meshes: &mut Assets<Mesh>, mist_materials: &mut Assets<MistMaterial>, ambient: f32, lite: bool) {
+    let layers = if lite || cfg!(target_os = "tvos") { MIST_LAYERS_LITE } else { MIST_LAYERS };
+    let brightness = (ambient * MIST_BRIGHTNESS).clamp(0.1, 1.0);
+    let plane = meshes.add(Plane3d::default().mesh().size(MIST_PLANE, MIST_PLANE));
+    for (height, share) in MIST_SHEETS {
+        commands.spawn((
+            Mist(height),
+            Mesh3d(plane.clone()),
+            MeshMaterial3d(mist_materials.add(MistMaterial {
+                data: Vec4::new(MIST_SCALE, MIST_DRIFT.x, MIST_DRIFT.y, MIST_DENSITY * share),
+                params: Vec4::new(layers, brightness, 0.0, 0.0),
+            })),
+            RenderLayers::layer(crate::decor3d::LAYER),
+            Transform::from_xyz(0.0, height, 0.0),
+        ));
     }
 }
 

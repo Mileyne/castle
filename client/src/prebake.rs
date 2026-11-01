@@ -22,7 +22,8 @@ const BUDGET: Duration = Duration::from_millis(10);
 fn reinforcement(boss: MonsterKind) -> Option<MonsterKind> {
     match boss {
         MonsterKind::Warg => Some(MonsterKind::Wolf),
-        MonsterKind::Troll => Some(MonsterKind::Goblin),
+        MonsterKind::Troll | MonsterKind::Gardener => Some(MonsterKind::Goblin),
+        MonsterKind::Dragon => Some(MonsterKind::Skeleton),
         MonsterKind::Muldant => Some(MonsterKind::Skeleton),
         _ => None,
     }

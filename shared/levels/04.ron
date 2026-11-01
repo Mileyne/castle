@@ -1,7 +1,7 @@
 (
   format: 1,
   name: "La meute",
-  region: Approach,
+  region: Forest,
   size: (80, 52),
   rows: [
     "################################################################################",
@@ -878,6 +878,12 @@
   ),
   quest: Some((Unseal, 1)),
   things: [
+    Trigger(
+      node: "samelia_taken",
+      at: (70.5, 25.5),
+      radius: 170.0,
+      delay: 1.0,
+    ),
     Monster(
       kind: Warg,
       at: (72.5, 27.5),
