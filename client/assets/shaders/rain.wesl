@@ -1,9 +1,11 @@
 // Pluie: des traits fins qui tombent en biais, dessinés par le processeur graphique (aucune entité par goutte).
 // `data` = (côté d'une cellule, vent, vitesse de chute, opacité). Le maillage fait 2400 x 1600 unités autour de la caméra.
-#import bevy_sprite::mesh2d_vertex_output::VertexOutput
-#import bevy_sprite::mesh2d_view_bindings::globals
+import bevy_sprite_render::mesh2d::{
+    vertex_output::VertexOutput,
+    view_bindings::globals,
+};
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> data: vec4<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> data: vec4<f32>;
 
 fn hash(p: vec2<f32>) -> f32 {
     var q = fract(p * vec2<f32>(0.1031, 0.1030));

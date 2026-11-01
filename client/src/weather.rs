@@ -9,7 +9,7 @@ use bevy::{
 };
 use castle_shared::{Expedition, Region};
 
-/// Vitesse de chute (unités du monde par seconde) et dérive du vent. Le trait mesure 0,35 x 7 unités (voir `rain.wgsl`).
+/// Vitesse de chute (unités du monde par seconde) et dérive du vent. Le trait mesure 0,35 x 7 unités (voir `rain.wesl`).
 const FALL_SPEED: f32 = 300.0;
 const WIND: f32 = 70.0;
 /// Côté, en unités du monde, de la cellule qui contient une goutte (une couche): deux couches donnent environ une goutte pour
@@ -100,7 +100,7 @@ fn update_storm(
 #[derive(Component)]
 struct Gloom;
 
-/// La pluie: un seul rectangle qui couvre la vue, dessiné par `assets/shaders/rain.wgsl`.
+/// La pluie: un seul rectangle qui couvre la vue, dessiné par `assets/shaders/rain.wesl`.
 #[derive(Component)]
 struct Rain;
 
@@ -113,7 +113,7 @@ struct RainMaterial {
 
 impl Material2d for RainMaterial {
     fn fragment_shader() -> ShaderRef {
-        "shaders/rain.wgsl".into()
+        "shaders/rain.wesl".into()
     }
 
     fn alpha_mode(&self) -> AlphaMode2d {
