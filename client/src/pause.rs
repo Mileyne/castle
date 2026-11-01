@@ -14,30 +14,7 @@ use crate::ui::ui_font;
 
 /// Entrées: reprendre, commandes tactiles (oui/non), volumes, abandonner.
 const ITEMS: [&str; 6] = ["pause-resume", "settings-touch", "settings-music", "settings-voice", "settings-sfx", "pause-quit"];
-/// Avec la vue 3D (prototype): quatre réglages de plus avant d'abandonner.
-const ITEMS_3D: [&str; 10] = [
-    "pause-resume",
-    "settings-touch",
-    "settings-music",
-    "settings-voice",
-    "settings-sfx",
-    "settings-wall",
-    "settings-tilt",
-    "settings-angle",
-    "settings-zoom",
-    "pause-quit",
-];
-/// Premier réglage de la vue 3D dans `ITEMS_3D`.
-const VIEW_FIRST: usize = 5;
 
-/// Cette entrée est-elle un réglage de la vue 3D?
-fn is_view_row(index: usize) -> bool {
-    crate::settings::view3d_enabled() && (VIEW_FIRST..VIEW_FIRST + crate::settings::View3d::ALL.len()).contains(&index)
-}
-
-fn items() -> &'static [&'static str] {
-    if crate::settings::view3d_enabled() { &ITEMS_3D } else { &ITEMS }
-}
 const CHANNELS: [crate::settings::Channel; 3] = [crate::settings::Channel::Music, crate::settings::Channel::Voice, crate::settings::Channel::Sfx];
 
 #[derive(Resource, Default)]
@@ -118,10 +95,10 @@ fn navigate(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, mut pause: 
         return;
     }
     if keys.just_pressed(KeyCode::ArrowUp) {
-        pause.cursor = (pause.cursor + items().len() - 1) % items().len();
+        pause.cursor = (pause.cursor + ITEMS.len() - 1) % ITEMS.len();
     }
     if keys.just_pressed(KeyCode::ArrowDown) {
-        pause.cursor = (pause.cursor + 1) % items().len();
+        pause.cursor = (pause.cursor + 1) % ITEMS.len();
     }
     let mut enter = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter);
     if let Some(index) = pause.click.take() {
@@ -139,10 +116,6 @@ fn navigate(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, mut pause: 
                 crate::settings::cycle_volume(CHANNELS[pause.cursor - 2]);
                 pause.redraw = true;
             }
-            n if is_view_row(n) => {
-                crate::settings::view_step(crate::settings::View3d::ALL[n - VIEW_FIRST], 1, true);
-                pause.redraw = true;
-            }
             _ => commands.trigger(ReturnToTitle(None)),
         }
     }
@@ -150,13 +123,6 @@ fn navigate(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, mut pause: 
         let step = i8::from(keys.just_pressed(KeyCode::ArrowRight)) - i8::from(keys.just_pressed(KeyCode::ArrowLeft));
         if step != 0 {
             crate::settings::adjust_volume(CHANNELS[pause.cursor - 2], step);
-            pause.redraw = true;
-        }
-    }
-    if is_view_row(pause.cursor) {
-        let step = i8::from(keys.just_pressed(KeyCode::ArrowRight)) - i8::from(keys.just_pressed(KeyCode::ArrowLeft));
-        if step != 0 {
-            crate::settings::view_step(crate::settings::View3d::ALL[pause.cursor - VIEW_FIRST], step, false);
             pause.redraw = true;
         }
     }
@@ -206,7 +172,7 @@ fn sync_overlay(
             ))
             .with_children(|ui| {
                 ui.spawn((Text::default(), Tr::new("pause-title"), font(24.0), TextColor(css::LIGHT_SKY_BLUE.into())));
-                for (i, key) in items().iter().copied().enumerate() {
+                for (i, key) in ITEMS.into_iter().enumerate() {
                     ui.spawn((
                         Button,
                         Hovered::default(),
@@ -227,9 +193,6 @@ fn sync_overlay(
                             row.spawn((Text::default(), Tr::new(value), font(16.0), TextColor(css::LIGHT_GRAY.into())));
                         } else if (2..=4).contains(&i) {
                             let value = format!("{} %", crate::settings::volume_tenths(CHANNELS[i - 2]) * 10);
-                            row.spawn((Text::new(value), font(16.0), TextColor(css::LIGHT_GRAY.into())));
-                        } else if is_view_row(i) {
-                            let value = crate::settings::view_label(crate::settings::View3d::ALL[i - VIEW_FIRST]);
                             row.spawn((Text::new(value), font(16.0), TextColor(css::LIGHT_GRAY.into())));
                         }
                     });

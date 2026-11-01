@@ -268,7 +268,8 @@ fn read_controls(
     mut typed: MessageWriter<KeyboardInput>,
     mut stick: ResMut<Stick>,
     touches: Res<Touches>,
-    gamepads: Query<&Gamepad>,
+    gamepads: Query<(Entity, &Gamepad)>,
+    time: Res<Time>,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     title: Res<TitleActive>,
     mode: Res<MenuMode>,
@@ -340,7 +341,14 @@ fn read_controls(
         })
         .collect();
     let mut pad_stick = Vec2::ZERO;
-    for gamepad in &gamepads {
+    // Avec la vue 3D, la première manette (dans l'ordre de branchement) est celle du joueur et la deuxième règle la caméra.
+    let mut pads: Vec<(Entity, &Gamepad)> = gamepads.iter().collect();
+    pads.sort_by_key(|(entity, _)| *entity);
+    if crate::settings::view3d_enabled() && pads.len() >= 2 {
+        steer_camera(pads[1].1, time.delta_secs());
+        pads.truncate(1);
+    }
+    for (_, gamepad) in pads {
         let left = gamepad.left_stick();
         if left.length() > pad_stick.length() {
             pad_stick = left;
@@ -401,6 +409,32 @@ fn type_key(typed: &mut MessageWriter<KeyboardInput>, window: Entity, logical_ke
             repeat: false,
             window,
         });
+    }
+}
+
+/// Vitesse de rotation et d'inclinaison de la vue avec le stick de la seconde manette, en degrés par seconde à fond.
+const CAMERA_TURN_RATE: f32 = 70.0;
+const CAMERA_TILT_RATE: f32 = 40.0;
+
+/// Le déplacement de la vue (angle, inclinaison, en degrés) pour un stick et une durée: à droite la vue tourne dans le sens des
+/// aiguilles d'une montre, en haut elle monte vers une vue de dessus. Rien sous la zone morte.
+fn camera_step(stick: Vec2, dt: f32) -> (f32, f32) {
+    if stick.length() < PAD_DEAD_ZONE {
+        return (0.0, 0.0);
+    }
+    (stick.x * CAMERA_TURN_RATE * dt, stick.y * CAMERA_TILT_RATE * dt)
+}
+
+/// La seconde manette règle la caméra (vue 3D): les sticks tournent et inclinent la vue, A la remet par défaut.
+fn steer_camera(gamepad: &Gamepad, dt: f32) {
+    let (right, left) = (gamepad.right_stick(), gamepad.left_stick());
+    let stick = if right.length() >= left.length() { right } else { left };
+    let (angle, tilt) = camera_step(stick, dt);
+    if angle != 0.0 || tilt != 0.0 {
+        crate::settings::turn_view(angle, tilt);
+    }
+    if gamepad.just_pressed(GamepadButton::South) {
+        crate::settings::reset_view();
     }
 }
 
@@ -643,5 +677,25 @@ fn draw_controls(
     }
     for mut node in &mut knob {
         place(&mut node, center + offset, KNOB_RADIUS);
+    }
+}
+
+#[cfg(test)]
+mod camera_tests {
+    use super::*;
+
+    #[test]
+    fn the_camera_stick_ignores_small_movements() {
+        assert_eq!(camera_step(Vec2::new(0.1, 0.1), 0.016), (0.0, 0.0));
+    }
+
+    #[test]
+    fn the_camera_stick_turns_right_and_tilts_up() {
+        let (angle, tilt) = camera_step(Vec2::new(1.0, 0.0), 1.0);
+        assert!(angle > 0.0 && tilt == 0.0);
+        let (angle, tilt) = camera_step(Vec2::new(0.0, -1.0), 1.0);
+        assert!(angle == 0.0 && tilt < 0.0);
+        // À fond pendant une seconde: la vitesse maximale.
+        assert!((camera_step(Vec2::new(1.0, 0.0), 1.0).0 - CAMERA_TURN_RATE).abs() < 1e-4);
     }
 }

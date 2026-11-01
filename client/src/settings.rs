@@ -5,7 +5,7 @@
 //! les réglages (écran titre ou menu de pause). Le choix est gardé dans un petit fichier à côté des parties.
 
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
 use bevy::prelude::*;
 
@@ -90,82 +90,53 @@ pub fn cycle_volume(channel: Channel) {
     save();
 }
 
-/// Les réglages de la vue 3D sont-ils proposés? (Le décor en 3D est un prototype: `CASTLE_DECOR3D=1`.)
+/// La vue 3D est-elle active? (Le décor en 3D est un prototype: `CASTLE_DECOR3D=1`.)
 pub fn view3d_enabled() -> bool {
     std::env::var_os("CASTLE_DECOR3D").is_some()
 }
 
+/// Hauteur des murs de la vue 3D, en tuiles.
+pub const VIEW_WALL_TILES: f32 = 3.0;
+/// Cadrage de la vue 3D: la part de terrain montrée, 1 étant celle de la version 2D.
+pub const VIEW_ZOOM: f32 = 1.25;
+/// Inclinaison et angle de la vue par défaut, en degrés. Une seconde manette les modifie en jouant (voir `turn_view`).
+pub const VIEW_TILT_DEFAULT: f32 = 52.0;
+pub const VIEW_ANGLE_DEFAULT: f32 = -15.0;
+/// Limites de l'inclinaison: de presque à l'horizontale à presque vue d'en haut.
+const VIEW_TILT_RANGE: (f32, f32) = (25.0, 80.0);
+
+/// Inclinaison de la caméra au-dessus de l'horizon, en degrés (bits d'un `f32`).
+static VIEW_TILT: AtomicU32 = AtomicU32::new(VIEW_TILT_DEFAULT.to_bits());
+/// Angle de la caméra autour du décor, en degrés (0: elle est au sud et regarde vers le nord).
+static VIEW_ANGLE: AtomicU32 = AtomicU32::new(VIEW_ANGLE_DEFAULT.to_bits());
+
+/// L'inclinaison de la vue, en degrés.
+pub fn view_tilt() -> f32 {
+    f32::from_bits(VIEW_TILT.load(Ordering::Relaxed))
+}
+
+/// L'angle de la vue, en degrés.
+pub fn view_angle() -> f32 {
+    f32::from_bits(VIEW_ANGLE.load(Ordering::Relaxed))
+}
+
 /// Angle de la caméra autour du décor, en radians; zéro sans la vue 3D. Les commandes de direction en tiennent compte.
 pub fn view_yaw() -> f32 {
-    if view3d_enabled() { view_value(View3d::Angle).to_radians() } else { 0.0 }
+    if view3d_enabled() { view_angle().to_radians() } else { 0.0 }
 }
 
-/// Un réglage de la vue 3D.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum View3d {
-    /// Hauteur des murs, en tuiles.
-    Wall,
-    /// Inclinaison de la caméra au-dessus de l'horizon, en degrés.
-    Tilt,
-    /// Angle de la caméra autour du décor, en degrés (0: elle regarde vers le nord).
-    Angle,
-    /// Cadrage: part de terrain montrée, en pour cent (plus petit: plus près).
-    Zoom,
+/// Tourne la vue de `angle` degrés et l'incline de `tilt` degrés (l'angle fait le tour, l'inclinaison reste bornée).
+pub fn turn_view(angle: f32, tilt: f32) {
+    let angle = (view_angle() + angle + 180.0).rem_euclid(360.0) - 180.0;
+    VIEW_ANGLE.store(angle.to_bits(), Ordering::Relaxed);
+    let tilt = (view_tilt() + tilt).clamp(VIEW_TILT_RANGE.0, VIEW_TILT_RANGE.1);
+    VIEW_TILT.store(tilt.to_bits(), Ordering::Relaxed);
 }
 
-impl View3d {
-    pub const ALL: [View3d; 4] = [Self::Wall, Self::Tilt, Self::Angle, Self::Zoom];
-
-    const KEYS: [&'static str; 4] = ["view_wall", "view_tilt", "view_angle", "view_zoom"];
-
-    /// Les valeurs proposées, et l'indice de celle par défaut.
-    fn steps(self) -> (&'static [f32], u8) {
-        match self {
-            Self::Wall => (&[0.5, 1.0, 1.5, 2.0, 3.0, 4.0], 4),
-            Self::Tilt => (&[25.0, 35.0, 45.0, 52.0, 60.0, 70.0, 80.0], 3),
-            Self::Angle => (&[-60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0], 3),
-            Self::Zoom => (&[50.0, 65.0, 80.0, 100.0, 125.0, 160.0, 200.0], 4),
-        }
-    }
-
-    fn index(self) -> usize {
-        self as usize
-    }
-}
-
-/// Indice choisi pour chaque réglage de la vue 3D (255: pas de choix, valeur par défaut).
-static VIEW3D: [AtomicU8; 4] = [AtomicU8::new(255), AtomicU8::new(255), AtomicU8::new(255), AtomicU8::new(255)];
-
-fn view_index(view: View3d) -> usize {
-    let (steps, default) = view.steps();
-    match VIEW3D[view.index()].load(Ordering::Relaxed) {
-        255 => default as usize,
-        chosen => (chosen as usize).min(steps.len() - 1),
-    }
-}
-
-/// La valeur du réglage: tuiles, degrés ou pour cent selon le réglage.
-pub fn view_value(view: View3d) -> f32 {
-    view.steps().0[view_index(view)]
-}
-
-/// La valeur du réglage, à afficher.
-pub fn view_label(view: View3d) -> String {
-    let value = view_value(view);
-    match view {
-        View3d::Wall => format!("{value}").replace('.', ","),
-        View3d::Tilt | View3d::Angle => format!("{value:.0}°"),
-        View3d::Zoom => format!("{value:.0} %"),
-    }
-}
-
-/// Passe à la valeur suivante (`delta` = 1) ou précédente (-1) et l'enregistre; au bout, la liste reprend de l'autre côté si `wrap`.
-pub fn view_step(view: View3d, delta: i8, wrap: bool) {
-    let count = view.steps().0.len() as i16;
-    let next = view_index(view) as i16 + i16::from(delta);
-    let next = if wrap { next.rem_euclid(count) } else { next.clamp(0, count - 1) };
-    VIEW3D[view.index()].store(next as u8, Ordering::Relaxed);
-    save();
+/// Remet l'angle et l'inclinaison par défaut.
+pub fn reset_view() {
+    VIEW_ANGLE.store(VIEW_ANGLE_DEFAULT.to_bits(), Ordering::Relaxed);
+    VIEW_TILT.store(VIEW_TILT_DEFAULT.to_bits(), Ordering::Relaxed);
 }
 
 /// Choix du joueur: 0 automatique (d'après le nom de la manette), 1 Xbox, 2 Nintendo.
@@ -263,10 +234,6 @@ fn load() {
                 VOLUMES[i].store(tenths.min(10), Ordering::Relaxed);
                 continue;
             }
-            if let (Some(i), Ok(chosen)) = (View3d::KEYS.iter().position(|k| *k == key), value.parse::<u8>()) {
-                VIEW3D[i].store(chosen, Ordering::Relaxed);
-                continue;
-            }
         }
         match line.trim() {
             "touch_ui=on" => TOUCH_CHOICE.store(2, Ordering::Relaxed),
@@ -299,13 +266,7 @@ fn save() {
         _ => "",
     };
     let volumes: String = Channel::KEYS.iter().zip(&VOLUMES).map(|(k, v)| format!("{k}={}\n", v.load(Ordering::Relaxed))).collect();
-    let views: String = View3d::KEYS
-        .iter()
-        .zip(&VIEW3D)
-        .filter(|(_, v)| v.load(Ordering::Relaxed) != 255)
-        .map(|(k, v)| format!("{k}={}\n", v.load(Ordering::Relaxed)))
-        .collect();
-    if let Err(err) = castle_shared::save::write_settings(&format!("{touch}{pad}{size}{volumes}{views}")) {
+    if let Err(err) = castle_shared::save::write_settings(&format!("{touch}{pad}{size}{volumes}")) {
         warn!("cannot write settings: {err}");
     }
 }
@@ -353,5 +314,27 @@ pub fn low_memory() -> bool {
         Ok("1") => true,
         Ok("0") => false,
         _ => (1..3 * 1024 * 1024 * 1024).contains(&physical_memory()),
+    }
+}
+
+#[cfg(test)]
+mod view_tests {
+    use super::*;
+
+    /// Les deux réglages vivent dans des variables globales: tout se vérifie dans un seul test.
+    #[test]
+    fn the_view_turns_wraps_clamps_and_resets() {
+        reset_view();
+        assert_eq!((view_angle(), view_tilt()), (VIEW_ANGLE_DEFAULT, VIEW_TILT_DEFAULT));
+        // L'angle fait le tour: -15 + 200 = 185, soit -175.
+        turn_view(200.0, 0.0);
+        assert!((view_angle() - -175.0).abs() < 1e-3, "{}", view_angle());
+        // L'inclinaison reste dans ses bornes.
+        turn_view(0.0, 500.0);
+        assert_eq!(view_tilt(), 80.0);
+        turn_view(0.0, -500.0);
+        assert_eq!(view_tilt(), 25.0);
+        reset_view();
+        assert_eq!((view_angle(), view_tilt()), (VIEW_ANGLE_DEFAULT, VIEW_TILT_DEFAULT));
     }
 }

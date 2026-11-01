@@ -29,26 +29,25 @@ use castle_shared::{Expedition, Region, Room, TILE_SIZE, Tile};
 
 use crate::LocalPlayer;
 use crate::live3d::Direct3d;
-use crate::settings::View3d;
 use crate::art::{Stain, TileMark, WorldTile};
 
-/// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2). Réglage du joueur.
+/// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2). Une seconde manette la règle.
 fn elevation() -> f32 {
-    crate::settings::view_value(View3d::Tilt).to_radians()
+    crate::settings::view_tilt().to_radians()
 }
 
-/// Angle de la caméra autour du décor, en radians (0: elle est au sud et regarde vers le nord). Réglage du joueur.
+/// Angle de la caméra autour du décor, en radians (0: elle est au sud et regarde vers le nord). Une seconde manette le règle.
 fn yaw() -> f32 {
     crate::settings::view_yaw()
 }
 
-/// Part de terrain montrée, 1 pour le cadrage de la version 2D. Réglage du joueur.
+/// Part de terrain montrée, 1 pour le cadrage de la version 2D.
 fn zoom() -> f32 {
-    crate::settings::view_value(View3d::Zoom) / 100.0
+    crate::settings::VIEW_ZOOM
 }
-/// Hauteur d'un mur, en unités du monde. Réglage du joueur (en tuiles).
+/// Hauteur d'un mur, en unités du monde.
 fn wall_height() -> f32 {
-    crate::settings::view_value(View3d::Wall) * TILE_SIZE
+    crate::settings::VIEW_WALL_TILES * TILE_SIZE
 }
 
 /// Champ de vision de la caméra en perspective, en degrés (`CASTLE_FOV`), ou `None` pour la vue orthographique.
@@ -84,7 +83,7 @@ impl Plugin for Decor3dPlugin {
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
-                (keep_the_image, apply_view, build_chunks.after(crate::art::rebuild_world), follow_camera, update_materials).chain(),
+                (keep_the_image, build_chunks.after(crate::art::rebuild_world), follow_camera, update_materials).chain(),
             )
             .add_systems(Update, mirror_sprites.after(crate::art::AnimateCharacters).after(crate::art::y_sort).after(crate::art::animate_props));
     }
@@ -428,22 +427,6 @@ fn follow_camera(
             to.scaling_mode = from.scaling_mode;
         }
         _ => {}
-    }
-}
-
-/// Un changement de la hauteur des murs oblige à refaire le décor: les maillages des murs en dépendent.
-fn apply_view(
-    mut commands: Commands,
-    chunks: Query<Entity, With<Decor3d>>,
-    built: Query<Entity, (With<TileMark>, With<Built>)>,
-    mut last: Local<Option<f32>>,
-) {
-    let wall = wall_height();
-    if last.replace(wall).is_some_and(|before| before != wall) {
-        chunks.iter().for_each(|entity| commands.entity(entity).despawn());
-        built.iter().for_each(|entity| {
-            commands.entity(entity).remove::<Built>();
-        });
     }
 }
 
