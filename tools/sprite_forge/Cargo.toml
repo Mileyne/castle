@@ -10,3 +10,8 @@ png = "0.17"
 serde = { version = "1", features = ["derive"] }
 ron = "0.12"
 basis-universal = "0.3"
+serde_json = "1"
+
+[dev-dependencies]
+# Relit les fichiers `.glb` exportés, pour vérifier qu'ils sont valides.
+gltf = { version = "1", default-features = false, features = ["import", "names", "utils"] }

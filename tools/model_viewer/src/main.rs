@@ -7,6 +7,8 @@
 //! Manette: stick droit = tourner autour; gâchettes L / R (ou ZL / ZR) = éloigner / rapprocher; croix gauche / droite = modèle précédent
 //! / suivant; croix haut / bas = action (repos, marche, coup); X = le rendu du jeu / trois rendus côte à côte;
 //! Y = rotation automatique; Select = recentrer la vue.
+//! Un fichier glTF (exporté par `sprite_forge export-glb`, ou édité dans Blender) s'ouvre à la place du modèle avec
+//! `MODEL_VIEWER_GLB=<chemin sous client/assets>` (par exemple `MODEL_VIEWER_GLB=exports/hero_Knight.glb`).
 //! Clavier: flèches = tourner; Q / E = zoom; A / D = modèle; W / S = action; F = comparer; Espace = rotation; R = recentrer.
 
 use std::time::Duration;
@@ -219,6 +221,10 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut standard:
     let ground = standard.add(StandardMaterial { base_color: Color::srgb(0.24, 0.3, 0.24), perceptual_roughness: 1.0, ..default() });
     commands.spawn((Mesh3d(meshes.add(Circle::new(3.5))), MeshMaterial3d(ground), Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))));
     commands.spawn((Shown::default(), Transform::default(), Visibility::default()));
+    // Un fichier glTF à la place du modèle du jeu (voir l'en-tête).
+    if let Ok(path) = std::env::var("MODEL_VIEWER_GLB") {
+        commands.spawn((WorldAssetRoot(assets.load(bevy::gltf::GltfAssetLabel::Scene(0).from_asset(path))), Transform::default()));
+    }
     let font = TextFont { font: assets.load("fonts/PressStart2P-Regular.ttf").into(), font_size: 11.0.into(), ..default() };
     commands.spawn((
         Hud,
@@ -368,7 +374,7 @@ fn update_model(
     mut shown: Single<(Entity, &mut Shown)>,
     mut bodies: Local<Vec<[Option<Entity>; merged::SURFACES]>>,
 ) {
-    if poses.baking.is_some() {
+    if poses.baking.is_some() || std::env::var_os("MODEL_VIEWER_GLB").is_some() {
         return;
     }
     let poses = &mut *poses;

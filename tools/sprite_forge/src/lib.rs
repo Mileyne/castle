@@ -7,6 +7,7 @@
 
 mod decals;
 mod decor;
+pub mod glb;
 mod editor_api;
 mod effects;
 mod heroes;
@@ -575,6 +576,13 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
 
 pub fn cli() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Export des modèles 3D vers glTF, pour Blender: `sprite_forge export-glb <dossier> [clé...]` (voir `glb.rs`).
+    if args.first().map(String::as_str) == Some("export-glb") {
+        let dir = PathBuf::from(args.get(1).expect("usage: sprite_forge export-glb <dossier de sortie> [clé...]"));
+        let written = glb::export_all(&dir, &args[2..]).expect("écriture");
+        println!("{written} fichier(s) dans {}", dir.display());
+        return;
+    }
     // Outils d'étude des photos de référence (voir `photo.rs`).
     if matches!(args.first().map(String::as_str), Some("crop" | "avg")) {
         let n = |i: usize| args[i].parse::<usize>().expect("nombre attendu");
