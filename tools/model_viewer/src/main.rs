@@ -173,7 +173,7 @@ fn main() {
     let sources: Vec<ModelSource> = entries.iter().map(|entry| entry.source.clone()).collect();
     let baking = Baking::plan(sources, &PoseCache::default());
     // Pour ouvrir directement sur un modèle (`MODEL_VIEWER_MODEL=hero:Sorcerer`), un rendu (`MODEL_VIEWER_FUSION=shaders`)
-    // et une distance (`MODEL_VIEWER_DISTANCE=2`).
+    // une distance (`MODEL_VIEWER_DISTANCE=2`) et un angle (`MODEL_VIEWER_YAW=0` pour de face).
     let start_model = std::env::var("MODEL_VIEWER_MODEL").ok().and_then(|key| entries.iter().position(|entry| entry.label == key)).unwrap_or(0);
     let start_fusion = if std::env::var("MODEL_VIEWER_FUSION").as_deref() == Ok("shaders") { Fusion::Shaders } else { Fusion::Primitives };
     let start_distance = std::env::var("MODEL_VIEWER_DISTANCE").ok().and_then(|d| d.parse().ok()).unwrap_or(DEFAULT_DISTANCE);
@@ -198,7 +198,7 @@ fn main() {
             model: start_model,
             entries,
             motion: Motion::Idle,
-            yaw: DEFAULT_YAW,
+            yaw: std::env::var("MODEL_VIEWER_YAW").ok().and_then(|y| y.parse().ok()).unwrap_or(DEFAULT_YAW),
             pitch: DEFAULT_PITCH,
             distance: start_distance,
             auto_rotate: false,

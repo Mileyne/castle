@@ -17,7 +17,7 @@ use bevy::{
     mesh::{Indices, PrimitiveTopology},
     prelude::*,
 };
-use sprite_forge::{Anim, LivePart, LiveShape, Theme, live_exit, live_landmark, live_parts};
+use sprite_forge::{Anim, FaceMap, LivePart, LiveShape, Theme, live_exit, live_landmark, live_parts};
 
 /// Images de la boucle d'une sortie de niveau (torches et bannières qui vacillent).
 pub const EXIT_FRAMES: usize = 10;
@@ -115,6 +115,14 @@ pub fn face_path(source: &ModelSource) -> Option<&'static str> {
             "hero:Forgebraise" => Some("art/medieval/faces/forgebraise.png"),
             _ => None,
         },
+        _ => None,
+    }
+}
+
+/// Le calage de la photo d'un héros (`None` pour les autres modèles): voir `sprite_forge::FaceMap`.
+pub fn face_map(source: &ModelSource) -> Option<FaceMap> {
+    match source {
+        ModelSource::Key(key) => sprite_forge::face_map(key),
         _ => None,
     }
 }
@@ -305,7 +313,7 @@ impl PoseCache {
             return found.clone();
         }
         let mut handles: PoseMeshes = Default::default();
-        for (slot, mesh) in handles.iter_mut().zip(merge(&key.0.parts(key.0.anim(key.1, key.2)))) {
+        for (slot, mesh) in handles.iter_mut().zip(merge(&key.0.parts(key.0.anim(key.1, key.2)), face_map(&key.0))) {
             if let Some(mesh) = mesh {
                 self.vertices += mesh.count_vertices();
                 *slot = Some(meshes.add(mesh));
@@ -461,7 +469,7 @@ pub fn vertex_color(color: [f32; 3], glow: bool) -> [f32; 4] {
 
 impl Buffers {
     /// Ajoute une primitive entière, à sa place.
-    pub fn push_part(&mut self, part: &LivePart) {
+    pub fn push_part(&mut self, part: &LivePart, face_map: Option<FaceMap>) {
         let shape = base(part.shape, is_fine(part));
         let place = part_transform(part);
         let face = part.layer == sprite_forge::LiveLayer::Face;
@@ -474,8 +482,9 @@ impl Buffers {
             self.positions.push(at.to_array());
             self.normals.push(facing.to_array());
             self.uvs.push(if face {
-                // De face (le modèle regarde vers +z): la photo couvre la pièce, du front (en haut) au menton, de gauche à droite.
-                [0.5 + (at.x - place.translation.x) / (2.0 * place.scale.x), 0.5 - (at.y - place.translation.y) / (2.0 * place.scale.y)]
+                // De face (le modèle regarde vers +z), calée sur les yeux et la bouche du modèle (voir `FaceMap`).
+                let (x, y) = ((at.x - place.translation.x) / place.scale.x, (at.y - place.translation.y) / place.scale.y);
+                face_map.unwrap_or(FaceMap { center: 0.5, scale: 0.5, origin: 0.5, slope: 0.5 }).uv(x, y)
             } else {
                 box_uv(at, facing)
             });
@@ -497,10 +506,10 @@ impl Buffers {
 }
 
 /// Toutes les pièces d'une pose en un maillage par matière (`None` pour une matière absente). Chaque sommet porte la couleur de sa pièce.
-pub fn merge(parts: &[LivePart]) -> [Option<Mesh>; SURFACES] {
+pub fn merge(parts: &[LivePart], face_map: Option<FaceMap>) -> [Option<Mesh>; SURFACES] {
     let mut buffers: [Buffers; SURFACES] = Default::default();
     for part in parts {
-        buffers[Surface::of(part).index()].push_part(part);
+        buffers[Surface::of(part).index()].push_part(part, face_map);
     }
     let mut meshes: [Option<Mesh>; SURFACES] = Default::default();
     for (surface, (slot, buffer)) in Surface::ALL.into_iter().zip(meshes.iter_mut().zip(buffers)) {
@@ -573,7 +582,7 @@ mod tests {
     fn merging_keeps_every_vertex_and_every_triangle() {
         let parts = [part(LiveShape::Sphere, [0.0; 3], false), part(LiveShape::Cube, [2.0, 0.0, 0.0], true)];
         let (sphere, cube) = (base(LiveShape::Sphere, false), base(LiveShape::Cube, false));
-        let meshes = merge(&parts);
+        let meshes = merge(&parts, None);
         assert_eq!(all_vertices(&meshes), sphere.positions.len() + cube.positions.len());
         let triangles: usize = meshes.iter().flatten().filter_map(|mesh| mesh.indices().map(|i| i.len())).sum();
         assert_eq!(triangles, sphere.indices.len() + cube.indices.len());
@@ -582,7 +591,7 @@ mod tests {
     #[test]
     fn parts_are_split_by_material_and_carry_their_own_colour() {
         // Un cube qui brille: la matière « lumière »; sa couleur est linéaire, trois fois plus vive.
-        let meshes = merge(&[part(LiveShape::Cube, [10.0, 0.0, 0.0], true)]);
+        let meshes = merge(&[part(LiveShape::Cube, [10.0, 0.0, 0.0], true)], None);
         assert!(meshes.iter().enumerate().all(|(i, mesh)| mesh.is_some() == (i == Surface::Glow.index())));
         let mesh = meshes[Surface::Glow.index()].as_ref().expect("la matière lumière");
         let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
@@ -617,7 +626,7 @@ mod tests {
         cloth.shine = 0.0;
         let mut metal = part(LiveShape::Sphere, [1.0; 3], false);
         metal.shine = 0.9;
-        let meshes = merge(&[cloth, metal]);
+        let meshes = merge(&[cloth, metal], None);
         assert!(meshes[Surface::Cloth.index()].as_ref().is_some_and(|mesh| mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_some()));
         assert!(meshes[Surface::Metal.index()].as_ref().is_some_and(|mesh| mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_none()));
     }
@@ -633,7 +642,7 @@ mod tests {
     #[test]
     fn indices_never_point_outside_their_part() {
         let parts = [part(LiveShape::Capsule(1.5), [0.0; 3], false), part(LiveShape::Frustum(1.0, 0.5), [0.0, 3.0, 0.0], false)];
-        for mesh in merge(&parts).iter().flatten() {
+        for mesh in merge(&parts, None).iter().flatten() {
             let count = mesh.count_vertices() as u32;
             assert!(mesh.indices().is_some_and(|indices| indices.iter().all(|i| (i as u32) < count)));
         }

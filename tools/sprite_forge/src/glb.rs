@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use glam::{Mat3, Quat, Vec3};
 use serde_json::{Value, json};
 
-use crate::editor_api::{Anim, LiveLayer, LivePart, LiveShape, live_parts, models};
+use crate::editor_api::{Anim, FaceMap, LiveLayer, LivePart, LiveShape, face_map, live_parts, models};
 use crate::shapes::Theme;
 
 /// Les animations d'un personnage: nom, nombre d'images, cadence (images par seconde, celle des planches du jeu), boucle ou non.
@@ -132,8 +132,9 @@ impl Geometry {
 const SLICES: usize = 24;
 const STACKS: usize = 16;
 
-/// Une sphère de rayon 1; avec `frontal`, ses coordonnées de texture sont une projection de face (pour la peau du crâne).
-fn sphere(frontal: bool) -> Geometry {
+/// Une sphère de rayon 1; avec `face`, ses coordonnées de texture sont la projection de face de la photo du héros (pour le crâne), sinon
+/// une projection simple de face, de -1 à 1 sur toute la largeur.
+fn sphere(frontal: bool, face: Option<FaceMap>) -> Geometry {
     let mut g = Geometry::default();
     for i in 0..=STACKS {
         let theta = std::f32::consts::PI * i as f32 / STACKS as f32;
@@ -143,7 +144,11 @@ fn sphere(frontal: bool) -> Geometry {
             let p = Vec3::new(theta.sin() * phi.sin(), theta.cos(), theta.sin() * phi.cos());
             g.positions.push(p.to_array());
             g.normals.push(p.to_array());
-            g.uvs.push(if frontal { [0.5 + p.x / 2.0, 0.5 - p.y / 2.0] } else { [j as f32 / SLICES as f32, i as f32 / STACKS as f32] });
+            g.uvs.push(if frontal {
+                face.map_or([0.5 + p.x / 2.0, 0.5 - p.y / 2.0], |face| face.uv(p.x, p.y))
+            } else {
+                [j as f32 / SLICES as f32, i as f32 / STACKS as f32]
+            });
         }
     }
     g.grid(STACKS, SLICES, 0);
@@ -334,7 +339,7 @@ pub fn export_glb(key: &str, face_png: Option<&[u8]>) -> Option<Vec<u8>> {
         let shape_key: ShapeKey = (shape_key.0, shape_key.1, shape_key.2, textured);
         let accessors = *geometry_of.entry(shape_key).or_insert_with(|| {
             let geometry = match part.shape {
-                LiveShape::Sphere => sphere(textured),
+                LiveShape::Sphere => sphere(textured, face_map(key)),
                 LiveShape::Cube => cube(),
                 LiveShape::Capsule(_) => capsule(),
                 LiveShape::Frustum(a, b) => frustum(a, b),
@@ -622,7 +627,7 @@ mod tests {
         let bytes = export_glb("hero:Knight", Some(&png)).expect("modèle connu");
         let (document, _, images) = gltf::import_slice(&bytes).expect("fichier valide");
         assert_eq!(images.len(), 1);
-        assert_eq!((images[0].width, images[0].height), (24, 24));
+        assert_eq!((images[0].width, images[0].height), (64, 64));
         let skin = document.materials().find(|m| m.name().is_some_and(|n| n.starts_with("Face_"))).expect("le crâne");
         assert!(skin.pbr_metallic_roughness().base_color_texture().is_some());
     }
