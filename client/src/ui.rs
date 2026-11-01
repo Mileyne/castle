@@ -21,6 +21,7 @@ impl Plugin for UiPlugin {
                     update_loot_counters,
                     update_special_label,
                     update_region_label,
+                    update_fps,
                 ),
             );
     }
@@ -28,6 +29,10 @@ impl Plugin for UiPlugin {
 
 #[derive(Component)]
 struct StatusText;
+
+/// Images par seconde, en haut à droite (F3 l'affiche ou le cache).
+#[derive(Component)]
+struct FpsText;
 
 #[derive(Component)]
 struct SpecialLabel;
@@ -104,6 +109,7 @@ fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
             ..default()
         })
         .with_children(|parent| {
+            parent.spawn((Text::new(""), FpsText, ui_font(&assets, 10.0), TextColor(css::LIGHT_GRAY.into())));
             for (key, is_gold) in [("hud-gold", true), ("hud-keys", false)] {
                 parent
                     .spawn(Node {
@@ -345,5 +351,29 @@ fn update_region_label(
     }
     if **visibility != Visibility::Inherited {
         **visibility = Visibility::Inherited;
+    }
+}
+
+/// Met à jour l'indicateur d'images par seconde (quatre fois par seconde); F3 le cache ou le montre.
+fn update_fps(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
+    mut text: Single<(&mut Text, &mut Visibility), With<FpsText>>,
+    mut next: Local<f32>,
+) {
+    use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
+    let (text, visibility) = &mut *text;
+    if keys.just_pressed(KeyCode::F3) {
+        **visibility = if **visibility == Visibility::Hidden { Visibility::Inherited } else { Visibility::Hidden };
+    }
+    if time.elapsed_secs() < *next {
+        return;
+    }
+    *next = time.elapsed_secs() + 0.25;
+    let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|d| d.smoothed()).unwrap_or(0.0);
+    let shown = format!("{fps:.0} FPS");
+    if text.0 != shown {
+        text.0 = shown;
     }
 }

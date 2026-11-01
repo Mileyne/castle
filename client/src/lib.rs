@@ -31,6 +31,8 @@ mod prefs;
 mod i18n;
 mod lighting;
 #[cfg(feature = "live3d")]
+mod decor3d;
+#[cfg(feature = "live3d")]
 mod live3d;
 mod pause;
 mod puzzle;
@@ -210,6 +212,8 @@ pub fn run() {
             boss::BossPlugin,
             #[cfg(feature = "live3d")]
             live3d::Live3dPlugin,
+            #[cfg(feature = "live3d")]
+            decor3d::Decor3dPlugin,
             touch::TouchPlugin,
             music::MusicPlugin,
             sfx::SfxPlugin,

@@ -736,7 +736,7 @@ fn is_vegetation(region: Region) -> bool {
 
 /// Tuile du décor, effacée quand le château est regénéré.
 #[derive(Component)]
-struct WorldTile;
+pub(crate) struct WorldTile;
 
 /// Marque une tuile du décor (pour la teinte du héros dirigé).
 #[derive(Component)]
@@ -977,7 +977,7 @@ fn bake_chunk(def: &LevelDef, room: &Room, sources: &BakeSources, chunk_x: u32, 
 
 /// Reconstruit la carte quand une expédition arrive du serveur: la graine suffit à la regénérer.
 /// Un mur dont la tuile du dessous est du sol montre sa face de briques.
-fn rebuild_world(
+pub(crate) fn rebuild_world(
     mut commands: Commands,
     art: Res<Art>,
     theme: Res<ArtTheme>,
