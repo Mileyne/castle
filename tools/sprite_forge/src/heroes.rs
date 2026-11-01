@@ -469,7 +469,10 @@ pub(crate) fn body(d: &Dims, j: &Joints, pal: &Palette, legs: bool) -> Vec<Part>
         Vec3::new(d.torso_rx, d.torso * 0.34 * breath, d.torso_rz),
         pal.torso,
     ));
+    // Le cou est le seul morceau de peau du corps habillé.
+    let neck = parts.len();
     parts.push(cone(Vec3::new(0.0, j.shoulder_y - 0.02, 0.0), j.head - Vec3::Y * d.head_r * 0.7, 0.065, 0.055, SKIN));
+    mark(&mut parts, neck, crate::render::Layer::Body);
     parts
 }
 

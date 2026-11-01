@@ -17,6 +17,17 @@ pub enum Shape {
     Frustum(f32, f32),
 }
 
+/// Ce qu'est une pièce d'un personnage: le corps (peau, visage, cheveux, barbe), la tenue (vêtements, armure, couvre-chef: c'est la
+/// couche par défaut) ou l'équipement tenu (arme, bouclier, bâton, arc). Fondre une couche dans une autre n'a pas de sens: un casque ne
+/// fait pas corps avec un visage.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Layer {
+    Body,
+    #[default]
+    Outfit,
+    Gear,
+}
+
 #[derive(Clone, Debug)]
 pub struct Part {
     pub shape: Shape,
@@ -28,6 +39,7 @@ pub struct Part {
     pub glow: bool,
     /// Force du reflet brillant (cheveux, métal), de 0 (mat) à 1.
     pub shine: f32,
+    pub layer: Layer,
 }
 
 type Hit = Option<(f32, Vec3)>;

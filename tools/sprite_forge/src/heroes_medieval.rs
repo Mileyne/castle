@@ -7,7 +7,7 @@ use std::f32::consts::TAU;
 use glam::{Mat3, Vec3};
 
 use crate::heroes::{Class, Dims, Joints, Palette, Pose, body, held, joints};
-use crate::render::Part;
+use crate::render::{Layer, Part};
 use crate::shapes::*;
 
 const STEEL_M: u32 = 0xa4a8b0;
@@ -229,6 +229,7 @@ fn face(h: Vec3, r: f32, s: &FaceSpec) -> Vec<Part> {
         }
     }
     // Lunettes rectangulaires à large monture noire sur le haut (style « browline »).
+    let glasses_start = p.len();
     if s.glasses {
         let frame = 0x16161c;
         for sg in [-1.0f32, 1.0] {
@@ -242,6 +243,7 @@ fn face(h: Vec3, r: f32, s: &FaceSpec) -> Vec<Part> {
         }
         p.push(block(at(0.0, 0.2, 1.0), Vec3::new(0.12, 0.02, 0.02) * r, Mat3::IDENTITY, frame));
     }
+    let glasses_end = p.len();
     // Cheveux.
     let hair = s.hair;
     match s.hair_style {
@@ -273,6 +275,9 @@ fn face(h: Vec3, r: f32, s: &FaceSpec) -> Vec<Part> {
             p.push(shiny(ellipsoid(at(0.0, 0.4, -0.1), Vec3::new(1.04, 0.8, 1.02) * r, hair), 0.2));
         }
     }
+    // Visage, oreilles, yeux, barbe et cheveux sont du corps; les lunettes sont une tenue.
+    mark(&mut p, 0, Layer::Body);
+    mark(&mut p[..glasses_end], glasses_start, Layer::Outfit);
     p
 }
 
@@ -342,6 +347,7 @@ fn knight(d: &Dims, j: &Joints) -> Vec<Part> {
         }
         p.push(shiny(ellipsoid(h + Vec3::new(0.0, -0.35 * r, -0.62 * r), Vec3::new(1.0, 0.85, 0.5) * r, MAIL), 0.3));
     }
+    let gear_start = p.len();
     // Épée longue dans la main droite, grand écu en amande à lion rouge au bras gauche.
     let rot = held(j, 0, 0.1);
     let hand = j.hand[0];
@@ -360,6 +366,7 @@ fn knight(d: &Dims, j: &Joints) -> Vec<Part> {
     p.push(shiny(ellipsoid(center, Vec3::new(0.225, 0.37, 0.035), CREAM), 0.2));
     p.push(shiny(ellipsoid(center + tilt * Vec3::new(0.0, 0.08, 0.034), Vec3::new(0.1, 0.14, 0.012), LION_RED), 0.2));
     p.push(ball(center + tilt * Vec3::new(0.05, 0.22, 0.036), 0.04, LION_RED));
+    mark(&mut p, gear_start, Layer::Gear);
     p
 }
 
@@ -423,6 +430,7 @@ fn sorcerer(d: &Dims, j: &Joints) -> Vec<Part> {
         }
         p.push(cone(brim + Vec3::new(0.85 * r, 0.4 * r, 0.6 * r), brim + Vec3::new(1.6 * r, 1.1 * r, 0.1 * r), 0.1 * r, 0.01 * r, 0x2a2a3a));
     }
+    let gear_start = p.len();
     // Bâton torsadé sculpté, couronné d'un anneau qui retient un orbe violet; breloques.
     let rot = held(j, 0, 0.12);
     let hand = j.hand[0];
@@ -451,6 +459,7 @@ fn sorcerer(d: &Dims, j: &Joints) -> Vec<Part> {
         }
         p.push(glow(ball(center + n * 0.03, 0.05 * j.fx.glow, 0xffffff)));
     }
+    mark(&mut p, gear_start, Layer::Gear);
     p
 }
 
@@ -509,6 +518,7 @@ fn ranger(d: &Dims, j: &Joints) -> Vec<Part> {
         p.push(limb(quill, quill + Vec3::new(0.55 * r, 1.2 * r, -0.4 * r), 0.015 * r, 0xb0a888));
         p.push(shiny(ball(brim + Vec3::new(0.95 * r, 0.3 * r, 0.12 * r), 0.1 * r, BRASS), 0.8));
     }
+    let gear_start = p.len();
     // Carquois dans le dos, plumes crème et flèches.
     let (qa, qb) = (c + Vec3::new(0.12, 0.0, -0.27), c + Vec3::new(0.2, 0.7, -0.3));
     p.push(shiny(cone(qa, qb, 0.065, 0.085, 0x6a4020), 0.3));
@@ -540,6 +550,7 @@ fn ranger(d: &Dims, j: &Joints) -> Vec<Part> {
         p.push(shiny(cone(tip - dir * 0.02, tip + dir * 0.09, 0.03, 0.004, 0xb8bcc4), 0.9));
         p.push(shiny(block(tail + dir * 0.04, Vec3::new(0.012, 0.04, 0.05), Mat3::IDENTITY, 0xf0eadc), 0.1));
     }
+    mark(&mut p, gear_start, Layer::Gear);
     p
 }
 
@@ -588,6 +599,7 @@ fn forgebraise(d: &Dims, j: &Joints) -> Vec<Part> {
             }
         }
     }
+    let gear_start = p.len();
     // Énorme masse de forge à tête de fer (marque d'enclume), manche de bois.
     let rot = held(j, 0, 0.25);
     let hand = j.hand[0];
@@ -610,6 +622,7 @@ fn forgebraise(d: &Dims, j: &Joints) -> Vec<Part> {
             }
         }
     }
+    mark(&mut p, gear_start, Layer::Gear);
     p
 }
 

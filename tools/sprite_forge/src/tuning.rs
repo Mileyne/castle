@@ -160,7 +160,7 @@ mod tests {
     use glam::{Mat3, Vec3};
 
     fn part(color: u32) -> Part {
-        Part { shape: Shape::Sphere, center: Vec3::new(0.0, 1.0, 0.0), rot: Mat3::IDENTITY, scale: Vec3::splat(0.5), color: rgb(color), glow: false, shine: 0.0 }
+        Part { shape: Shape::Sphere, center: Vec3::new(0.0, 1.0, 0.0), rot: Mat3::IDENTITY, scale: Vec3::splat(0.5), color: rgb(color), glow: false, shine: 0.0, layer: crate::render::Layer::Outfit }
     }
 
     #[test]

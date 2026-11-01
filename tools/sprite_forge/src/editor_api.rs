@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use crate::heroes::{CLASSES, Class, Pose};
 use crate::monsters::{MONSTERS, Monster};
 use crate::props::{PROPS, Prop};
-use crate::render::{Part, Shape, render};
+use crate::render::{Layer, Part, Shape, render};
 use crate::shapes::Theme;
 use crate::tuning::{self, Tuning, hex_of};
 use crate::{CELL, SUPERSAMPLE, TILE_CELL, tiles, to_rgba8};
@@ -435,6 +435,19 @@ pub struct LivePart {
     pub color: [f32; 3],
     pub glow: bool,
     pub shine: f32,
+    /// Ce que la pièce est: corps, tenue ou équipement tenu (voir `render::Layer`).
+    pub layer: LiveLayer,
+}
+
+/// La couche d'une pièce: la fusion douce n'unit que des pièces de la même couche.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LiveLayer {
+    /// Peau, visage, cheveux, barbe.
+    Body,
+    /// Vêtements, armure, couvre-chef (la couche des monstres et des objets).
+    Outfit,
+    /// Arme, bouclier, bâton, arc, et les traînées de leurs coups.
+    Gear,
 }
 
 /// Les pièces du modèle `key` (voir `models()`) dans la pose donnée, avec les proportions d'origine.
@@ -484,6 +497,11 @@ fn to_live(parts: Vec<Part>) -> Vec<LivePart> {
             color: part.color,
             glow: part.glow,
             shine: part.shine,
+            layer: match part.layer {
+                Layer::Body => LiveLayer::Body,
+                Layer::Outfit => LiveLayer::Outfit,
+                Layer::Gear => LiveLayer::Gear,
+            },
         })
         .collect()
 }

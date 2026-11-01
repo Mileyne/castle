@@ -13,7 +13,7 @@ pub(crate) fn align_y(dir: Vec3) -> Mat3 {
 }
 
 pub(crate) fn mk(shape: Shape, center: Vec3, rot: Mat3, scale: Vec3, color: u32) -> Part {
-    Part { shape, center, rot, scale, color: rgb(color), glow: false, shine: 0.0 }
+    Part { shape, center, rot, scale, color: rgb(color), glow: false, shine: 0.0, layer: crate::render::Layer::Outfit }
 }
 
 pub(crate) fn ellipsoid(c: Vec3, radii: Vec3, color: u32) -> Part {
@@ -121,4 +121,11 @@ pub(crate) fn scaled(mut parts: Vec<Part>, k: f32) -> Vec<Part> {
         part.scale *= k;
     }
     parts
+}
+
+/// Met dans la couche `layer` toutes les pièces à partir de la `from`-ième.
+pub(crate) fn mark(parts: &mut [Part], from: usize, layer: crate::render::Layer) {
+    for part in &mut parts[from..] {
+        part.layer = layer;
+    }
 }

@@ -376,7 +376,7 @@ fn update_model(
                 let found = poses.soft.get(&wanted).map(|(handle, vertices, millis)| (handle.clone(), *vertices, *millis));
                 let (handle, vertices, millis) = found.unwrap_or_else(|| {
                     let started = std::time::Instant::now();
-                    let mesh = smooth::smooth_merge(&source.parts(source.anim(family, index)), smooth::Blend::default());
+                    let mesh = smooth::smooth_merge(&source.parts(source.anim(family, index)), smooth::Blends::default());
                     let vertices = mesh.count_vertices();
                     let millis = started.elapsed().as_secs_f32() * 1000.0;
                     let handle = meshes.add(mesh);

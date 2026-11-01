@@ -1,5 +1,9 @@
 //! Fusion douce des primitives d'un modèle: un seul corps continu au lieu de pièces qui se traversent.
 //!
+//! Seules des pièces de même nature se fondent: le corps (peau, visage, cheveux, barbe) d'un côté, la tenue (vêtements, armure,
+//! couvre-chef) de l'autre, chacun avec sa grille et son congé. Un casque ne fait pas corps avec un visage, ni une épée avec une main:
+//! l'équipement tenu reste en primitives (voir `sprite_forge::LiveLayer`).
+//!
 //! Chaque pièce est un champ de distance (négatif dedans, positif dehors). Leur union lissée (`smin`) arrondit les jonctions: l'épaule
 //! se fond dans le torse, la botte dans la jambe. La surface est ensuite extraite d'une grille par « surface nets » (un sommet par case
 //! traversée, des quadrilatères entre cases voisines), avec la normale prise dans le champ de distance (ombrage lisse) et la couleur
@@ -10,11 +14,11 @@
 //! l'avance (voir `merged::Baking`), jamais en jeu.
 
 use bevy::prelude::*;
-use sprite_forge::{LivePart, LiveShape};
+use sprite_forge::{LiveLayer, LivePart, LiveShape};
 
 use crate::merged::{Buffers, glow_shine, part_transform};
 
-/// Réglages de la fusion.
+/// Réglages de fusion d'une couche.
 #[derive(Clone, Copy, Debug)]
 pub struct Blend {
     /// Rayon du congé entre deux pièces, en mètres: plus il est grand, plus les jonctions fondent.
@@ -23,9 +27,17 @@ pub struct Blend {
     pub cell: f32,
 }
 
-impl Default for Blend {
+/// Les réglages de chaque couche. Le corps tient dans une petite boîte (la tête, le cou): sa grille peut être très fine, ce qui garde
+/// les yeux, le nez et les sourcils; la tenue couvre tout le personnage, avec une grille plus large.
+#[derive(Clone, Copy, Debug)]
+pub struct Blends {
+    pub body: Blend,
+    pub outfit: Blend,
+}
+
+impl Default for Blends {
     fn default() -> Self {
-        Self { radius: 0.03, cell: 0.03 }
+        Self { body: Blend { radius: 0.012, cell: 0.012 }, outfit: Blend { radius: 0.02, cell: 0.03 } }
     }
 }
 
@@ -235,16 +247,22 @@ impl Field {
     }
 }
 
-/// Les pièces fondues en un seul corps continu, plus les pièces fines telles quelles.
-pub fn smooth_merge(parts: &[LivePart], blend: Blend) -> Mesh {
-    let thin_limit = blend.cell * 2.5;
-    let (thin, body): (Vec<&LivePart>, Vec<&LivePart>) = parts.iter().partition(|part| Solid::is_thin(part, thin_limit));
+/// Les pièces de chaque couche fondues en un corps continu, plus les pièces fines et l'équipement tenus tels quels.
+pub fn smooth_merge(parts: &[LivePart], blends: Blends) -> Mesh {
     let mut buffers = Buffers::default();
-    if !body.is_empty() {
-        let field = Field::new(body.iter().map(|part| Solid::new(part)).collect(), blend.radius);
-        extract_surface(&field, blend.cell, &mut buffers);
+    for (layer, blend) in [(LiveLayer::Body, blends.body), (LiveLayer::Outfit, blends.outfit)] {
+        let thin_limit = blend.cell * 2.5;
+        let (thin, body): (Vec<&LivePart>, Vec<&LivePart>) = parts.iter().filter(|part| part.layer == layer).partition(|part| Solid::is_thin(part, thin_limit));
+        if !body.is_empty() {
+            let field = Field::new(body.iter().map(|part| Solid::new(part)).collect(), blend.radius);
+            extract_surface(&field, blend.cell, &mut buffers);
+        }
+        for part in thin {
+            buffers.push_part(part);
+        }
     }
-    for part in thin {
+    // L'équipement tenu (arme, bouclier, bâton, arc) reste en primitives: il a ses arêtes.
+    for part in parts.iter().filter(|part| part.layer == LiveLayer::Gear) {
         buffers.push_part(part);
     }
     buffers.into_mesh()
@@ -347,7 +365,7 @@ mod tests {
     use bevy::mesh::VertexAttributeValues;
 
     fn part(shape: LiveShape, center: [f32; 3], scale: [f32; 3]) -> LivePart {
-        LivePart { shape, center, rot: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], scale, color: [0.8, 0.2, 0.2], glow: false, shine: 0.0 }
+        LivePart { shape, center, rot: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], scale, color: [0.8, 0.2, 0.2], glow: false, shine: 0.0, layer: LiveLayer::Outfit }
     }
 
     fn vertices(mesh: &Mesh) -> Vec<Vec3> {
@@ -359,7 +377,7 @@ mod tests {
 
     #[test]
     fn a_sphere_becomes_a_sphere_with_outward_normals() {
-        let mesh = smooth_merge(&[part(LiveShape::Sphere, [0.0, 1.0, 0.0], [0.5; 3])], Blend::default());
+        let mesh = smooth_merge(&[part(LiveShape::Sphere, [0.0, 1.0, 0.0], [0.5; 3])], Blends::default());
         let points = vertices(&mesh);
         assert!(points.len() > 200, "{} sommets", points.len());
         for p in &points {
@@ -374,7 +392,7 @@ mod tests {
 
     #[test]
     fn triangles_face_outward() {
-        let mesh = smooth_merge(&[part(LiveShape::Sphere, [0.0, 1.0, 0.0], [0.5; 3])], Blend::default());
+        let mesh = smooth_merge(&[part(LiveShape::Sphere, [0.0, 1.0, 0.0], [0.5; 3])], Blends::default());
         let points = vertices(&mesh);
         let Some(bevy::mesh::Indices::U32(indices)) = mesh.indices() else {
             panic!("indices manquants");
@@ -390,8 +408,8 @@ mod tests {
     fn two_touching_spheres_are_joined_by_a_neck() {
         // Deux sphères séparées de 10 cm: sans congé, deux corps; avec, un pont de matière au milieu.
         let parts = [part(LiveShape::Sphere, [-0.55, 1.0, 0.0], [0.5; 3]), part(LiveShape::Sphere, [0.55, 1.0, 0.0], [0.5; 3])];
-        let smooth = smooth_merge(&parts, Blend { radius: 0.2, cell: 0.03 });
-        let sharp = smooth_merge(&parts, Blend { radius: 0.001, cell: 0.03 });
+        let smooth = smooth_merge(&parts, Blends { outfit: Blend { radius: 0.2, cell: 0.03 }, ..Blends::default() });
+        let sharp = smooth_merge(&parts, Blends { outfit: Blend { radius: 0.001, cell: 0.03 }, ..Blends::default() });
         let bridge = |mesh: &Mesh| vertices(mesh).iter().filter(|p| p.x.abs() < 0.02 && (p.y - 1.0).abs() < 0.2).count();
         assert!(bridge(&smooth) > bridge(&sharp), "le pont existe seulement avec le congé");
     }
@@ -400,7 +418,31 @@ mod tests {
     fn thin_parts_stay_primitives() {
         // Une lame de 1 cm n'entre pas dans la grille: elle est ajoutée comme primitive, donc avec ses 24 sommets de cube.
         let blade = part(LiveShape::Cube, [0.0, 1.0, 0.0], [0.005, 0.4, 0.005]);
-        let mesh = smooth_merge(&[blade], Blend::default());
+        let mesh = smooth_merge(&[blade], Blends::default());
         assert_eq!(mesh.count_vertices(), 24);
+    }
+
+    #[test]
+    fn layers_are_never_fused_with_each_other() {
+        // Un « casque » (tenue) posé contre une « tête » (corps), à 1 cm l'un de l'autre: avec un gros congé, ils se joindraient s'ils
+        // étaient dans la même couche; dans deux couches, la tête reste un corps à part et le casque aussi.
+        let mut head = part(LiveShape::Sphere, [0.0, 1.0, 0.0], [0.4; 3]);
+        head.layer = LiveLayer::Body;
+        let mut helmet = part(LiveShape::Sphere, [0.0, 1.0, 0.85], [0.4; 3]);
+        helmet.layer = LiveLayer::Outfit;
+        let big = Blends { body: Blend { radius: 0.3, cell: 0.03 }, outfit: Blend { radius: 0.3, cell: 0.03 } };
+        let separate = smooth_merge(&[head.clone(), helmet.clone()], big);
+        helmet.layer = LiveLayer::Body;
+        let fused = smooth_merge(&[head, helmet], big);
+        // Entre eux (z = 0,425, au milieu des deux sphères, dont les bords sont à z = 0,4 et 0,45): un pont n'existe que fondu.
+        let neck = |mesh: &Mesh| vertices(mesh).iter().filter(|p| (p.z - 0.425).abs() < 0.02 && (p.y - 1.0).abs() < 0.2).count();
+        assert!(neck(&fused) > neck(&separate), "fondus: {}, séparés: {}", neck(&fused), neck(&separate));
+    }
+
+    #[test]
+    fn held_gear_stays_made_of_primitives() {
+        let mut blade = part(LiveShape::Cube, [0.0, 1.0, 0.0], [0.3, 0.3, 0.3]);
+        blade.layer = LiveLayer::Gear;
+        assert_eq!(smooth_merge(&[blade], Blends::default()).count_vertices(), 24, "un cube intact, pas une surface fondue");
     }
 }

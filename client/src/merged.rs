@@ -346,7 +346,7 @@ mod tests {
     }
 
     fn part(shape: LiveShape, center: [f32; 3], glow: bool) -> LivePart {
-        LivePart { shape, center, rot: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], scale: [1.0; 3], color: [1.0, 0.5, 0.25], glow, shine: 0.3 }
+        LivePart { shape, center, rot: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], scale: [1.0; 3], color: [1.0, 0.5, 0.25], glow, shine: 0.3, layer: sprite_forge::LiveLayer::Outfit }
     }
 
     #[test]
