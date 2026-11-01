@@ -1,0 +1,20 @@
+(
+    levels: {},
+    moods: {
+        "Forest": (0.0, 0.099999994),
+    },
+    lantern_intensity: 1.2,
+    lantern_radius: 0.85,
+    hero: (
+        gain: 1.0,
+        glow: 0.5,
+    ),
+    enemy: (
+        gain: 1.0,
+        glow: 0.0,
+    ),
+    object: (
+        gain: 1.0,
+        glow: 0.099999994,
+    ),
+)
