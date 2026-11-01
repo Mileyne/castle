@@ -117,13 +117,19 @@ impl Geometry {
         self.indices.extend([first, first + 1, first + 2, first, first + 2, first + 3]);
     }
 
-    /// Une grille de sommets (`rows` lignes de `columns` + 1 sommets, le dernier répétant le premier) reliée en triangles.
-    fn grid(&mut self, rows: usize, columns: usize, first: u32) {
+    /// Une grille de sommets (`rows` lignes de `columns` + 1 sommets, le dernier répétant le premier) reliée en triangles. `from_top`: les
+    /// lignes vont de haut en bas (sphère, capsule), sinon de bas en haut (flanc d'un cône); le sens des triangles en dépend, pour que
+    /// l'avant de chacun regarde vers l'extérieur.
+    fn grid(&mut self, rows: usize, columns: usize, first: u32, from_top: bool) {
         for r in 0..rows {
             for c in 0..columns {
                 let a = first + (r * (columns + 1) + c) as u32;
                 let b = a + (columns + 1) as u32;
-                self.indices.extend([a, a + 1, b, a + 1, b + 1, b]);
+                if from_top {
+                    self.indices.extend([a, b, a + 1, a + 1, b, b + 1]);
+                } else {
+                    self.indices.extend([a, a + 1, b, a + 1, b + 1, b]);
+                }
             }
         }
     }
@@ -151,7 +157,7 @@ fn sphere(frontal: bool, face: Option<FaceMap>) -> Geometry {
             });
         }
     }
-    g.grid(STACKS, SLICES, 0);
+    g.grid(STACKS, SLICES, 0, true);
     g
 }
 
@@ -184,7 +190,7 @@ fn capsule() -> Geometry {
             g.uvs.push([j as f32 / SLICES as f32, i as f32 / STACKS as f32]);
         }
     }
-    g.grid(STACKS, SLICES, 0);
+    g.grid(STACKS, SLICES, 0, true);
     g
 }
 
@@ -201,7 +207,7 @@ fn frustum(bottom: f32, top: f32) -> Geometry {
             g.uvs.push([j as f32 / SLICES as f32, row as f32]);
         }
     }
-    g.grid(1, SLICES, 0);
+    g.grid(1, SLICES, 0, false);
     // Les disques.
     for (y, radius, normal) in [(-1.0f32, bottom, Vec3::NEG_Y), (1.0, top, Vec3::Y)] {
         let center = g.positions.len() as u32;
@@ -216,11 +222,11 @@ fn frustum(bottom: f32, top: f32) -> Geometry {
         }
         for j in 0..SLICES as u32 {
             let (a, b) = (center + 1 + j, center + 2 + j);
-            // Vue de l'extérieur, dans le sens trigonométrique.
+            // Vue de l'extérieur, dans le sens trigonométrique (le disque du haut regarde vers +y, celui du bas vers -y).
             if normal.y > 0.0 {
-                g.indices.extend([center, b, a]);
-            } else {
                 g.indices.extend([center, a, b]);
+            } else {
+                g.indices.extend([center, b, a]);
             }
         }
     }
@@ -637,5 +643,58 @@ mod tests {
         let (document, _) = read("prop:Coin");
         assert_eq!(document.animations().count(), 1);
         assert!(export_glb("hero:Nobody", None).is_none());
+    }
+}
+
+#[cfg(test)]
+mod winding {
+    use super::*;
+
+    /// Chaque triangle d'une forme convexe centrée à l'origine doit regarder vers l'extérieur: sa normale (le sens des sommets, dans glTF
+    /// l'avant d'un triangle est le sens trigonométrique) va dans le sens de son centre. Sinon le logiciel 3D supprime la face et on voit
+    /// l'intérieur de la pièce.
+    fn inward_triangles(g: &Geometry) -> usize {
+        g.indices
+            .chunks(3)
+            .filter(|t| {
+                let p = |i: u32| Vec3::from(g.positions[i as usize]);
+                let (a, b, c) = (p(t[0]), p(t[1]), p(t[2]));
+                let normal = (b - a).cross(c - a);
+                // Les triangles quasi nuls des pôles (de l'ordre de 1e-9) ne comptent pas.
+                normal.length() > 1e-6 && normal.dot((a + b + c) / 3.0) < 0.0
+            })
+            .count()
+    }
+
+    #[test]
+    fn every_shape_faces_outward() {
+        for (name, geometry) in [
+            ("sphère", sphere(false, None)),
+            ("cube", cube()),
+            ("capsule", capsule()),
+            ("cône", frustum(1.0, 0.5)),
+            ("cylindre", frustum(1.0, 1.0)),
+            ("cône inversé", frustum(0.4, 1.0)),
+        ] {
+            assert_eq!(inward_triangles(&geometry), 0, "{name}: des triangles regardent vers l'intérieur");
+        }
+    }
+
+    /// La normale écrite dans le fichier doit aussi aller dans le sens où le triangle regarde.
+    #[test]
+    fn the_written_normals_agree_with_the_triangles() {
+        for geometry in [sphere(false, None), cube(), capsule(), frustum(1.0, 0.5)] {
+            let disagreeing = geometry
+                .indices
+                .chunks(3)
+                .filter(|t| {
+                    let p = |i: u32| Vec3::from(geometry.positions[i as usize]);
+                    let n = |i: u32| Vec3::from(geometry.normals[i as usize]);
+                    let face = (p(t[1]) - p(t[0])).cross(p(t[2]) - p(t[0]));
+                    face.length() > 1e-6 && face.dot(n(t[0]) + n(t[1]) + n(t[2])) < 0.0
+                })
+                .count();
+            assert_eq!(disagreeing, 0);
+        }
     }
 }
