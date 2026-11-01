@@ -5,8 +5,9 @@
 //! tous les modèles sont construites à l'avance, derrière un écran « Veuillez patienter » avec son avancement.
 //!
 //! Manette: stick droit = tourner autour; gâchettes L / R (ou ZL / ZR) = éloigner / rapprocher; croix gauche / droite = modèle précédent
-//! / suivant; croix haut / bas = action (repos, marche, coup); Y = rotation automatique; Select = recentrer la vue.
-//! Clavier: flèches = tourner; Q / E = zoom; A / D = modèle; W / S = action; Espace = rotation; R = recentrer.
+//! / suivant; croix haut / bas = action (repos, marche, coup); X = fusion douce / primitives fusionnées / les deux côte à côte;
+//! Y = rotation automatique; Select = recentrer la vue.
+//! Clavier: flèches = tourner; Q / E = zoom; A / D = modèle; W / S = action; F = fusion; Espace = rotation; R = recentrer.
 
 use std::time::Duration;
 
@@ -24,7 +25,12 @@ use sprite_forge::{Anim, models};
 #[path = "../../../client/src/merged.rs"]
 mod merged;
 
-use merged::{Baking, ModelSource, PoseCache};
+// La fusion douce: les pièces se fondent en un seul corps continu (voir `client/src/smooth.rs`).
+#[allow(dead_code)]
+#[path = "../../../client/src/smooth.rs"]
+mod smooth;
+
+use merged::{Baking, ModelSource, PoseCache, PoseKey};
 
 /// Les grands motifs du décor et les sorties de niveau, après les modèles réglables.
 const LANDMARKS: [&str; 4] = ["rocher", "colonne", "statue", "fontaine"];
@@ -81,9 +87,28 @@ struct Entry {
     source: ModelSource,
 }
 
+/// Quel rendu montrer: les primitives fusionnées en un seul maillage (celui du jeu), leur fusion douce, ou les deux côte à côte.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fusion {
+    Primitives,
+    Soft,
+    Both,
+}
+
+impl Fusion {
+    fn next(self) -> Self {
+        match self {
+            Self::Both => Self::Soft,
+            Self::Soft => Self::Primitives,
+            Self::Primitives => Self::Both,
+        }
+    }
+}
+
 /// Ce que montre la visionneuse, et la caméra.
 #[derive(Resource)]
 struct Viewer {
+    fusion: Fusion,
     entries: Vec<Entry>,
     model: usize,
     motion: Motion,
@@ -95,7 +120,7 @@ struct Viewer {
 
 const DEFAULT_YAW: f32 = 0.5;
 const DEFAULT_PITCH: f32 = 0.35;
-const DEFAULT_DISTANCE: f32 = 4.5;
+const DEFAULT_DISTANCE: f32 = 6.0;
 
 /// Le maillage fusionné de chaque pose, construit à l'avance.
 #[derive(Resource, Default)]
@@ -105,6 +130,10 @@ struct Poses {
     /// La construction à l'avance, tant qu'elle n'est pas finie, et son temps (en secondes).
     baking: Option<Baking>,
     baking_secs: f32,
+    /// Les poses en fusion douce, construites à la demande: (maillage, sommets, millisecondes de construction).
+    soft: std::collections::HashMap<PoseKey, (Handle<Mesh>, usize, f32)>,
+    /// La fusion douce de la pose montrée: ses sommets et son temps de construction.
+    soft_stats: Option<(usize, f32)>,
 }
 
 #[derive(Component)]
@@ -119,7 +148,9 @@ struct WaitPercent;
 /// Le modèle montré, et la pose qu'il affiche.
 #[derive(Component, Default)]
 struct Shown {
-    pose: Option<(ModelSource, u8, u16)>,
+    /// La pose montrée à gauche (primitives fusionnées) et à droite (fusion douce).
+    poses: [Option<PoseKey>; 2],
+    fusion: Option<Fusion>,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
@@ -160,6 +191,7 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.16, 0.2, 0.17)))
         .insert_resource(Viewer {
             entries,
+            fusion: Fusion::Both,
             model: 0,
             motion: Motion::Idle,
             yaw: DEFAULT_YAW,
@@ -245,13 +277,14 @@ fn input(mut viewer: ResMut<Viewer>, keys: Res<ButtonInput<KeyCode>>, time: Res<
     let dt = time.delta_secs();
     let count = viewer.entries.len();
     let (mut turn, mut tilt, mut zoom) = (0.0f32, 0.0f32, 0.0f32);
-    let (mut next, mut motion, mut auto, mut reset) = (0i32, 0i32, false, false);
+    let (mut next, mut motion, mut auto, mut reset, mut fusion) = (0i32, 0i32, false, false, false);
     turn += f32::from(keys.pressed(KeyCode::ArrowRight)) - f32::from(keys.pressed(KeyCode::ArrowLeft));
     tilt += f32::from(keys.pressed(KeyCode::ArrowUp)) - f32::from(keys.pressed(KeyCode::ArrowDown));
     zoom += f32::from(keys.pressed(KeyCode::KeyQ)) - f32::from(keys.pressed(KeyCode::KeyE));
     next += i32::from(keys.just_pressed(KeyCode::KeyD)) - i32::from(keys.just_pressed(KeyCode::KeyA));
     motion += i32::from(keys.just_pressed(KeyCode::KeyS)) - i32::from(keys.just_pressed(KeyCode::KeyW));
     auto |= keys.just_pressed(KeyCode::Space);
+    fusion |= keys.just_pressed(KeyCode::KeyF);
     reset |= keys.just_pressed(KeyCode::KeyR);
     for pad in &pads {
         let right = pad.right_stick();
@@ -264,6 +297,7 @@ fn input(mut viewer: ResMut<Viewer>, keys: Res<ButtonInput<KeyCode>>, time: Res<
         next += i32::from(pad.just_pressed(GamepadButton::DPadRight)) - i32::from(pad.just_pressed(GamepadButton::DPadLeft));
         motion += i32::from(pad.just_pressed(GamepadButton::DPadDown)) - i32::from(pad.just_pressed(GamepadButton::DPadUp));
         auto |= pad.just_pressed(GamepadButton::North);
+        fusion |= pad.just_pressed(GamepadButton::West);
         reset |= pad.just_pressed(GamepadButton::Select);
     }
     viewer.yaw += turn.clamp(-1.0, 1.0) * 1.8 * dt;
@@ -282,6 +316,9 @@ fn input(mut viewer: ResMut<Viewer>, keys: Res<ButtonInput<KeyCode>>, time: Res<
     if auto {
         viewer.auto_rotate = !viewer.auto_rotate;
     }
+    if fusion {
+        viewer.fusion = viewer.fusion.next();
+    }
     if reset {
         viewer.yaw = DEFAULT_YAW;
         viewer.pitch = DEFAULT_PITCH;
@@ -296,7 +333,8 @@ fn place_camera(viewer: Res<Viewer>, mut camera: Single<&mut Transform, With<Cam
     **camera = Transform::from_translation(target + offset * viewer.distance).looking_at(target, Vec3::Y);
 }
 
-/// Montre la pose du moment du modèle choisi: l'image de la boucle de son action, prise dans les poses déjà construites.
+/// Montre la pose du moment du modèle choisi: l'image de la boucle de son action. À gauche, le maillage des primitives fusionnées (déjà
+/// construit); à droite, la fusion douce de la même pose, construite à la demande (une par image au plus).
 fn update_model(
     mut commands: Commands,
     time: Res<Time>,
@@ -305,7 +343,7 @@ fn update_model(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ToonMaterial>>,
     mut shown: Single<(Entity, &mut Shown)>,
-    mut body: Local<Option<Entity>>,
+    mut bodies: Local<[Option<Entity>; 2]>,
 ) {
     if poses.baking.is_some() {
         return;
@@ -318,17 +356,52 @@ fn update_model(
     let (family, index) = source.pose(viewer.motion.anim(phase));
     let wanted = (source.clone(), family, index);
     let (root, shown) = &mut *shown;
-    if shown.pose.as_ref() == Some(&wanted) {
-        return;
-    }
-    let handle = poses.cache.get_or_build(&wanted, &mut meshes);
-    match *body {
-        Some(entity) => {
-            commands.entity(entity).insert(Mesh3d(handle));
+    let sides = match viewer.fusion {
+        Fusion::Both => [Some(-0.9), Some(0.9)],
+        Fusion::Primitives => [Some(0.0), None],
+        Fusion::Soft => [None, Some(0.0)],
+    };
+    for side in 0..2 {
+        let Some(offset) = sides[side] else {
+            if let Some(entity) = bodies[side].take() {
+                commands.entity(entity).despawn();
+                shown.poses[side] = None;
+            }
+            continue;
+        };
+        if shown.poses[side].as_ref() != Some(&wanted) || shown.fusion != Some(viewer.fusion) {
+            let handle = if side == 0 {
+                poses.cache.get_or_build(&wanted, &mut meshes)
+            } else {
+                let found = poses.soft.get(&wanted).map(|(handle, vertices, millis)| (handle.clone(), *vertices, *millis));
+                let (handle, vertices, millis) = found.unwrap_or_else(|| {
+                    let started = std::time::Instant::now();
+                    let mesh = smooth::smooth_merge(&source.parts(source.anim(family, index)), smooth::Blend::default());
+                    let vertices = mesh.count_vertices();
+                    let millis = started.elapsed().as_secs_f32() * 1000.0;
+                    let handle = meshes.add(mesh);
+                    poses.soft.insert(wanted.clone(), (handle.clone(), vertices, millis));
+                    (handle, vertices, millis)
+                });
+                poses.soft_stats = Some((vertices, millis));
+                handle
+            };
+            match bodies[side] {
+                Some(entity) => {
+                    commands.entity(entity).insert((Mesh3d(handle), Transform::from_xyz(offset, 0.0, 0.0)));
+                }
+                None => {
+                    bodies[side] = Some(
+                        commands
+                            .spawn((Mesh3d(handle), MeshMaterial3d(material.clone()), Transform::from_xyz(offset, 0.0, 0.0), ChildOf(*root)))
+                            .id(),
+                    );
+                }
+            }
+            shown.poses[side] = Some(wanted.clone());
         }
-        None => *body = Some(commands.spawn((Mesh3d(handle), MeshMaterial3d(material), ChildOf(*root))).id()),
     }
-    shown.pose = Some(wanted);
+    shown.fusion = Some(viewer.fusion);
 }
 
 fn update_hud(viewer: Res<Viewer>, poses: Res<Poses>, diagnostics: Res<DiagnosticsStore>, mut hud: Single<&mut Text, With<Hud>>) {
@@ -336,8 +409,14 @@ fn update_hud(viewer: Res<Viewer>, poses: Res<Poses>, diagnostics: Res<Diagnosti
     let entry = &viewer.entries[viewer.model];
     let own = entry.source.all_poses().len();
     let actions: Vec<&str> = Motion::ALL.iter().filter(|m| entry.source.families().contains(&m.family())).map(|m| m.label()).collect();
+    let fusion = match viewer.fusion {
+        Fusion::Both => "à gauche: primitives fusionnées (le jeu)   à droite: fusion douce",
+        Fusion::Primitives => "primitives fusionnées (le jeu)",
+        Fusion::Soft => "fusion douce",
+    };
+    let soft = poses.soft_stats.map_or(String::new(), |(vertices, millis)| format!("\nFusion douce de cette pose: {vertices} sommets, construite en {millis:.0} ms"));
     let text = format!(
-        "{}   [{}]   {} / {}   {fps:.0} FPS\n\n{} poses pour ce modèle (actions: {})\n{} poses construites au lancement en {:.2} s: {:.1} Mo de sommets\n\nStick droit: tourner   L / R: zoom   croix: modèle / action   Y: rotation   Select: recentrer",
+        "{}   [{}]   {} / {}   {fps:.0} FPS\n{fusion}\n\n{} poses pour ce modèle (actions: {})\n{} poses construites au lancement en {:.2} s: {:.1} Mo de sommets{soft}\n\nStick droit: tourner   L / R: zoom   croix: modèle / action   X: fusion   Y: rotation   Select: recentrer",
         entry.label,
         viewer.motion.label(),
         viewer.model + 1,

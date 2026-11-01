@@ -35,6 +35,7 @@ mod decor3d;
 mod live3d;
 mod merged;
 mod prebake;
+mod smooth;
 mod pause;
 mod puzzle;
 mod settings;

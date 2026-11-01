@@ -245,33 +245,54 @@ pub fn part_transform(part: &LivePart) -> Transform {
     Transform { translation: Vec3::from(part.center), rotation: Quat::from_mat3(&Mat3::from_cols_array_2d(&part.rot)), scale }
 }
 
-/// Toutes les pièces dans un seul maillage. Chaque sommet porte la couleur de sa pièce (sRGB, comme dans `sprite_forge`) et, dans son
-/// canal alpha, son éclat (la pièce brille, sans ombre) et son reflet.
-pub fn merge(parts: &[LivePart]) -> Mesh {
-    let mut positions: Vec<[f32; 3]> = Vec::new();
-    let mut normals: Vec<[f32; 3]> = Vec::new();
-    let mut colors: Vec<[f32; 4]> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-    for part in parts {
+/// Le tampon de sommets d'un maillage fusionné: position, normale et couleur (avec l'éclat et le reflet dans l'alpha).
+#[derive(Default)]
+pub struct Buffers {
+    pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    pub colors: Vec<[f32; 4]>,
+    pub indices: Vec<u32>,
+}
+
+/// L'alpha d'une couleur de sommet: l'éclat et le reflet partagent le canal alpha (2 + reflet pour une pièce qui brille, reflet sinon;
+/// aucune surface n'est transparente).
+pub fn glow_shine(glow: bool, shine: f32) -> f32 {
+    (if glow { 2.0 } else { 0.0 }) + shine.clamp(0.0, 1.0)
+}
+
+impl Buffers {
+    /// Ajoute une primitive entière, à sa place.
+    pub fn push_part(&mut self, part: &LivePart) {
         let shape = base(part.shape);
         let place = part_transform(part);
-        let first = positions.len() as u32;
+        let first = self.positions.len() as u32;
         // Une normale suit l'inverse de l'échelle (puis la rotation): une sphère aplatie garde des normales justes.
         let inverse_scale = Vec3::new(1.0 / place.scale.x.max(1e-4), 1.0 / place.scale.y.max(1e-4), 1.0 / place.scale.z.max(1e-4));
         for (position, normal) in shape.positions.iter().zip(&shape.normals) {
-            positions.push((place.rotation * (Vec3::from(*position) * place.scale) + place.translation).to_array());
-            normals.push((place.rotation * (Vec3::from(*normal) * inverse_scale)).normalize_or_zero().to_array());
-            // L'éclat et le reflet partagent le canal alpha: 2 + reflet pour une pièce qui brille, reflet sinon (aucune surface n'est
-            // transparente).
-            colors.push([part.color[0], part.color[1], part.color[2], if part.glow { 2.0 } else { 0.0 } + part.shine.clamp(0.0, 1.0)]);
+            self.positions.push((place.rotation * (Vec3::from(*position) * place.scale) + place.translation).to_array());
+            self.normals.push((place.rotation * (Vec3::from(*normal) * inverse_scale)).normalize_or_zero().to_array());
+            self.colors.push([part.color[0], part.color[1], part.color[2], glow_shine(part.glow, part.shine)]);
         }
-        indices.extend(shape.indices.iter().map(|index| first + index));
+        self.indices.extend(shape.indices.iter().map(|index| first + index));
     }
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
-        .with_inserted_indices(Indices::U32(indices))
+
+    pub fn into_mesh(self) -> Mesh {
+        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.positions)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, self.colors)
+            .with_inserted_indices(Indices::U32(self.indices))
+    }
+}
+
+/// Toutes les pièces dans un seul maillage. Chaque sommet porte la couleur de sa pièce (sRGB, comme dans `sprite_forge`) et, dans son
+/// canal alpha, son éclat (la pièce brille, sans ombre) et son reflet.
+pub fn merge(parts: &[LivePart]) -> Mesh {
+    let mut buffers = Buffers::default();
+    for part in parts {
+        buffers.push_part(part);
+    }
+    buffers.into_mesh()
 }
 
 #[cfg(test)]
