@@ -21,6 +21,7 @@ use bevy::{
     render::render_resource::{AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat},
     shader::ShaderRef,
 };
+use castle_shared::tileart::TILE_CELL;
 use castle_shared::{Room, TILE_SIZE, Tile};
 
 use crate::LocalPlayer;
@@ -32,6 +33,22 @@ const ELEVATION: f32 = 0.9;
 /// tuile à l'écran: la hauteur à l'écran d'une verticale est `hauteur x cos(élévation)`.
 fn wall_height() -> f32 {
     TILE_SIZE * 1.02 / ELEVATION.cos()
+}
+
+/// Hauteur ajoutée au-dessus de la face dessinée, en tuiles à l'écran (`CASTLE_WALL_EXTRA=<tuiles>` pour l'essayer; 0,3 par défaut, 0 pour des murs à plat: au-delà de 0,6 les murs cachent trop de sol): le mur
+/// continue avec le haut de son art étiré, et un dessus surélevé reprend l'art du mur voisin. Il masque alors une partie du sol
+/// derrière lui.
+fn extra_height() -> f32 {
+    static EXTRA: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *EXTRA.get_or_init(|| {
+        let tiles = std::env::var("CASTLE_WALL_EXTRA").ok().and_then(|value| value.parse::<f32>().ok()).unwrap_or(0.3).max(0.0);
+        tiles * TILE_SIZE / ELEVATION.cos()
+    })
+}
+
+/// Hauteur totale d'un mur.
+fn total_height() -> f32 {
+    wall_height() + extra_height()
 }
 /// Nombre maximal de lampes par bloc.
 const MAX_LIGHTS: usize = 8;
@@ -190,7 +207,7 @@ fn build_chunks(
             image: sprite.image.clone(),
             data: DecorData {
                 tint: Vec4::ONE,
-                params: Vec4::new(1.0 / ELEVATION.sin(), 0.0, wall_height(), TILE_SIZE),
+                params: Vec4::new(1.0 / ELEVATION.sin(), 0.0, total_height(), TILE_SIZE),
                 room: Vec4::new(room.size().x as f32, room.size().y as f32, 0.0, 0.0),
                 light_pos: [Vec4::ZERO; MAX_LIGHTS],
                 light_color: [Vec4::ZERO; MAX_LIGHTS],
@@ -258,8 +275,32 @@ fn chunk_mesh(room: &Room, origin: IVec2, cols: u32, rows: u32, lift: f32) -> Me
             let (v_top, v_bottom) = ((rows as i32 - 1 - j) as f32, (rows as i32 - j) as f32);
             let cell = [uv_at(u0, v_bottom), uv_at(u1, v_bottom), uv_at(u1, v_top), uv_at(u0, v_top)];
             // La face du sud, visible quand la tuile devant est du sol.
-            if room.tile(x, y - 1) == Tile::Floor {
+            let has_face = room.tile(x, y - 1) == Tile::Floor;
+            if has_face {
                 quad([to_3d(sw, lift), to_3d(se, lift), to_3d(se, wall_height() + lift), to_3d(sw, wall_height() + lift)], Vec3::Z, cell);
+            }
+            let extra = extra_height();
+            if extra > 0.0 {
+                let (low, high) = (wall_height() + lift, total_height() + lift);
+                // La rangée du haut de l'art, étirée vers le haut: la suite du mur au-dessus de sa face.
+                let smear = (v_top + 0.5 / TILE_CELL as f32).min(v_bottom);
+                let streak = [uv_at(u0, smear), uv_at(u1, smear)];
+                if has_face {
+                    quad([to_3d(sw, low), to_3d(se, low), to_3d(se, high), to_3d(sw, high)], Vec3::Z, [streak[0], streak[1], streak[1], streak[0]]);
+                }
+                // Le dessus: l'art du mur voisin au nord (l'intérieur du mur), sinon la rangée étirée.
+                let ne = se + Vec2::new(0.0, TILE_SIZE);
+                let nw = sw + Vec2::new(0.0, TILE_SIZE);
+                let north_art = has_face && j + 1 < rows as i32 && room.tile(x, y + 1) == Tile::Wall;
+                let top = if !has_face {
+                    cell
+                } else if north_art {
+                    let (north_top, north_bottom) = (v_top - 1.0, v_top);
+                    [uv_at(u0, north_bottom), uv_at(u1, north_bottom), uv_at(u1, north_top), uv_at(u0, north_top)]
+                } else {
+                    [streak[0], streak[1], streak[1], streak[0]]
+                };
+                quad([to_3d(sw, high), to_3d(se, high), to_3d(ne, high), to_3d(nw, high)], Vec3::Y, top);
             }
         }
     }
