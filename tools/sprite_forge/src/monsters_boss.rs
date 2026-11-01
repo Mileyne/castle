@@ -92,11 +92,11 @@ pub(crate) fn troll(pose: Pose) -> Vec<Part> {
             0.8,
         ));
     }
-    p.push(glow(ball(
+    p.push(ball(
         h + Vec3::new(0.0, 0.78 * r, 0.98 * r),
         0.1 * r,
         0xff3040,
-    )));
+    ));
     // La couronne dépasse: on le dessine plus petit que l'orque pour qu'elle reste dans la case.
     scaled(p, 0.95)
 }
@@ -158,8 +158,8 @@ pub(crate) fn muldant(pose: Pose) -> Vec<Part> {
     // La Pierre Ancestrale sur la poitrine, dans une monture de fer.
     let stone = Vec3::new(0.0, j.hip_y + d.torso * 0.72, d.torso_rz * 1.25 + 0.04);
     p.push(shiny(ball(stone, 0.075, IRON_D), 0.7));
-    p.push(glow(ball(stone + Vec3::new(0.0, 0.0, 0.03), 0.05, 0xb040ff)));
-    p.push(glow(ball(stone + Vec3::new(0.0, 0.0, 0.05), 0.025, 0xf0d8ff)));
+    p.push(ball(stone + Vec3::new(0.0, 0.0, 0.03), 0.05, 0xb040ff));
+    p.push(ball(stone + Vec3::new(0.0, 0.0, 0.05), 0.025, 0xf0d8ff));
     // La crinière et la largeur dépassent: on le dessine plus petit pour qu'il tienne dans la case.
     scaled(p, 0.66)
 }

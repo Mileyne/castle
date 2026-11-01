@@ -127,7 +127,7 @@ pub(crate) fn goblin(pose: Pose) -> Vec<Part> {
     for sg in [-1.0f32, 1.0] {
         p.push(shiny(cone(h + Vec3::new(sg * 0.85 * r, 0.1 * r, -0.1 * r), h + Vec3::new(sg * 2.3 * r, 0.75 * r, -0.45 * r), 0.42 * r, 0.04 * r, skin), 0.2));
         p.push(cone(h + Vec3::new(sg * 0.95 * r, 0.12 * r, -0.05 * r), h + Vec3::new(sg * 2.0 * r, 0.7 * r, -0.4 * r), 0.25 * r, 0.03 * r, 0xe89aa0));
-        p.push(glow(ellipsoid(h + Vec3::new(sg * 0.38 * r, 0.14 * r, 0.8 * r), Vec3::new(0.22, 0.15, 0.1) * r, 0xf0e030)));
+        p.push(ellipsoid(h + Vec3::new(sg * 0.38 * r, 0.14 * r, 0.8 * r), Vec3::new(0.22, 0.15, 0.1) * r, 0xf0e030));
         p.push(ellipsoid(h + Vec3::new(sg * 0.38 * r, 0.14 * r, 0.88 * r), Vec3::new(0.05, 0.12, 0.04) * r, DARK));
         p.push(block(h + Vec3::new(sg * 0.4 * r, 0.36 * r, 0.82 * r), Vec3::new(0.24, 0.035, 0.04) * r, Mat3::from_rotation_z(-sg * 0.3), skin_d));
         p.push(cone(h + Vec3::new(sg * 0.2 * r, -0.5 * r, 0.82 * r), h + Vec3::new(sg * 0.2 * r, -0.2 * r, 0.9 * r), 0.07 * r, 0.01 * r, FANG));
@@ -185,7 +185,7 @@ pub(crate) fn orc(pose: Pose) -> Vec<Part> {
     p.push(shiny(ellipsoid(h + Vec3::new(0.0, -0.5 * r, 0.42 * r), Vec3::new(0.85, 0.5, 0.65) * r, skin), 0.2));
     p.push(block(h + Vec3::new(0.0, 0.34 * r, 0.82 * r), Vec3::new(0.62, 0.1, 0.1) * r, Mat3::IDENTITY, skin_d));
     for sg in [-1.0f32, 1.0] {
-        p.push(glow(ellipsoid(h + Vec3::new(sg * 0.34 * r, 0.16 * r, 0.8 * r), Vec3::new(0.14, 0.09, 0.08) * r, 0xff4020)));
+        p.push(ellipsoid(h + Vec3::new(sg * 0.34 * r, 0.16 * r, 0.8 * r), Vec3::new(0.14, 0.09, 0.08) * r, 0xff4020));
         p.push(block(h + Vec3::new(sg * 0.34 * r, 0.3 * r, 0.86 * r), Vec3::new(0.2, 0.04, 0.05) * r, Mat3::from_rotation_z(-sg * 0.35), DARK));
         p.push(shiny(cone(h + Vec3::new(sg * 0.38 * r, -0.62 * r, 0.82 * r), h + Vec3::new(sg * 0.46 * r, 0.12 * r, 1.0 * r), 0.1 * r, 0.015 * r, BONE), 0.5));
         p.push(shiny(cone(h + Vec3::new(sg * 0.95 * r, 0.05 * r, 0.0), h + Vec3::new(sg * 1.45 * r, 0.45 * r, -0.15 * r), 0.16 * r, 0.02 * r, skin), 0.2));
@@ -254,7 +254,7 @@ pub(crate) fn ghoul(pose: Pose) -> Vec<Part> {
     p.push(shiny(limb(h + Vec3::new(0.05 * r, -0.7 * r, 0.7 * r), h + Vec3::new(0.08 * r + j.sway * 0.3, -1.25 * r, 0.8 * r), 0.07 * r, 0x9a3a50), 0.6));
     for sg in [-1.0f32, 1.0] {
         p.push(ellipsoid(h + Vec3::new(sg * 0.38 * r, 0.12 * r, 0.78 * r), Vec3::new(0.26, 0.28, 0.14) * r, 0x1e1a22));
-        p.push(glow(ball(h + Vec3::new(sg * 0.38 * r, 0.1 * r, 0.9 * r), 0.1 * r, 0xe8f070)));
+        p.push(ball(h + Vec3::new(sg * 0.38 * r, 0.1 * r, 0.9 * r), 0.1 * r, 0xe8f070));
         p.push(ball(h + Vec3::new(sg * 0.38 * r, 0.1 * r, 0.98 * r), 0.035 * r, DARK));
         p.push(cone(h + Vec3::new(sg * 0.95 * r, 0.1 * r, 0.0), h + Vec3::new(sg * 1.3 * r, 0.5 * r, -0.1 * r), 0.15 * r, 0.02 * r, skin));
     }
@@ -267,9 +267,9 @@ pub(crate) fn ghoul(pose: Pose) -> Vec<Part> {
     p
 }
 
-/// Le loup: un quadrupède gris, maigre et décharné, aux côtes saillantes, aux pattes fines et aux yeux jaunes, qui regarde
+/// Le loup: un quadrupède gris, maigre et décharné, aux côtes saillantes, aux pattes fines et aux yeux de rubis rayonnants, qui regarde
 /// vers +Z. À la marche, les pattes en diagonale (avant gauche avec arrière droite) s'élancent ensemble; au repos, il
-/// respire et la queue balance. `gore`: la gueule est ensanglantée et les yeux rougeoient.
+/// respire et la queue balance. `gore`: la gueule est ensanglantée.
 pub(crate) fn wolf(pose: Pose, gore: bool) -> Vec<Part> {
     let (phase, walking) = match pose {
         Pose::Walk(p) => (p, true),
@@ -313,8 +313,12 @@ pub(crate) fn wolf(pose: Pose, gore: bool) -> Vec<Part> {
         // Grandes oreilles dressées, intérieur rose.
         p.push(shiny(cone(head + Vec3::new(sg * 0.055, 0.06, -0.02), head + Vec3::new(sg * 0.085, 0.24, -0.05), 0.045, 0.007, fur_d), 0.15));
         p.push(cone(head + Vec3::new(sg * 0.055, 0.07, 0.0), head + Vec3::new(sg * 0.075, 0.2, -0.03), 0.024, 0.005, 0xc07a80));
-        // Yeux enfoncés.
-        p.push(glow(ball(head + Vec3::new(sg * 0.055, 0.03, 0.085), 0.017, if gore { 0xff3020 } else { 0xf0d040 })));
+        // Yeux de rubis rayonnants: un halo rouge sombre, une gemme rouge vif qui brille, et un point de lumière clair. (Le rubis est
+        // celui des deux loups, ordinaire ou de boss: `gore` ne change que la gueule.)
+        let eye = head + Vec3::new(sg * 0.055, 0.03, 0.085);
+        p.push(glow(ball(eye + Vec3::new(0.0, 0.0, -0.004), 0.03, 0x6e0a1a)));
+        p.push(glow(ball(eye + Vec3::new(0.0, 0.0, 0.012), 0.019, 0xe0102c)));
+        p.push(glow(ball(eye + Vec3::new(sg * -0.005, 0.007, 0.03), 0.007, 0xff8c9a)));
     }
     if gore {
         p.push(ellipsoid(head + Vec3::new(0.0, -0.06, 0.24), Vec3::new(0.04, 0.025, 0.05), 0xa01820));

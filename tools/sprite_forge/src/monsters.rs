@@ -103,7 +103,7 @@ pub(crate) fn skeleton(pose: Pose) -> Vec<Part> {
     p.push(ellipsoid(h + Vec3::new(0.0, -0.6 * r, 0.4 * r), Vec3::new(0.62, 0.34, 0.5) * r, BONE_D));
     for sg in [-1.0f32, 1.0] {
         p.push(ellipsoid(h + Vec3::new(sg * 0.38 * r, 0.05 * r, 0.82 * r), Vec3::new(0.25, 0.3, 0.14) * r, DARK));
-        p.push(glow(ellipsoid(h + Vec3::new(sg * 0.38 * r, 0.02 * r, 0.93 * r), Vec3::new(0.12, 0.16, 0.06) * r, 0xff5a20)));
+        p.push(ellipsoid(h + Vec3::new(sg * 0.38 * r, 0.02 * r, 0.93 * r), Vec3::new(0.12, 0.16, 0.06) * r, 0xff5a20));
     }
     p.push(ellipsoid(h + Vec3::new(0.0, -0.22 * r, 0.93 * r), Vec3::new(0.1, 0.14, 0.07) * r, DARK));
     for k in 0..6 {
@@ -113,7 +113,7 @@ pub(crate) fn skeleton(pose: Pose) -> Vec<Part> {
     p.push(block(h + Vec3::new(0.3 * r, 0.55 * r, 0.8 * r), Vec3::new(0.012, 0.18, 0.02) * r, Mat3::from_rotation_z(0.4), DARK));
     for (x, up) in [(-0.45, 0.7), (0.0, 1.0), (0.45, 0.75)] {
         let base = h + Vec3::new(x * r, 0.95 * r, 0.0);
-        p.push(glow(cone(base, base + Vec3::new((x * 0.5 + j.sway * 3.0) * r, up * r, -0.2 * r), 0.22 * r, 0.02 * r, SOUL)));
+        p.push(cone(base, base + Vec3::new((x * 0.5 + j.sway * 3.0) * r, up * r, -0.2 * r), 0.22 * r, 0.02 * r, SOUL));
     }
     // Épée rouillée ébréchée, petit bouclier rond fendu.
     let rot = Mat3::from_rotation_x(j.forearm_angle[0] * 0.5 + 0.15);
@@ -152,9 +152,9 @@ pub(crate) fn bat(pose: Pose) -> Vec<Part> {
         p.push(cone(head + Vec3::new(sg * 0.12, 0.12, 0.0), head + Vec3::new(sg * 0.24, 0.5, -0.03), 0.1, 0.012, body));
         p.push(cone(head + Vec3::new(sg * 0.12, 0.14, 0.03), head + Vec3::new(sg * 0.22, 0.44, 0.0), 0.06, 0.01, 0xe890b0));
         // Gros yeux jaunes à fente, crocs.
-        p.push(glow(ellipsoid(head + Vec3::new(sg * 0.085, 0.03, 0.17), Vec3::new(0.065, 0.085, 0.035), 0xffe040)));
+        p.push(ellipsoid(head + Vec3::new(sg * 0.085, 0.03, 0.17), Vec3::new(0.065, 0.085, 0.035), 0xffe040));
         p.push(ellipsoid(head + Vec3::new(sg * 0.085, 0.02, 0.2), Vec3::new(0.014, 0.065, 0.02), DARK));
-        p.push(glow(ball(head + Vec3::new(sg * 0.07, 0.07, 0.215), 0.017, 0xffffff)));
+        p.push(ball(head + Vec3::new(sg * 0.07, 0.07, 0.215), 0.017, 0xffffff));
         p.push(cone(head + Vec3::new(sg * 0.05, -0.1, 0.17), head + Vec3::new(sg * 0.05, -0.2, 0.18), 0.022, 0.003, WHITE));
         // Aile: os du bras, trois doigts et membrane.
         let shoulder = Vec3::new(sg * 0.14, y0 + 0.1, -0.02);
