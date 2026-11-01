@@ -1,5 +1,6 @@
-//! Météo des deux premiers extérieurs (forêt et marais): une pluie battante, un ciel plus sombre (un voile translucide sur
-//! toute la vue), et de temps en temps un éclair qui éclaire tout d'un coup, très brièvement, deux fois de suite.
+//! Météo des deux premiers extérieurs: la forêt de brume est noyée sous des nappes de brume qui dérivent; le marais est sous une
+//! pluie battante, avec un ciel plus sombre (un voile translucide sur toute la vue), et de temps en temps un éclair qui éclaire
+//! tout d'un coup, très brièvement, deux fois de suite.
 
 use bevy::{
     prelude::*,
@@ -20,13 +21,35 @@ const RAIN_CELL_LITE: f32 = 34.0;
 const RAIN_Z: f32 = 950.0;
 /// Opacité du voile sombre sous la pluie (forêt, marais), et force maximale d'un éclair (1 = il efface tout le voile et
 /// blanchit l'image).
-const GLOOM: [(Region, f32); 2] = [(Region::Forest, 0.28), (Region::Marsh, 0.36)];
+const GLOOM: [(Region, f32); 2] = [(Region::Forest, 0.12), (Region::Marsh, 0.36)];
+/// Brume: côté (unités du monde) d'un motif de bruit, dérive du vent, et opacité maximale des nappes. Moins de couches de bruit
+/// sur les petits appareils, pour alléger le calcul.
+const MIST_SCALE: f32 = 220.0;
+const MIST_DRIFT: Vec2 = Vec2::new(0.03, 0.012);
+const MIST_DENSITY: f32 = 0.4;
+const MIST_LAYERS: f32 = 4.0;
+const MIST_LAYERS_LITE: f32 = 2.0;
 const FLASH_STRENGTH: f32 = 1.0;
 const STRIKE_GAP: (f32, f32) = (7.0, 16.0);
 
-/// La région est-elle sous la pluie ?
+/// Le temps qu'il fait dans une région.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Sky {
+    Mist,
+    Rain,
+}
+
+fn sky(region: Region) -> Option<Sky> {
+    match region {
+        Region::Forest => Some(Sky::Mist),
+        Region::Marsh => Some(Sky::Rain),
+        _ => None,
+    }
+}
+
+/// La région est-elle sous la pluie (et donc l'orage) ?
 pub fn is_rainy(region: Region) -> bool {
-    matches!(region, Region::Forest | Region::Marsh)
+    sky(region) == Some(Sky::Rain)
 }
 
 /// État de l'orage; `flash` (0 à 1) dit à quel point un éclair éclaire la scène en ce moment.
@@ -42,8 +65,8 @@ pub struct WeatherPlugin;
 impl Plugin for WeatherPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Weather>()
-            .add_plugins(Material2dPlugin::<RainMaterial>::default())
-            .add_systems(Update, (update_storm, update_rain).chain());
+            .add_plugins((Material2dPlugin::<RainMaterial>::default(), Material2dPlugin::<MistMaterial>::default()))
+            .add_systems(Update, (update_storm, update_sky).chain());
     }
 }
 
@@ -121,22 +144,53 @@ impl Material2d for RainMaterial {
     }
 }
 
-/// Pose la pluie et le voile sombre de l'orage sur la vue, et les retire hors des régions pluvieuses.
-fn update_rain(
+/// La brume: un seul rectangle qui couvre la vue, dessiné par `assets/shaders/mist.wesl`.
+#[derive(Component)]
+struct Mist;
+
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+struct MistMaterial {
+    /// (échelle, vent x, vent y, densité maximale).
+    #[uniform(0)]
+    data: Vec4,
+    /// (nombre de couches de bruit, -, -, -).
+    #[uniform(1)]
+    params: Vec4,
+}
+
+impl Material2d for MistMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/mist.wesl".into()
+    }
+
+    fn alpha_mode(&self) -> AlphaMode2d {
+        AlphaMode2d::Blend
+    }
+}
+
+/// Pose le temps de la région (pluie ou brume) et le voile sombre sur la vue, et retire ce qui n'est plus de saison.
+fn update_sky(
     mut commands: Commands,
     expeditions: Query<&Expedition>,
     camera: Single<Entity, With<Camera2d>>,
     rain: Query<Entity, With<Rain>>,
+    mist: Query<Entity, With<Mist>>,
     mut gloom: Query<(Entity, &mut Sprite), With<Gloom>>,
     weather: Res<Weather>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<RainMaterial>>,
+    mut rain_materials: ResMut<Assets<RainMaterial>>,
+    mut mist_materials: ResMut<Assets<MistMaterial>>,
 ) {
-    let region = expeditions.iter().last().map(|e| e.region).filter(|r| is_rainy(*r));
+    let region = expeditions.iter().last().map(|e| e.region).filter(|r| sky(*r).is_some());
+    let weather_now = region.and_then(sky);
+    if weather_now != Some(Sky::Rain) {
+        rain.iter().for_each(|entity| commands.entity(entity).despawn());
+    }
+    if weather_now != Some(Sky::Mist) {
+        mist.iter().for_each(|entity| commands.entity(entity).despawn());
+    }
     let Some(region) = region else {
-        for entity in rain.iter().chain(gloom.iter().map(|(entity, _)| entity)) {
-            commands.entity(entity).despawn();
-        }
+        gloom.iter().for_each(|(entity, _)| commands.entity(entity).despawn());
         return;
     };
     // Le voile: sombre et bleuté; un éclair le dissipe et blanchit brièvement la vue.
@@ -153,13 +207,28 @@ fn update_rain(
             sprite.color = veil;
         }
     }
-    if rain.is_empty() {
-        let cell = if crate::settings::low_memory() { RAIN_CELL_LITE } else { RAIN_CELL };
+    let lite = crate::settings::low_memory();
+    if weather_now == Some(Sky::Rain) && rain.is_empty() {
+        let cell = if lite { RAIN_CELL_LITE } else { RAIN_CELL };
         commands.entity(*camera).with_children(|camera| {
             camera.spawn((
                 Rain,
                 Mesh2d(meshes.add(Rectangle::new(2400.0, 1600.0))),
-                MeshMaterial2d(materials.add(RainMaterial { data: Vec4::new(cell, WIND, FALL_SPEED, 1.0) })),
+                MeshMaterial2d(rain_materials.add(RainMaterial { data: Vec4::new(cell, WIND, FALL_SPEED, 1.0) })),
+                Transform::from_xyz(0.0, 0.0, RAIN_Z),
+            ));
+        });
+    }
+    if weather_now == Some(Sky::Mist) && mist.is_empty() {
+        let layers = if lite { MIST_LAYERS_LITE } else { MIST_LAYERS };
+        commands.entity(*camera).with_children(|camera| {
+            camera.spawn((
+                Mist,
+                Mesh2d(meshes.add(Rectangle::new(2400.0, 1600.0))),
+                MeshMaterial2d(mist_materials.add(MistMaterial {
+                    data: Vec4::new(MIST_SCALE, MIST_DRIFT.x, MIST_DRIFT.y, MIST_DENSITY),
+                    params: Vec4::new(layers, 0.0, 0.0, 0.0),
+                })),
                 Transform::from_xyz(0.0, 0.0, RAIN_Z),
             ));
         });
@@ -180,8 +249,9 @@ mod tests {
     }
 
     #[test]
-    fn only_the_forest_and_the_marsh_get_rain() {
-        assert!(is_rainy(Region::Forest) && is_rainy(Region::Marsh));
-        assert!(!is_rainy(Region::Approach) && !is_rainy(Region::Crypts));
+    fn the_forest_has_mist_and_only_the_marsh_gets_rain() {
+        assert_eq!(sky(Region::Forest), Some(Sky::Mist));
+        assert!(is_rainy(Region::Marsh) && !is_rainy(Region::Forest));
+        assert!(sky(Region::Approach).is_none() && sky(Region::Crypts).is_none());
     }
 }
