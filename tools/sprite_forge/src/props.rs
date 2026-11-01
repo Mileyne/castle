@@ -256,7 +256,7 @@ fn wall_rune(t: f32) -> Vec<Part> {
         p.push(glow(block(
             Vec3::new(a.cos() * 0.31, 0.12 + a.sin() * 0.31, 0.11),
             Vec3::new(0.05 * lit, 0.018, 0.012),
-            Mat3::from_rotation_z(a + 1.5708),
+            Mat3::from_rotation_z(a + std::f32::consts::FRAC_PI_2),
             SORCERER_C,
         )));
     }

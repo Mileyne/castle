@@ -33,7 +33,7 @@ pub fn tile_column(x: u32, y: u32, region_row: usize, wall: bool, floor_below: b
         // La ligne 0 du motif est en haut, alors que `y` croît vers le haut.
         (pattern * MACRO * MACRO + (MACRO - 1 - y % MACRO) * MACRO + x % MACRO) as usize
     } else if floor_below {
-        if noise % 9 == 0 {
+        if noise.is_multiple_of(9) {
             DECOR_START + (noise as usize / 9) % 2
         } else {
             FACE_START + (((face_block >> 5) % FACE_PATTERNS) * MACRO + x % MACRO) as usize

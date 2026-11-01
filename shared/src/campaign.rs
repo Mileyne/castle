@@ -11,7 +11,7 @@ pub const BOSS_EVERY: u32 = 4;
 
 /// Les niveaux 4, 8 et 12 sont des combats de boss.
 pub fn is_boss_level(level: u32) -> bool {
-    level >= BOSS_EVERY && level % BOSS_EVERY == 0
+    level >= BOSS_EVERY && level.is_multiple_of(BOSS_EVERY)
 }
 
 const FILES: [&str; LEVEL_COUNT as usize] = [

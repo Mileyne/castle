@@ -145,7 +145,7 @@ pub fn ground(region: usize, variant: usize, seed: u64, st: &Style, gore: bool) 
                 for _ in 0..40 {
                     let (x, z) = (rng.spread(half), rng.spread(half));
                     let color = pick(&mut rng, &[0xb8702a, 0x8a5a20, 0xc89030, 0x6a4a1c]);
-                    let a = rng.next() * 3.14;
+                    let a = rng.next() * std::f32::consts::PI;
                     for dx in wraps(x, 0.08, side) {
                         for dz in wraps(z, 0.08, side) {
                             p.push(ellipsoid(Vec3::new(dx, 0.06, dz), Vec3::new(0.05, 0.007, 0.028), color));
@@ -155,7 +155,7 @@ pub fn ground(region: usize, variant: usize, seed: u64, st: &Style, gore: bool) 
                 }
                 for _ in 0..8 {
                     let (x, z) = (rng.spread(half), rng.spread(half));
-                    let a = rng.next() * 3.14;
+                    let a = rng.next() * std::f32::consts::PI;
                     for dx in wraps(x, 0.2, side) {
                         for dz in wraps(z, 0.2, side) {
                             p.push(limb(Vec3::new(dx, 0.06, dz), Vec3::new(dx + a.cos() * 0.3, 0.065, dz + a.sin() * 0.3), 0.01, 0x4a3822));

@@ -162,7 +162,7 @@ fn path_of(name: &str) -> PathBuf {
 }
 
 fn parse(text: &str) -> Option<SaveGame> {
-    let save: SaveGame = ron::from_str(&text).ok()?;
+    let save: SaveGame = ron::from_str(text).ok()?;
     (save.version <= SAVE_VERSION).then_some(save)
 }
 
@@ -242,7 +242,7 @@ pub fn list(mode: GameMode) -> Vec<SaveGame> {
             .filter(|s| s.mode == mode)
             .collect()
     };
-    saves.sort_by(|a, b| b.saved_at.cmp(&a.saved_at));
+    saves.sort_by_key(|save| std::cmp::Reverse(save.saved_at));
     saves
 }
 

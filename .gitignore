@@ -10,3 +10,4 @@ target-tvos/
 build_*.log
 tvos_build.log
 target-win/
+client/assets/art/*/sprite_meta.rs
