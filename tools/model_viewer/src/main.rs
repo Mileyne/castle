@@ -143,7 +143,8 @@ struct Poses {
     baking: Option<Baking>,
     baking_secs: f32,
     /// Les matériaux (par matière et par rendu) et la texture de tissage.
-    materials: std::collections::HashMap<(merged::Surface, u8), Handle<StandardMaterial>>,
+    materials: std::collections::HashMap<(merged::Surface, u8, Option<&'static str>), Handle<StandardMaterial>>,
+    faces: std::collections::HashMap<&'static str, Handle<Image>>,
     cloth: Option<Handle<Image>>,
 }
 
@@ -186,7 +187,7 @@ fn main() {
                     }),
                     ..default()
                 })
-                .set(AssetPlugin { file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/assets").into(), ..default() }),
+                .set(AssetPlugin { file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../client/assets").into(), ..default() }),
             FrameTimeDiagnosticsPlugin::default(),
         ))
         .insert_resource(ClearColor(Color::srgb(0.16, 0.2, 0.17)))
@@ -337,7 +338,9 @@ fn input(mut viewer: ResMut<Viewer>, keys: Res<ButtonInput<KeyCode>>, time: Res<
 
 /// La caméra tourne autour du modèle, à hauteur de poitrine.
 fn place_camera(viewer: Res<Viewer>, mut camera: Single<&mut Transform, With<Camera3d>>) {
-    let target = Vec3::new(0.0, 0.8, 0.0);
+    // `MODEL_VIEWER_HEIGHT=1.5` cadre la tête (hauteur du point regardé, en mètres).
+    let height = std::env::var("MODEL_VIEWER_HEIGHT").ok().and_then(|h| h.parse().ok()).unwrap_or(0.8);
+    let target = Vec3::new(0.0, height, 0.0);
     let offset = Vec3::new(viewer.yaw.sin() * viewer.pitch.cos(), viewer.pitch.sin(), viewer.yaw.cos() * viewer.pitch.cos());
     **camera = Transform::from_translation(target + offset * viewer.distance).looking_at(target, Vec3::Y);
 }
@@ -361,6 +364,7 @@ fn update_model(
     mut meshes: ResMut<Assets<Mesh>>,
     mut standard: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    assets: Res<AssetServer>,
     mut shown: Single<(Entity, &mut Shown)>,
     mut bodies: Local<Vec<[Option<Entity>; merged::SURFACES]>>,
 ) {
@@ -402,12 +406,15 @@ fn update_model(
                 Look::Plain => 1,
                 Look::Lit => 2,
             };
+            let face = merged::face_path(source);
+            let face = if surface == merged::Surface::Face { face } else { None };
+            let face_image = face.map(|path| poses.faces.entry(path).or_insert_with(|| merged::load_face(&assets, path)).clone());
             let material = poses
                 .materials
-                .entry((surface, kind))
+                .entry((surface, kind, face))
                 .or_insert_with(|| {
                     let cloth = (kind == 2).then_some(&cloth);
-                    standard.add(merged::surface_material(surface, kind != 0, Color::WHITE, cloth))
+                    standard.add(merged::surface_material(surface, kind != 0, Color::WHITE, cloth, face_image.as_ref()))
                 })
                 .clone();
             let place = Transform::from_xyz(*offset, 0.0, 0.0);

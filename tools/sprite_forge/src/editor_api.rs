@@ -442,6 +442,8 @@ pub struct LivePart {
 /// La couche d'une pièce: la fusion douce n'unit que des pièces de la même couche.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LiveLayer {
+    /// Le crâne: il reçoit la peau tirée des photos de référence.
+    Face,
     /// Peau, visage, cheveux, barbe.
     Body,
     /// Vêtements, armure, couvre-chef (la couche des monstres et des objets).
@@ -498,6 +500,7 @@ fn to_live(parts: Vec<Part>) -> Vec<LivePart> {
             glow: part.glow,
             shine: part.shine,
             layer: match part.layer {
+                Layer::Face => LiveLayer::Face,
                 Layer::Body => LiveLayer::Body,
                 Layer::Outfit => LiveLayer::Outfit,
                 Layer::Gear => LiveLayer::Gear,

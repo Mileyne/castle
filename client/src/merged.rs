@@ -39,13 +39,15 @@ pub enum Surface {
     Metal,
     /// Les pièces qui brillent (orbe, étincelles, braise): elles ne sont pas éclairées.
     Glow,
+    /// Le crâne d'un héros: sa peau vient de la photo de référence (voir `Face`).
+    Face,
 }
 
 /// Le nombre de matières.
-pub const SURFACES: usize = 5;
+pub const SURFACES: usize = 6;
 
 impl Surface {
-    pub const ALL: [Surface; SURFACES] = [Self::Cloth, Self::Skin, Self::Mail, Self::Metal, Self::Glow];
+    pub const ALL: [Surface; SURFACES] = [Self::Cloth, Self::Skin, Self::Mail, Self::Metal, Self::Glow, Self::Face];
 
     pub fn index(self) -> usize {
         self as usize
@@ -56,6 +58,8 @@ impl Surface {
     pub fn of(part: &LivePart) -> Self {
         if part.glow {
             Self::Glow
+        } else if part.layer == sprite_forge::LiveLayer::Face {
+            Self::Face
         } else if part.layer == sprite_forge::LiveLayer::Body {
             Self::Skin
         } else if part.shine >= 0.6 {
@@ -71,20 +75,25 @@ impl Surface {
 /// Les maillages d'une pose, un par matière (certaines matières peuvent manquer).
 pub type PoseMeshes = [Option<Handle<Mesh>>; SURFACES];
 
-/// Le matériau de Bevy d'une matière. `lit`: éclairé par le soleil et la lumière ambiante, avec la rugosité et le métal de la matière;
+/// Le matériau de Bevy d'une matière. `face` est la peau du crâne tirée de la photo (voir `face_image`). `lit`: éclairé par le soleil et la lumière ambiante, avec la rugosité et le métal de la matière;
 /// sinon, les couleurs pures. `tint` multiplie la couleur (et la rend translucide si son alpha est inférieur à 1); `cloth` est la
 /// texture de tissage des vêtements (`None`: vêtements unis).
-pub fn surface_material(surface: Surface, lit: bool, tint: Color, cloth: Option<&Handle<Image>>) -> StandardMaterial {
+pub fn surface_material(surface: Surface, lit: bool, tint: Color, cloth: Option<&Handle<Image>>, face: Option<&Handle<Image>>) -> StandardMaterial {
     let (roughness, metallic, reflectance) = match surface {
         Surface::Cloth => (0.92, 0.0, 0.3),
-        Surface::Skin => (0.6, 0.0, 0.4),
+        Surface::Skin | Surface::Face => (0.6, 0.0, 0.4),
         Surface::Mail => (0.45, 0.5, 0.5),
         Surface::Metal => (0.25, 0.9, 0.6),
         Surface::Glow => (0.5, 0.0, 0.5),
     };
     StandardMaterial {
         base_color: tint,
-        base_color_texture: if lit && surface == Surface::Cloth { cloth.cloned() } else { None },
+        base_color_texture: match surface {
+            Surface::Cloth if lit => cloth.cloned(),
+            // La peau de la photo se voit aussi sans éclairage: ce sont les couleurs du visage.
+            Surface::Face => face.cloned(),
+            _ => None,
+        },
         perceptual_roughness: roughness,
         metallic,
         reflectance,
@@ -92,6 +101,34 @@ pub fn surface_material(surface: Surface, lit: bool, tint: Color, cloth: Option<
         alpha_mode: if tint.alpha() < 1.0 { AlphaMode::Blend } else { AlphaMode::Opaque },
         ..default()
     }
+}
+
+/// La peau du crâne d'un héros, tirée de sa photo de référence (`client/assets/art/medieval/faces/<classe>.png`, 24 x 24 pixels: le
+/// visage de la photo réduit, pour ne garder que les teintes: front, joues, barbe, ombres des orbites). Les yeux, le nez et la bouche
+/// restent des pièces modélisées par-dessus; une photo plus nette les doublerait.
+pub fn face_path(source: &ModelSource) -> Option<&'static str> {
+    match source {
+        ModelSource::Key(key) => match key.as_str() {
+            "hero:Knight" => Some("art/medieval/faces/knight.png"),
+            "hero:Sorcerer" => Some("art/medieval/faces/sorcerer.png"),
+            "hero:Ranger" => Some("art/medieval/faces/ranger.png"),
+            "hero:Forgebraise" => Some("art/medieval/faces/forgebraise.png"),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Charge la peau du crâne d'un héros (échantillonnage lissé, la texture est très petite).
+pub fn load_face(assets: &AssetServer, path: &'static str) -> Handle<Image> {
+    use bevy::image::{ImageLoaderSettings, ImageSampler};
+    assets
+        .load_builder()
+        .with_settings(|settings: &mut ImageLoaderSettings| {
+            settings.sampler = ImageSampler::linear();
+            settings.asset_usage = RenderAssetUsages::RENDER_WORLD;
+        })
+        .load(path)
 }
 
 /// La texture de tissage des vêtements: un tissage simple (fils qui passent dessus puis dessous) un peu irrégulier, en tons clairs qui
@@ -323,6 +360,12 @@ impl Baking {
     }
 }
 
+/// Une pièce se dessine avec plus de facettes quand c'est du corps (visage, cheveux, barbe, oreilles): c'est ce qu'on regarde de près,
+/// et ces pièces sont arrondies. Les petits détails (cils, rides, dents) restent grossiers: ils sont minuscules à l'écran.
+fn is_fine(part: &LivePart) -> bool {
+    matches!(part.layer, sprite_forge::LiveLayer::Body | sprite_forge::LiveLayer::Face) && part.scale.iter().copied().fold(0.0f32, f32::max) >= 0.06
+}
+
 /// Un maillage de base (une forme de rayon 1), déjà réduit à des tableaux.
 struct Base {
     positions: Vec<[f32; 3]>,
@@ -331,22 +374,26 @@ struct Base {
 }
 
 /// Un cône de rayons `bottom` et `top` se distingue de l'autre au centième près.
-fn base_key(shape: LiveShape) -> (u8, i32, i32) {
-    match shape {
+fn base_key(shape: LiveShape, fine: bool) -> (u8, i32, i32) {
+    let key = match shape {
         LiveShape::Sphere => (0, 0, 0),
         LiveShape::Cube => (1, 0, 0),
         LiveShape::Capsule(_) => (2, 0, 0),
         LiveShape::Frustum(a, b) => (3, (a * 50.0).round() as i32, (b * 50.0).round() as i32),
-    }
+    };
+    (key.0 + if fine { 10 } else { 0 }, key.1, key.2)
 }
 
 /// Les formes de base, avec moins de facettes que pour un affichage isolé: une pièce de personnage est petite à l'écran.
-fn build_base(shape: LiveShape) -> Base {
-    let mesh: Mesh = match shape {
-        LiveShape::Sphere => Sphere::new(1.0).mesh().uv(12, 8),
-        LiveShape::Cube => Cuboid::new(2.0, 2.0, 2.0).into(),
-        LiveShape::Capsule(_) => Capsule3d::new(1.0, 2.0).mesh().rings(2).latitudes(4).longitudes(10).build(),
-        LiveShape::Frustum(a, b) => ConicalFrustum { radius_top: b, radius_bottom: a, height: 2.0 }.mesh().resolution(12).build(),
+fn build_base(shape: LiveShape, fine: bool) -> Base {
+    let mesh: Mesh = match (shape, fine) {
+        (LiveShape::Sphere, false) => Sphere::new(1.0).mesh().uv(12, 8),
+        (LiveShape::Sphere, true) => Sphere::new(1.0).mesh().uv(28, 18),
+        (LiveShape::Cube, _) => Cuboid::new(2.0, 2.0, 2.0).into(),
+        (LiveShape::Capsule(_), false) => Capsule3d::new(1.0, 2.0).mesh().rings(2).latitudes(4).longitudes(10).build(),
+        (LiveShape::Capsule(_), true) => Capsule3d::new(1.0, 2.0).mesh().rings(3).latitudes(8).longitudes(20).build(),
+        (LiveShape::Frustum(a, b), false) => ConicalFrustum { radius_top: b, radius_bottom: a, height: 2.0 }.mesh().resolution(12).build(),
+        (LiveShape::Frustum(a, b), true) => ConicalFrustum { radius_top: b, radius_bottom: a, height: 2.0 }.mesh().resolution(24).build(),
     };
     let float3 = |attribute| match mesh.attribute(attribute) {
         Some(bevy::mesh::VertexAttributeValues::Float32x3(values)) => values.clone(),
@@ -360,10 +407,10 @@ fn build_base(shape: LiveShape) -> Base {
     Base { positions: float3(Mesh::ATTRIBUTE_POSITION), normals: float3(Mesh::ATTRIBUTE_NORMAL), indices }
 }
 
-fn base(shape: LiveShape) -> Arc<Base> {
+fn base(shape: LiveShape, fine: bool) -> Arc<Base> {
     static BASES: OnceLock<Mutex<HashMap<(u8, i32, i32), Arc<Base>>>> = OnceLock::new();
     let mut bases = BASES.get_or_init(Default::default).lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    bases.entry(base_key(shape)).or_insert_with(|| Arc::new(build_base(shape))).clone()
+    bases.entry(base_key(shape, fine)).or_insert_with(|| Arc::new(build_base(shape, fine))).clone()
 }
 
 /// La place d'une pièce dans le modèle.
@@ -382,7 +429,8 @@ pub struct Buffers {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub colors: Vec<[f32; 4]>,
-    /// Coordonnées de texture (une projection plane selon l'axe dominant de la normale), gardées seulement pour les vêtements.
+    /// Coordonnées de texture, gardées seulement pour les vêtements (projection plane selon l'axe dominant de la normale) et le crâne
+    /// (projection de face, calée sur la pièce).
     pub uvs: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
 }
@@ -414,8 +462,9 @@ pub fn vertex_color(color: [f32; 3], glow: bool) -> [f32; 4] {
 impl Buffers {
     /// Ajoute une primitive entière, à sa place.
     pub fn push_part(&mut self, part: &LivePart) {
-        let shape = base(part.shape);
+        let shape = base(part.shape, is_fine(part));
         let place = part_transform(part);
+        let face = part.layer == sprite_forge::LiveLayer::Face;
         let first = self.positions.len() as u32;
         // Une normale suit l'inverse de l'échelle (puis la rotation): une sphère aplatie garde des normales justes.
         let inverse_scale = Vec3::new(1.0 / place.scale.x.max(1e-4), 1.0 / place.scale.y.max(1e-4), 1.0 / place.scale.z.max(1e-4));
@@ -424,8 +473,14 @@ impl Buffers {
             let facing = (place.rotation * (Vec3::from(*normal) * inverse_scale)).normalize_or_zero();
             self.positions.push(at.to_array());
             self.normals.push(facing.to_array());
-            self.uvs.push(box_uv(at, facing));
-            self.colors.push(vertex_color(part.color, part.glow));
+            self.uvs.push(if face {
+                // De face (le modèle regarde vers +z): la photo couvre la pièce, du front (en haut) au menton, de gauche à droite.
+                [0.5 + (at.x - place.translation.x) / (2.0 * place.scale.x), 0.5 - (at.y - place.translation.y) / (2.0 * place.scale.y)]
+            } else {
+                box_uv(at, facing)
+            });
+            // Le crâne prend ses couleurs de la photo: une couleur de sommet s'y multiplierait.
+            self.colors.push(if face { [1.0, 1.0, 1.0, 1.0] } else { vertex_color(part.color, part.glow) });
         }
         self.indices.extend(shape.indices.iter().map(|index| first + index));
     }
@@ -450,7 +505,7 @@ pub fn merge(parts: &[LivePart]) -> [Option<Mesh>; SURFACES] {
     let mut meshes: [Option<Mesh>; SURFACES] = Default::default();
     for (surface, (slot, buffer)) in Surface::ALL.into_iter().zip(meshes.iter_mut().zip(buffers)) {
         if !buffer.positions.is_empty() {
-            *slot = Some(buffer.into_mesh_with(surface == Surface::Cloth));
+            *slot = Some(buffer.into_mesh_with(matches!(surface, Surface::Cloth | Surface::Face)));
         }
     }
     meshes
@@ -517,7 +572,7 @@ mod tests {
     #[test]
     fn merging_keeps_every_vertex_and_every_triangle() {
         let parts = [part(LiveShape::Sphere, [0.0; 3], false), part(LiveShape::Cube, [2.0, 0.0, 0.0], true)];
-        let (sphere, cube) = (base(LiveShape::Sphere), base(LiveShape::Cube));
+        let (sphere, cube) = (base(LiveShape::Sphere, false), base(LiveShape::Cube, false));
         let meshes = merge(&parts);
         assert_eq!(all_vertices(&meshes), sphere.positions.len() + cube.positions.len());
         let triangles: usize = meshes.iter().flatten().filter_map(|mesh| mesh.indices().map(|i| i.len())).sum();

@@ -22,6 +22,8 @@ pub enum Shape {
 /// fait pas corps avec un visage.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Layer {
+    /// Le crâne (la seule pièce qui reçoit la peau tirée des photos de référence).
+    Face,
     Body,
     #[default]
     Outfit,

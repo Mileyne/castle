@@ -10,7 +10,7 @@ use castle_shared::{ExitKind, HeroClass, Landmark, LandmarkKind, LevelExit, Mons
 use sprite_forge::{Anim, models};
 
 use crate::art::{PoseKind, Prop, SPRITE_SIZE, WalkCycle, exit_row, monster_scale, object};
-use crate::merged::{ModelSource, PoseCache, SURFACES, Surface, surface_material, weave_image};
+use crate::merged::{ModelSource, PoseCache, SURFACES, Surface, face_path, load_face, surface_material, weave_image};
 use crate::settings::ModelShader;
 
 /// Les modèles de `sprite_forge` montrent 2,4 mètres dans une case de sprite: un mètre vaut `taille de la case / 2,4` unités du monde.
@@ -52,7 +52,9 @@ fn tint_key(tint: Option<&ModelTint>) -> TintKey {
 #[derive(Resource, Default)]
 pub struct Caches {
     pub poses: PoseCache,
-    materials: std::collections::HashMap<(Surface, ModelShader, TintKey), Handle<StandardMaterial>>,
+    materials: std::collections::HashMap<(Surface, ModelShader, TintKey, Option<&'static str>), Handle<StandardMaterial>>,
+    /// Les peaux des crânes (une par héros), chargées à la première utilisation.
+    faces: std::collections::HashMap<&'static str, Handle<Image>>,
     /// La texture de tissage des vêtements, créée à la première utilisation.
     cloth: Option<Handle<Image>>,
 }
@@ -200,6 +202,7 @@ fn animate(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    assets: Res<AssetServer>,
 ) {
     let caches = &mut *caches;
     let shader = crate::settings::model_shader();
@@ -252,6 +255,7 @@ fn animate(
         let tint = tint_key(tint);
         let cloth = caches.cloth.get_or_insert_with(|| images.add(weave_image())).clone();
         let restyle = live.tint != tint || live.shader != Some(shader);
+        let face = face_path(&live.source);
         // Les maillages de la pose: construits à l'avance (`prebake`), sinon à la demande.
         let (family, index) = live.source.pose(anim);
         let wanted = (live.source.clone(), family, index);
@@ -262,7 +266,7 @@ fn animate(
         let pose = if new_pose { Some(caches.poses.get_or_build(&wanted, &mut meshes)) } else { None };
         for surface in Surface::ALL {
             let slot = surface.index();
-            let material = restyle.then(|| material_for(caches, &mut materials, &cloth, surface, shader, tint));
+            let material = restyle.then(|| material_for(caches, &mut materials, &cloth, &assets, face, surface, shader, tint));
             match (live.bodies[slot], pose.as_ref().map(|meshes| meshes[slot].clone())) {
                 // La pose change: le corps montre le maillage de sa matière, ou se cache s'il n'y en a pas.
                 (Some(body), Some(Some(handle))) => {
@@ -272,7 +276,7 @@ fn animate(
                     commands.entity(body).insert(Visibility::Hidden);
                 }
                 (None, Some(Some(handle))) => {
-                    let material = material.clone().unwrap_or_else(|| material_for(caches, &mut materials, &cloth, surface, shader, tint));
+                    let material = material.clone().unwrap_or_else(|| material_for(caches, &mut materials, &cloth, &assets, face, surface, shader, tint));
                     live.bodies[slot] = Some(
                         commands
                             .spawn((Mesh3d(handle), MeshMaterial3d(material), ChildOf(live.root), RenderLayers::layer(crate::decor3d::LAYER)))
@@ -291,22 +295,28 @@ fn animate(
     }
 }
 
-/// Le matériau d'une matière, d'un éclairage et d'une teinte, créé la première fois.
+/// Le matériau d'une matière, d'un éclairage et d'une teinte (et, pour le crâne, de la photo du héros), créé la première fois.
+#[allow(clippy::too_many_arguments)]
 fn material_for(
     caches: &mut Caches,
     standard: &mut Assets<StandardMaterial>,
     cloth: &Handle<Image>,
+    assets: &AssetServer,
+    face: Option<&'static str>,
     surface: Surface,
     shader: ModelShader,
     tint: TintKey,
 ) -> Handle<StandardMaterial> {
+    // Seul le crâne dépend de la photo: les autres matières sont communes à tous les modèles.
+    let face = if surface == Surface::Face { face } else { None };
+    let face_image = face.map(|path| caches.faces.entry(path).or_insert_with(|| load_face(assets, path)).clone());
     caches
         .materials
-        .entry((surface, shader, tint))
+        .entry((surface, shader, tint, face))
         .or_insert_with(|| {
             let channel = |byte: u8| f32::from(byte) / 127.0;
             let color = Color::srgba(channel(tint[0]), channel(tint[1]), channel(tint[2]), f32::from(tint[3]) / 255.0);
-            standard.add(surface_material(surface, shader == ModelShader::Lit, color, Some(cloth)))
+            standard.add(surface_material(surface, shader == ModelShader::Lit, color, Some(cloth), face_image.as_ref()))
         })
         .clone()
 }

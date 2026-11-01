@@ -278,6 +278,8 @@ fn face(h: Vec3, r: f32, s: &FaceSpec) -> Vec<Part> {
     // Visage, oreilles, yeux, barbe et cheveux sont du corps; les lunettes sont une tenue.
     mark(&mut p, 0, Layer::Body);
     mark(&mut p[..glasses_end], glasses_start, Layer::Outfit);
+    // La première pièce est le crâne, qui porte la peau de la photo.
+    mark(&mut p[..1], 0, Layer::Face);
     p
 }
 
