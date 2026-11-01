@@ -87,12 +87,14 @@ struct Entry {
     source: ModelSource,
 }
 
-/// Quel rendu montrer: les primitives fusionnées en un seul maillage (celui du jeu), leur fusion douce, ou les deux côte à côte.
+/// Quel rendu montrer: les primitives fusionnées en un seul maillage (celui du jeu), leur fusion douce, les deux côte à côte, ou le
+/// même modèle sous quatre shaders (le toon du jeu, puis trois matériaux de Bevy).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Fusion {
     Primitives,
     Soft,
     Both,
+    Shaders,
 }
 
 impl Fusion {
@@ -100,8 +102,39 @@ impl Fusion {
         match self {
             Self::Both => Self::Soft,
             Self::Soft => Self::Primitives,
-            Self::Primitives => Self::Both,
+            Self::Primitives => Self::Shaders,
+            Self::Shaders => Self::Both,
         }
+    }
+}
+
+/// Ce qui dessine un exemplaire: le shader toon du jeu (sur le maillage fusionné ou sa fusion douce), ou un matériau de Bevy.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Look {
+    Toon,
+    SoftToon,
+    /// `StandardMaterial` mat: un éclairage physique, sans reflet marqué.
+    Matte,
+    /// `StandardMaterial` brillant: métallique et peu rugueux, comme une armure polie.
+    Glossy,
+    /// `StandardMaterial` sans éclairage: les couleurs propres des pièces, sans lumière ni ombre.
+    Flat,
+}
+
+impl Look {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Toon => "toon du jeu (paliers, hachures, reflet, contour)",
+            Self::SoftToon => "toon du jeu, fusion douce",
+            Self::Matte => "Bevy StandardMaterial mat (rugosité 0,75)",
+            Self::Glossy => "Bevy StandardMaterial brillant (métal 0,6, rugosité 0,3)",
+            Self::Flat => "Bevy StandardMaterial sans éclairage (couleurs pures)",
+        }
+    }
+
+    /// Le matériau est-il un matériau de Bevy (couleurs de sommets linéaires)?
+    fn is_standard(self) -> bool {
+        matches!(self, Self::Matte | Self::Glossy | Self::Flat)
     }
 }
 
@@ -134,6 +167,9 @@ struct Poses {
     soft: std::collections::HashMap<PoseKey, (Handle<Mesh>, usize, f32)>,
     /// La fusion douce de la pose montrée: ses sommets et son temps de construction.
     soft_stats: Option<(usize, f32)>,
+    /// Les poses en couleurs linéaires, pour les matériaux de Bevy.
+    linear: std::collections::HashMap<PoseKey, Handle<Mesh>>,
+    standard: Option<[Handle<StandardMaterial>; 3]>,
 }
 
 #[derive(Component)]
@@ -145,11 +181,10 @@ struct WaitScreen;
 #[derive(Component)]
 struct WaitPercent;
 
-/// Le modèle montré, et la pose qu'il affiche.
+/// Le modèle montré, et la pose qu'il affiche dans chacun des (au plus quatre) emplacements.
 #[derive(Component, Default)]
 struct Shown {
-    /// La pose montrée à gauche (primitives fusionnées) et à droite (fusion douce).
-    poses: [Option<PoseKey>; 2],
+    poses: [Option<PoseKey>; 4],
     fusion: Option<Fusion>,
 }
 
@@ -207,8 +242,14 @@ fn main() {
 
 fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut standard: ResMut<Assets<StandardMaterial>>, assets: Res<AssetServer>) {
     commands.spawn((Camera3d::default(), Projection::from(PerspectiveProjection { fov: 0.5, ..default() }), Transform::default()));
+    // Le soleil et la lumière ambiante des matériaux de Bevy (le shader toon du jeu a la sienne, fixe).
+    commands.spawn((
+        DirectionalLight { illuminance: 9000.0, shadow_maps_enabled: true, ..default() },
+        Transform::from_xyz(-3.0, 6.0, 4.0).looking_at(Vec3::new(0.0, 0.8, 0.0), Vec3::Y),
+    ));
+    commands.insert_resource(GlobalAmbientLight { color: Color::WHITE, brightness: 450.0, ..default() });
     // Un sol pour se repérer.
-    let ground = standard.add(StandardMaterial { base_color: Color::srgb(0.24, 0.3, 0.24), unlit: true, ..default() });
+    let ground = standard.add(StandardMaterial { base_color: Color::srgb(0.24, 0.3, 0.24), perceptual_roughness: 1.0, ..default() });
     commands.spawn((Mesh3d(meshes.add(Circle::new(3.5))), MeshMaterial3d(ground), Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))));
     commands.spawn((Shown::default(), Transform::default(), Visibility::default()));
     let font = TextFont { font: assets.load("fonts/PressStart2P-Regular.ttf").into(), font_size: 11.0.into(), ..default() };
@@ -318,6 +359,8 @@ fn input(mut viewer: ResMut<Viewer>, keys: Res<ButtonInput<KeyCode>>, time: Res<
     }
     if fusion {
         viewer.fusion = viewer.fusion.next();
+        // Quatre exemplaires côte à côte demandent plus de recul.
+        viewer.distance = viewer.distance.max(if viewer.fusion == Fusion::Shaders { 9.0 } else { 6.0 });
     }
     if reset {
         viewer.yaw = DEFAULT_YAW;
@@ -333,46 +376,67 @@ fn place_camera(viewer: Res<Viewer>, mut camera: Single<&mut Transform, With<Cam
     **camera = Transform::from_translation(target + offset * viewer.distance).looking_at(target, Vec3::Y);
 }
 
-/// Montre la pose du moment du modèle choisi: l'image de la boucle de son action. À gauche, le maillage des primitives fusionnées (déjà
-/// construit); à droite, la fusion douce de la même pose, construite à la demande (une par image au plus).
+/// Ce que montre chaque emplacement, selon le mode: (décalage en x, rendu).
+fn slots(fusion: Fusion) -> Vec<(f32, Look)> {
+    match fusion {
+        Fusion::Both => vec![(-0.9, Look::Toon), (0.9, Look::SoftToon)],
+        Fusion::Primitives => vec![(0.0, Look::Toon)],
+        Fusion::Soft => vec![(0.0, Look::SoftToon)],
+        Fusion::Shaders => vec![(-2.2, Look::Toon), (-0.73, Look::Matte), (0.73, Look::Glossy), (2.2, Look::Flat)],
+    }
+}
+
+/// Montre la pose du moment du modèle choisi: l'image de la boucle de son action. Les maillages des primitives fusionnées sont déjà
+/// construits; la fusion douce et les couleurs linéaires des matériaux de Bevy se construisent à la demande (une pose à la fois).
+#[allow(clippy::too_many_arguments)]
 fn update_model(
     mut commands: Commands,
     time: Res<Time>,
     viewer: Res<Viewer>,
     mut poses: ResMut<Poses>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ToonMaterial>>,
+    mut toon_materials: ResMut<Assets<ToonMaterial>>,
+    mut standard: ResMut<Assets<StandardMaterial>>,
     mut shown: Single<(Entity, &mut Shown)>,
-    mut bodies: Local<[Option<Entity>; 2]>,
+    mut bodies: Local<Vec<Entity>>,
 ) {
     if poses.baking.is_some() {
         return;
     }
     let poses = &mut *poses;
-    let material = poses.material.get_or_insert_with(|| materials.add(ToonMaterial { tint: Vec4::ONE })).clone();
+    let toon = poses.material.get_or_insert_with(|| toon_materials.add(ToonMaterial { tint: Vec4::ONE })).clone();
+    let [matte, glossy, flat] = poses
+        .standard
+        .get_or_insert_with(|| {
+            [
+                standard.add(StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.75, metallic: 0.0, ..default() }),
+                standard.add(StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.3, metallic: 0.6, reflectance: 0.6, ..default() }),
+                standard.add(StandardMaterial { base_color: Color::WHITE, unlit: true, ..default() }),
+            ]
+        })
+        .clone();
     let source = &viewer.entries[viewer.model].source;
     let phase = (time.elapsed_secs() / viewer.motion.period()).fract();
     // Un objet, un motif ou une sortie n'ont que leur repos.
     let (family, index) = source.pose(viewer.motion.anim(phase));
     let wanted = (source.clone(), family, index);
     let (root, shown) = &mut *shown;
-    let sides = match viewer.fusion {
-        Fusion::Both => [Some(-0.9), Some(0.9)],
-        Fusion::Primitives => [Some(0.0), None],
-        Fusion::Soft => [None, Some(0.0)],
-    };
-    for side in 0..2 {
-        let Some(offset) = sides[side] else {
-            if let Some(entity) = bodies[side].take() {
-                commands.entity(entity).despawn();
-                shown.poses[side] = None;
-            }
+    let layout = slots(viewer.fusion);
+    // Un autre mode: on repart de zéro (les matériaux ne sont pas du même type d'un mode à l'autre).
+    if shown.fusion != Some(viewer.fusion) {
+        for entity in bodies.drain(..) {
+            commands.entity(entity).despawn();
+        }
+        shown.poses = Default::default();
+        shown.fusion = Some(viewer.fusion);
+    }
+    for (slot, (offset, look)) in layout.iter().enumerate() {
+        if shown.poses[slot].as_ref() == Some(&wanted) {
             continue;
-        };
-        if shown.poses[side].as_ref() != Some(&wanted) || shown.fusion != Some(viewer.fusion) {
-            let handle = if side == 0 {
-                poses.cache.get_or_build(&wanted, &mut meshes)
-            } else {
+        }
+        let handle = match look {
+            Look::Toon => poses.cache.get_or_build(&wanted, &mut meshes),
+            Look::SoftToon => {
                 let found = poses.soft.get(&wanted).map(|(handle, vertices, millis)| (handle.clone(), *vertices, *millis));
                 let (handle, vertices, millis) = found.unwrap_or_else(|| {
                     let started = std::time::Instant::now();
@@ -385,23 +449,28 @@ fn update_model(
                 });
                 poses.soft_stats = Some((vertices, millis));
                 handle
-            };
-            match bodies[side] {
-                Some(entity) => {
-                    commands.entity(entity).insert((Mesh3d(handle), Transform::from_xyz(offset, 0.0, 0.0)));
-                }
-                None => {
-                    bodies[side] = Some(
-                        commands
-                            .spawn((Mesh3d(handle), MeshMaterial3d(material.clone()), Transform::from_xyz(offset, 0.0, 0.0), ChildOf(*root)))
-                            .id(),
-                    );
-                }
             }
-            shown.poses[side] = Some(wanted.clone());
+            Look::Matte | Look::Glossy | Look::Flat => poses
+                .linear
+                .entry(wanted.clone())
+                .or_insert_with(|| meshes.add(merged::merge_linear(&source.parts(source.anim(family, index)))))
+                .clone(),
+        };
+        let place = Transform::from_xyz(*offset, 0.0, 0.0);
+        if let Some(entity) = bodies.get(slot).copied() {
+            commands.entity(entity).insert((Mesh3d(handle), place));
+        } else {
+            let mut body = commands.spawn((Mesh3d(handle), place, ChildOf(*root)));
+            match look {
+                Look::Toon | Look::SoftToon => body.insert(MeshMaterial3d(toon.clone())),
+                Look::Matte => body.insert(MeshMaterial3d(matte.clone())),
+                Look::Glossy => body.insert(MeshMaterial3d(glossy.clone())),
+                Look::Flat => body.insert(MeshMaterial3d(flat.clone())),
+            };
+            bodies.push(body.id());
         }
+        shown.poses[slot] = Some(wanted.clone());
     }
-    shown.fusion = Some(viewer.fusion);
 }
 
 fn update_hud(viewer: Res<Viewer>, poses: Res<Poses>, diagnostics: Res<DiagnosticsStore>, mut hud: Single<&mut Text, With<Hud>>) {
@@ -410,9 +479,16 @@ fn update_hud(viewer: Res<Viewer>, poses: Res<Poses>, diagnostics: Res<Diagnosti
     let own = entry.source.all_poses().len();
     let actions: Vec<&str> = Motion::ALL.iter().filter(|m| entry.source.families().contains(&m.family())).map(|m| m.label()).collect();
     let fusion = match viewer.fusion {
-        Fusion::Both => "à gauche: primitives fusionnées (le jeu)   à droite: fusion douce",
-        Fusion::Primitives => "primitives fusionnées (le jeu)",
-        Fusion::Soft => "fusion douce",
+        Fusion::Both => "à gauche: primitives fusionnées (le jeu)   à droite: fusion douce".to_string(),
+        Fusion::Primitives => "primitives fusionnées (le jeu)".to_string(),
+        Fusion::Soft => "fusion douce".to_string(),
+        Fusion::Shaders => format!(
+            "même modèle, de gauche à droite:\n  1 {}\n  2 {}\n  3 {}\n  4 {}",
+            Look::Toon.label(),
+            Look::Matte.label(),
+            Look::Glossy.label(),
+            Look::Flat.label()
+        ),
     };
     let soft = poses.soft_stats.map_or(String::new(), |(vertices, millis)| format!("\nFusion douce de cette pose: {vertices} sommets, construite en {millis:.0} ms"));
     let text = format!(

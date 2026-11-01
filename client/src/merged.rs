@@ -285,6 +285,27 @@ impl Buffers {
     }
 }
 
+impl Buffers {
+    /// Le maillage avec des couleurs linéaires et opaques, pour les matériaux de Bevy (qui lisent la couleur des sommets comme du
+    /// linéaire, et n'ont pas besoin de l'éclat ni du reflet que le shader du jeu cache dans l'alpha).
+    pub fn into_linear_mesh(mut self) -> Mesh {
+        for color in &mut self.colors {
+            let linear = Color::srgb(color[0], color[1], color[2]).to_linear();
+            *color = [linear.red, linear.green, linear.blue, 1.0];
+        }
+        self.into_mesh()
+    }
+}
+
+/// Comme `merge`, avec des couleurs linéaires pour les matériaux de Bevy (voir `Buffers::into_linear_mesh`).
+pub fn merge_linear(parts: &[LivePart]) -> Mesh {
+    let mut buffers = Buffers::default();
+    for part in parts {
+        buffers.push_part(part);
+    }
+    buffers.into_linear_mesh()
+}
+
 /// Toutes les pièces dans un seul maillage. Chaque sommet porte la couleur de sa pièce (sRGB, comme dans `sprite_forge`) et, dans son
 /// canal alpha, son éclat (la pièce brille, sans ombre) et son reflet.
 pub fn merge(parts: &[LivePart]) -> Mesh {
