@@ -426,15 +426,35 @@ fn camera_step(stick: Vec2, dt: f32) -> (f32, f32) {
     (stick.x * CAMERA_TURN_RATE * dt, stick.y * CAMERA_TILT_RATE * dt)
 }
 
-/// La manette principale règle la caméra (vue 3D): le stick droit tourne et incline la vue (le gauche et les boutons restent au
-/// joueur), et les deux gâchettes d'épaule ensemble la remettent par défaut.
+/// Vitesse du zoom avec les gâchettes: le cadrage change de cette part (en logarithme) par seconde.
+const CAMERA_ZOOM_RATE: f32 = 0.9;
+
+/// Le changement de cadrage (un logarithme, voir `settings::zoom_view`) pour la gâchette gauche (éloigne) et la droite (rapproche),
+/// chacune de 0 à 1.
+fn zoom_step(left: f32, right: f32, dt: f32) -> f32 {
+    (left - right) * CAMERA_ZOOM_RATE * dt
+}
+
+/// La force d'une gâchette, de 0 à 1: l'épaule (L, R) ou la gâchette analogique du dessous (ZL, ZR).
+fn trigger(gamepad: &Gamepad, shoulder: GamepadButton, analog: GamepadButton) -> f32 {
+    let pushed = gamepad.get(analog).unwrap_or(0.0);
+    if gamepad.pressed(shoulder) { 1.0 } else { pushed }
+}
+
+/// La manette principale règle la caméra (vue 3D): le stick droit tourne et incline la vue, la gâchette gauche éloigne et la droite
+/// rapproche; Select remet tout par défaut. Le stick gauche et les boutons restent au joueur.
 fn steer_camera(gamepad: &Gamepad, dt: f32) {
     let (angle, tilt) = camera_step(gamepad.right_stick(), dt);
     if angle != 0.0 || tilt != 0.0 {
         crate::settings::turn_view(angle, tilt);
     }
-    let (left, right) = (GamepadButton::LeftTrigger, GamepadButton::RightTrigger);
-    if gamepad.pressed(left) && gamepad.pressed(right) && (gamepad.just_pressed(left) || gamepad.just_pressed(right)) {
+    let left = trigger(gamepad, GamepadButton::LeftTrigger, GamepadButton::LeftTrigger2);
+    let right = trigger(gamepad, GamepadButton::RightTrigger, GamepadButton::RightTrigger2);
+    let zoom = zoom_step(left, right, dt);
+    if zoom != 0.0 {
+        crate::settings::zoom_view(zoom);
+    }
+    if gamepad.just_pressed(GamepadButton::Select) {
         crate::settings::reset_view();
     }
 }
@@ -688,6 +708,14 @@ mod camera_tests {
     #[test]
     fn the_camera_stick_ignores_small_movements() {
         assert_eq!(camera_step(Vec2::new(0.1, 0.1), 0.016), (0.0, 0.0));
+    }
+
+    #[test]
+    fn the_left_trigger_zooms_out_and_the_right_one_zooms_in() {
+        assert!(zoom_step(1.0, 0.0, 0.5) > 0.0);
+        assert!(zoom_step(0.0, 1.0, 0.5) < 0.0);
+        assert_eq!(zoom_step(0.7, 0.7, 0.5), 0.0);
+        assert!((zoom_step(1.0, 0.0, 1.0) - CAMERA_ZOOM_RATE).abs() < 1e-6);
     }
 
     #[test]

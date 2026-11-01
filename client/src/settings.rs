@@ -97,8 +97,10 @@ pub fn view3d_enabled() -> bool {
 
 /// Hauteur des murs de la vue 3D, en tuiles.
 pub const VIEW_WALL_TILES: f32 = 3.0;
-/// Cadrage de la vue 3D: la part de terrain montrée, 1 étant celle de la version 2D.
-pub const VIEW_ZOOM: f32 = 1.25;
+/// Cadrage de la vue 3D par défaut: la part de terrain montrée, 1 étant celle de la version 2D (plus grand: plus loin).
+pub const VIEW_ZOOM_DEFAULT: f32 = 1.25;
+/// Limites du cadrage: de très près à très loin.
+const VIEW_ZOOM_RANGE: (f32, f32) = (0.5, 2.5);
 /// Inclinaison et angle de la vue par défaut, en degrés. Le stick droit de la manette principale les modifie en jouant (voir `turn_view`).
 pub const VIEW_TILT_DEFAULT: f32 = 52.0;
 pub const VIEW_ANGLE_DEFAULT: f32 = -15.0;
@@ -109,6 +111,21 @@ const VIEW_TILT_RANGE: (f32, f32) = (25.0, 80.0);
 static VIEW_TILT: AtomicU32 = AtomicU32::new(VIEW_TILT_DEFAULT.to_bits());
 /// Angle de la caméra autour du décor, en degrés (0: elle est au sud et regarde vers le nord).
 static VIEW_ANGLE: AtomicU32 = AtomicU32::new(VIEW_ANGLE_DEFAULT.to_bits());
+
+/// Cadrage de la vue 3D (bits d'un `f32`).
+static VIEW_ZOOM: AtomicU32 = AtomicU32::new(VIEW_ZOOM_DEFAULT.to_bits());
+
+/// Le cadrage de la vue: la part de terrain montrée, 1 étant celle de la version 2D.
+pub fn view_zoom() -> f32 {
+    f32::from_bits(VIEW_ZOOM.load(Ordering::Relaxed))
+}
+
+/// Éloigne (`ln_change` > 0) ou rapproche (< 0) la vue; le changement est un logarithme, pour que zoomer puis dézoomer d'autant revienne
+/// au même cadrage.
+pub fn zoom_view(ln_change: f32) {
+    let zoom = (view_zoom() * ln_change.exp()).clamp(VIEW_ZOOM_RANGE.0, VIEW_ZOOM_RANGE.1);
+    VIEW_ZOOM.store(zoom.to_bits(), Ordering::Relaxed);
+}
 
 /// L'inclinaison de la vue, en degrés.
 pub fn view_tilt() -> f32 {
@@ -133,8 +150,9 @@ pub fn turn_view(angle: f32, tilt: f32) {
     VIEW_TILT.store(tilt.to_bits(), Ordering::Relaxed);
 }
 
-/// Remet l'angle et l'inclinaison par défaut.
+/// Remet l'angle, l'inclinaison et le cadrage par défaut.
 pub fn reset_view() {
+    VIEW_ZOOM.store(VIEW_ZOOM_DEFAULT.to_bits(), Ordering::Relaxed);
     VIEW_ANGLE.store(VIEW_ANGLE_DEFAULT.to_bits(), Ordering::Relaxed);
     VIEW_TILT.store(VIEW_TILT_DEFAULT.to_bits(), Ordering::Relaxed);
 }
@@ -366,7 +384,16 @@ mod view_tests {
         assert_eq!(view_tilt(), 80.0);
         turn_view(0.0, -500.0);
         assert_eq!(view_tilt(), 25.0);
+        // Le cadrage s'éloigne, se rapproche, reste borné.
+        zoom_view(0.5);
+        assert!(view_zoom() > VIEW_ZOOM_DEFAULT);
+        zoom_view(-0.5);
+        assert!((view_zoom() - VIEW_ZOOM_DEFAULT).abs() < 1e-4);
+        zoom_view(50.0);
+        assert_eq!(view_zoom(), 2.5);
+        zoom_view(-50.0);
+        assert_eq!(view_zoom(), 0.5);
         reset_view();
-        assert_eq!((view_angle(), view_tilt()), (VIEW_ANGLE_DEFAULT, VIEW_TILT_DEFAULT));
+        assert_eq!((view_angle(), view_tilt(), view_zoom()), (VIEW_ANGLE_DEFAULT, VIEW_TILT_DEFAULT, VIEW_ZOOM_DEFAULT));
     }
 }

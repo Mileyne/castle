@@ -43,7 +43,7 @@ fn yaw() -> f32 {
 
 /// Part de terrain montrée, 1 pour le cadrage de la version 2D.
 fn zoom() -> f32 {
-    crate::settings::VIEW_ZOOM
+    crate::settings::view_zoom()
 }
 /// Hauteur d'un mur, en unités du monde.
 fn wall_height() -> f32 {
