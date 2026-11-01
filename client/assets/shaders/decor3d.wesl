@@ -20,7 +20,11 @@ struct Decor {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let base = textureSample(tex, samp, in.uv).rgb * decor.tint.rgb;
+    let sample = textureSample(tex, samp, in.uv);
+    if sample.a < 0.5 {
+        discard;
+    }
+    let base = sample.rgb * decor.tint.rgb;
     let n = normalize(in.world_normal);
     let sun = normalize(vec3<f32>(-0.4, 0.8, 0.45));
     // Le sol plat reçoit 0,8 du soleil: 0,45 + 0,69 x 0,8 = 1.

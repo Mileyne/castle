@@ -99,7 +99,16 @@ impl Material for DecorMaterial {
     fn fragment_shader() -> ShaderRef {
         "shaders/decor3d.wesl".into()
     }
+
+    // Les blocs se recouvrent (lisières, clairières: des blocs aux bords transparents posés sur d'autres): les pixels transparents
+    // sont écartés par le shader, et chaque bloc est un peu plus haut que le précédent pour que le plus récent passe devant.
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Mask(0.5)
+    }
 }
+
+/// De combien chaque bloc est plus haut que le précédent, en unités du monde.
+const LAYER_LIFT: f32 = 0.01;
 
 /// La caméra 2D dessine par-dessus la 3D: elle ne doit plus effacer l'image. (Elle est créée après le démarrage de ce module.)
 fn keep_the_image(mut cameras: Query<&mut Camera, (With<Camera2d>, Changed<Camera>)>) {
@@ -146,14 +155,21 @@ fn build_chunks(
     let Some(room) = room else {
         return;
     };
-    for (entity, mut visibility, sprite, transform) in &mut tiles {
+    // La version à plat dessine les blocs dans l'ordre de leurs entités: le dernier est devant.
+    let mut order: Vec<Entity> = tiles.iter().map(|(entity, ..)| entity).collect();
+    order.sort();
+    for (rank, entity) in order.into_iter().enumerate() {
+        let Ok((entity, mut visibility, sprite, transform)) = tiles.get_mut(entity) else {
+            continue;
+        };
+        let lift = rank as f32 * LAYER_LIFT;
         let Some(size) = sprite.custom_size else {
             continue;
         };
         let (cols, rows) = ((size.x / TILE_SIZE).round() as u32, (size.y / TILE_SIZE).round() as u32);
         let half = Vec2::new(cols as f32 - 1.0, rows as f32 - 1.0) * TILE_SIZE / 2.0;
         let origin = room.world_to_tile(transform.translation.truncate() - half);
-        let mesh = meshes.add(chunk_mesh(&room, origin, cols, rows));
+        let mesh = meshes.add(chunk_mesh(&room, origin, cols, rows, lift));
         let material = materials.add(DecorMaterial {
             image: sprite.image.clone(),
             data: DecorData {
@@ -171,7 +187,7 @@ fn build_chunks(
 
 /// Le maillage d'un bloc: le sol en un seul rectangle (texturé par l'image du bloc), et, pour chaque tuile de mur, un dessus
 /// surélevé et une face tournée vers la caméra quand il y a du sol devant.
-fn chunk_mesh(room: &Room, origin: IVec2, cols: u32, rows: u32) -> Mesh {
+fn chunk_mesh(room: &Room, origin: IVec2, cols: u32, rows: u32, lift: f32) -> Mesh {
     let mut positions: Vec<Vec3> = Vec::new();
     let mut normals: Vec<Vec3> = Vec::new();
     let mut uvs: Vec<Vec2> = Vec::new();
@@ -189,7 +205,7 @@ fn chunk_mesh(room: &Room, origin: IVec2, cols: u32, rows: u32) -> Mesh {
     let (min, max) = (world(origin.x, origin.y), world(origin.x + cols as i32, origin.y + rows as i32));
     // Le sol: sud-ouest, sud-est, nord-est, nord-ouest, vu de dessus (normale vers le haut).
     quad(
-        [to_3d(min, 0.0), to_3d(Vec2::new(max.x, min.y), 0.0), to_3d(max, 0.0), to_3d(Vec2::new(min.x, max.y), 0.0)],
+        [to_3d(min, lift), to_3d(Vec2::new(max.x, min.y), lift), to_3d(max, lift), to_3d(Vec2::new(min.x, max.y), lift)],
         Vec3::Y,
         [uv_at(0.0, rows as f32), uv_at(cols as f32, rows as f32), uv_at(cols as f32, 0.0), uv_at(0.0, 0.0)],
     );
@@ -205,10 +221,10 @@ fn chunk_mesh(room: &Room, origin: IVec2, cols: u32, rows: u32) -> Mesh {
             let (v_top, v_bottom) = ((rows as i32 - 1 - j) as f32, (rows as i32 - j) as f32);
             let cell = [uv_at(u0, v_bottom), uv_at(u1, v_bottom), uv_at(u1, v_top), uv_at(u0, v_top)];
             // Le dessus, à la hauteur du mur.
-            quad([to_3d(sw, WALL_HEIGHT), to_3d(se, WALL_HEIGHT), to_3d(ne, WALL_HEIGHT), to_3d(nw, WALL_HEIGHT)], Vec3::Y, cell);
+            quad([to_3d(sw, WALL_HEIGHT + lift), to_3d(se, WALL_HEIGHT + lift), to_3d(ne, WALL_HEIGHT + lift), to_3d(nw, WALL_HEIGHT + lift)], Vec3::Y, cell);
             // La face du sud, visible quand la tuile devant est du sol.
             if room.tile(x, y - 1) == Tile::Floor {
-                quad([to_3d(sw, 0.0), to_3d(se, 0.0), to_3d(se, WALL_HEIGHT), to_3d(sw, WALL_HEIGHT)], Vec3::Z, cell);
+                quad([to_3d(sw, lift), to_3d(se, lift), to_3d(se, WALL_HEIGHT + lift), to_3d(sw, WALL_HEIGHT + lift)], Vec3::Z, cell);
             }
         }
     }
