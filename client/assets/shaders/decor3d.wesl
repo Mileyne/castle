@@ -44,6 +44,10 @@ fn wall_at(p: vec2<f32>) -> bool {
 // Part de lumière du soleil qui atteint un point du sol: on remonte le rayon vers le soleil, et un mur le coupe tant que le rayon est
 // plus bas que lui.
 fn sunlight(ground: vec2<f32>) -> f32 {
+    // Le sol à l'intérieur d'un mur n'est pas dans son ombre.
+    if wall_at(ground) {
+        return 1.0;
+    }
     let toward = vec2<f32>(SUN.x, -SUN.z) / SUN.y;
     for (var i = 1u; i <= SHADOW_STEPS; i = i + 1u) {
         let height = decor.params.z * f32(i) / f32(SHADOW_STEPS);
@@ -72,8 +76,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         tone = tone * sunlight(here.xz);
     }
     if n.z > 0.5 {
-        // Une face de mur: plus sombre au pied qu'en haut.
-        tone = tone * mix(0.6, 1.0, clamp(here.y / decor.params.z, 0.0, 1.0));
+        // Une face de mur: son art est déjà ombré; un peu plus sombre au pied qu'en haut.
+        tone = vec3<f32>(0.95) * mix(0.75, 1.0, clamp(here.y / decor.params.z, 0.0, 1.0));
     }
     let count = u32(decor.params.y);
     for (var i = 0u; i < count && i < MAX_LIGHTS; i = i + 1u) {

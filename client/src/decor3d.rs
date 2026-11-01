@@ -28,8 +28,11 @@ use crate::art::WorldTile;
 
 /// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2).
 const ELEVATION: f32 = 0.9;
-/// Hauteur des murs, en unités du monde (une tuile en mesure `TILE_SIZE`).
-const WALL_HEIGHT: f32 = TILE_SIZE * 1.4;
+/// Hauteur des murs, en unités du monde. L'art d'une tuile de mur est déjà une face vue en 3/4, et elle doit remplir exactement une
+/// tuile à l'écran: la hauteur à l'écran d'une verticale est `hauteur x cos(élévation)`.
+fn wall_height() -> f32 {
+    TILE_SIZE * 1.02 / ELEVATION.cos()
+}
 /// Nombre maximal de lampes par bloc.
 const MAX_LIGHTS: usize = 8;
 /// Lanterne du héros dirigé: hauteur, rayon, couleur (linéaire).
@@ -187,7 +190,7 @@ fn build_chunks(
             image: sprite.image.clone(),
             data: DecorData {
                 tint: Vec4::ONE,
-                params: Vec4::new(1.0 / ELEVATION.sin(), 0.0, WALL_HEIGHT, TILE_SIZE),
+                params: Vec4::new(1.0 / ELEVATION.sin(), 0.0, wall_height(), TILE_SIZE),
                 room: Vec4::new(room.size().x as f32, room.size().y as f32, 0.0, 0.0),
                 light_pos: [Vec4::ZERO; MAX_LIGHTS],
                 light_color: [Vec4::ZERO; MAX_LIGHTS],
@@ -218,8 +221,9 @@ fn wall_mask(room: &Room) -> Image {
     image
 }
 
-/// Le maillage d'un bloc: le sol en un seul rectangle (texturé par l'image du bloc), et, pour chaque tuile de mur, un dessus
-/// surélevé et une face tournée vers la caméra quand il y a du sol devant.
+/// Le maillage d'un bloc: le sol en un seul rectangle (texturé par l'image du bloc, murs compris), et, pour chaque tuile de mur qui a du
+/// sol devant elle, sa face dressée à la verticale avec la même image. L'art d'un mur est déjà sa face vue en 3/4: la dresser (sans
+/// rien poser au-dessus) évite de le dessiner deux fois.
 fn chunk_mesh(room: &Room, origin: IVec2, cols: u32, rows: u32, lift: f32) -> Mesh {
     let mut positions: Vec<Vec3> = Vec::new();
     let mut normals: Vec<Vec3> = Vec::new();
@@ -249,15 +253,13 @@ fn chunk_mesh(room: &Room, origin: IVec2, cols: u32, rows: u32, lift: f32) -> Me
                 continue;
             }
             let sw = world(x, y);
-            let (se, ne, nw) = (sw + Vec2::new(TILE_SIZE, 0.0), sw + Vec2::splat(TILE_SIZE), sw + Vec2::new(0.0, TILE_SIZE));
+            let se = sw + Vec2::new(TILE_SIZE, 0.0);
             let (u0, u1) = (i as f32, i as f32 + 1.0);
             let (v_top, v_bottom) = ((rows as i32 - 1 - j) as f32, (rows as i32 - j) as f32);
             let cell = [uv_at(u0, v_bottom), uv_at(u1, v_bottom), uv_at(u1, v_top), uv_at(u0, v_top)];
-            // Le dessus, à la hauteur du mur.
-            quad([to_3d(sw, WALL_HEIGHT + lift), to_3d(se, WALL_HEIGHT + lift), to_3d(ne, WALL_HEIGHT + lift), to_3d(nw, WALL_HEIGHT + lift)], Vec3::Y, cell);
             // La face du sud, visible quand la tuile devant est du sol.
             if room.tile(x, y - 1) == Tile::Floor {
-                quad([to_3d(sw, lift), to_3d(se, lift), to_3d(se, WALL_HEIGHT + lift), to_3d(sw, WALL_HEIGHT + lift)], Vec3::Z, cell);
+                quad([to_3d(sw, lift), to_3d(se, lift), to_3d(se, wall_height() + lift), to_3d(sw, wall_height() + lift)], Vec3::Z, cell);
             }
         }
     }
