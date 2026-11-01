@@ -337,23 +337,60 @@ fn ground_mesh(room: &Room, origin: IVec2, cols: u32, rows: u32, lift: f32) -> M
     quads.into_mesh()
 }
 
-/// Les murs de tout le niveau: pour chaque tuile de mur, un dessus à la hauteur du mur et, quand il y a du sol devant (au sud), sa
-/// face. La matière est calculée par le shader (`decor3d.wesl`) à partir de la position dans le monde: face et dessus s'accordent.
+/// Hauteur du dessus plat des masses de mur (au-delà de la première rangée): juste au-dessus du sol, pour recouvrir son image.
+const MASS_HEIGHT: f32 = 1.5;
+
+/// Les murs de tout le niveau. Une tuile de mur qui touche du sol (même en diagonale) est un bloc: un dessus à la hauteur du mur et,
+/// quand rien de surélevé n'est devant elle (au sud), sa face. Les tuiles plus profondes ne sont qu'un fond de roche, à plat. La
+/// matière est calculée par le shader (`decor3d.wesl`) à partir des coordonnées de texture, qui donnent la position au sol: face et
+/// dessus s'accordent.
+///
+/// Le sol est étiré en profondeur pour rester à l'échelle 1:1 de la carte 2D, mais le dessus d'un bloc, lui, doit paraître raccourci
+/// comme toute face horizontale vue de biais (d'un facteur sin(élévation)): on ne l'étire pas. Pour que deux dessus l'un derrière
+/// l'autre se rejoignent, la profondeur est comptée depuis le début de la file de blocs surélevés de la colonne, dont le pied, lui,
+/// est bien à sa place sur le sol.
 fn walls_mesh(room: &Room) -> Mesh {
     let mut quads = Quads::default();
     let height = wall_height();
     let size = room.size();
-    for y in 0..size.y as i32 {
-        for x in 0..size.x as i32 {
+    let sin = ELEVATION.sin();
+    let raised = |x: i32, y: i32| {
+        room.tile(x, y) == Tile::Wall && (-1..=1).any(|dy| (-1..=1).any(|dx| room.tile(x + dx, y + dy) == Tile::Floor))
+    };
+    for x in 0..size.x as i32 {
+        let mut run_start: Option<f32> = None;
+        for y in 0..size.y as i32 {
             if room.tile(x, y) != Tile::Wall {
+                run_start = None;
                 continue;
             }
             let sw = tile_corner(room, x, y);
-            let (se, ne, nw) = (sw + Vec2::new(TILE_SIZE, 0.0), sw + Vec2::splat(TILE_SIZE), sw + Vec2::new(0.0, TILE_SIZE));
-            let none = [Vec2::ZERO; 4];
-            quads.add([to_3d(sw, height), to_3d(se, height), to_3d(ne, height), to_3d(nw, height)], Vec3::Y, none);
-            if room.tile(x, y - 1) == Tile::Floor {
-                quads.add([to_3d(sw, 0.0), to_3d(se, 0.0), to_3d(se, height), to_3d(sw, height)], Vec3::Z, none);
+            let (se, ne) = (sw + Vec2::new(TILE_SIZE, 0.0), sw + Vec2::splat(TILE_SIZE));
+            // Les coordonnées de texture d'un dessus sont sa position au sol (le shader y calcule les dalles).
+            let ground_uv = [sw, se, ne, Vec2::new(sw.x, ne.y)];
+            if !raised(x, y) {
+                run_start = None;
+                let flat = |at: Vec2| to_3d(at, MASS_HEIGHT);
+                quads.add([flat(sw), flat(se), flat(ne), flat(Vec2::new(sw.x, ne.y))], Vec3::Y, ground_uv);
+                continue;
+            }
+            let start = *run_start.get_or_insert(sw.y);
+            // Bord sud du dessus: le pied du bloc de tête de file, puis un pas de `TILE_SIZE` par tuile, sans étirement.
+            let south = -start / sin - (sw.y - start);
+            let north = south - TILE_SIZE;
+            quads.add(
+                [Vec3::new(sw.x, height, south), Vec3::new(se.x, height, south), Vec3::new(se.x, height, north), Vec3::new(sw.x, height, north)],
+                Vec3::Y,
+                ground_uv,
+            );
+            // La face du sud, quand il n'y a rien de surélevé devant: elle monte du pied du bloc au bord sud du dessus.
+            if !raised(x, y - 1) {
+                let top = -sw.y / sin;
+                quads.add(
+                    [to_3d(sw, 0.0), to_3d(se, 0.0), Vec3::new(se.x, height, top), Vec3::new(sw.x, height, top)],
+                    Vec3::Z,
+                    [Vec2::ZERO; 4],
+                );
             }
         }
     }

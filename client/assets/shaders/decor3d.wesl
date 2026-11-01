@@ -156,8 +156,8 @@ fn wall_face(fx: f32, h: f32) -> vec3<f32> {
 // Le dessus d'un mur: `p` position sur le sol (x, y du monde 2D).
 fn wall_top(p: vec2<f32>) -> vec3<f32> {
     if decor.style.x < 1.5 {
-        // Pierre: dalles d'une tuile, de la même pierre que la face.
-        var color = bricks(p + tile_origin(), decor.params.w, decor.params.w, 9.0);
+        // Pierre: les mêmes appareils que la face, vus de dessus.
+        var color = bricks(p + tile_origin(), 8.0, 12.0, 9.0);
         // Le rebord de devant (côté sud, quand le sol est devant) reprend la lumière de l'arête haute de la face.
         let t = p / decor.params.w + decor.room.xy * 0.5;
         let south_edge = fract(t.y) * decor.params.w;
@@ -183,8 +183,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             base = wall_face(here.x + tile_origin().x, here.y);
             // La face tourne le dos au soleil: une lumière de remplissage, et plus sombre au pied qu'en haut.
             tone = vec3<f32>(0.8) * mix(0.65, 1.0, clamp(here.y / decor.params.z, 0.0, 1.0));
+        } else if here.y < 3.0 {
+            // Le fond de roche, derrière la première rangée de murs: la même matière, à plat et plus sombre.
+            base = wall_top(in.uv) * 0.5;
         } else {
-            base = wall_top(here.xz);
+            // Le dessus d'un bloc: les coordonnées de texture sont sa position au sol (il est raccourci, pas son motif).
+            base = wall_top(in.uv);
         }
         base = base * decor.tint.rgb;
     } else {
