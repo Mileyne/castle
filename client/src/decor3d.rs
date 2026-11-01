@@ -22,12 +22,13 @@ use bevy::{
     prelude::*,
     render::render_resource::{AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat},
     shader::ShaderRef,
+    sprite::Anchor,
 };
 use castle_shared::tileart::TILE_CELL;
 use castle_shared::{Expedition, Region, Room, TILE_SIZE, Tile};
 
 use crate::LocalPlayer;
-use crate::art::TileMark;
+use crate::art::{TileMark, YSort};
 
 /// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2).
 const ELEVATION: f32 = 0.9;
@@ -37,12 +38,12 @@ fn wall_height() -> f32 {
     TILE_SIZE * 1.02 / ELEVATION.cos() + extra_height()
 }
 
-/// Hauteur ajoutée au-dessus, en tuiles à l'écran (`CASTLE_WALL_EXTRA=<tuiles>`; 0,3 par défaut). Plus le mur est haut, plus il masque
+/// Hauteur ajoutée au-dessus, en tuiles à l'écran (`CASTLE_WALL_EXTRA=<tuiles>`; 0,8 par défaut). Plus le mur est haut, plus il masque
 /// le sol derrière lui.
 fn extra_height() -> f32 {
     static EXTRA: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     *EXTRA.get_or_init(|| {
-        let tiles = std::env::var("CASTLE_WALL_EXTRA").ok().and_then(|value| value.parse::<f32>().ok()).unwrap_or(0.3).max(0.0);
+        let tiles = std::env::var("CASTLE_WALL_EXTRA").ok().and_then(|value| value.parse::<f32>().ok()).unwrap_or(0.8).max(0.0);
         tiles * TILE_SIZE / ELEVATION.cos()
     })
 }
@@ -70,12 +71,13 @@ impl Plugin for Decor3dPlugin {
         if !enabled() {
             return;
         }
-        app.add_plugins(MaterialPlugin::<DecorMaterial>::default())
+        app.add_plugins((MaterialPlugin::<DecorMaterial>::default(), MaterialPlugin::<BillboardMaterial>::default()))
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
                 (keep_the_image, build_chunks.after(crate::art::rebuild_world), follow_camera, update_materials).chain(),
-            );
+            )
+            .add_systems(Update, mirror_sprites.after(crate::art::AnimateCharacters).after(crate::art::y_sort));
     }
 }
 
@@ -401,5 +403,137 @@ fn update_materials(
             count = 1.0;
         }
         material.data.params.y = count;
+    }
+}
+
+/// Un sprite trié (héros, monstre, grand motif) dont le panneau 3D remplace l'affichage à plat.
+#[derive(Component)]
+struct Mirror {
+    billboard: Entity,
+    /// Taille d'origine du sprite (on lui donne une taille nulle pour ne plus le dessiner à plat).
+    size: Vec2,
+}
+
+/// Le panneau 3D d'un sprite.
+#[derive(Component)]
+struct Billboard {
+    source: Entity,
+}
+
+#[derive(ShaderType, Clone, Debug, PartialEq)]
+struct BillboardData {
+    rect: Vec4,
+    tint: Vec4,
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+struct BillboardMaterial {
+    #[texture(0)]
+    #[sampler(1)]
+    image: Handle<Image>,
+    #[uniform(2)]
+    data: BillboardData,
+}
+
+impl Material for BillboardMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/billboard3d.wesl".into()
+    }
+
+    // Les bords des sprites sont adoucis (MSAA des personnages en 3D): ils se mélangent au décor derrière.
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Blend
+    }
+}
+
+/// Zone de texture (u0, v0, u1, v1) que montre un sprite, ou `None` tant que son image n'est pas chargée.
+fn sprite_rect(sprite: &Sprite, images: &Assets<Image>, layouts: &Assets<TextureAtlasLayout>) -> Option<Vec4> {
+    let (area, whole) = match &sprite.texture_atlas {
+        Some(atlas) => {
+            let layout = layouts.get(&atlas.layout)?;
+            (layout.textures.get(atlas.index)?.as_rect(), layout.size.as_vec2())
+        }
+        None => {
+            let whole = images.get(&sprite.image)?.size().as_vec2();
+            (sprite.rect.unwrap_or(Rect::from_corners(Vec2::ZERO, whole)), whole)
+        }
+    };
+    let (min, max) = (area.min / whole, area.max / whole);
+    let (u0, u1) = if sprite.flip_x { (max.x, min.x) } else { (min.x, max.x) };
+    let (v0, v1) = if sprite.flip_y { (max.y, min.y) } else { (min.y, max.y) };
+    Some(Vec4::new(u0, v0, u1, v1))
+}
+
+/// Dessine les sprites triés dans la scène 3D, pour que les murs les cachent comme ils cachent le sol: la caméra 2D dessine après
+/// la 3D, sans profondeur commune, donc un sprite à plat passerait toujours par-dessus un mur. Le panneau est vertical, de la hauteur
+/// du sprite à l'écran (une verticale est raccourcie de `cos(élévation)`), et pose son bas sur le sol à l'endroit où le sprite finit.
+fn mirror_sprites(
+    mut commands: Commands,
+    mut sources: Query<(Entity, &mut Sprite, &Transform, Option<&Anchor>, &InheritedVisibility, Option<&mut Mirror>), With<YSort>>,
+    billboards: Query<(Entity, &Billboard)>,
+    mut placed: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<BillboardMaterial>), (With<Billboard>, Without<YSort>)>,
+    images: Res<Assets<Image>>,
+    layouts: Res<Assets<TextureAtlasLayout>>,
+    mut materials: ResMut<Assets<BillboardMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut quad: Local<Option<Handle<Mesh>>>,
+) {
+    // Les panneaux dont le sprite a disparu.
+    for (entity, billboard) in &billboards {
+        if sources.get(billboard.source).is_err() {
+            commands.entity(entity).despawn();
+        }
+    }
+    let quad = quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0))).clone();
+    for (entity, mut sprite, transform, anchor, visible, mirror) in &mut sources {
+        // La taille d'origine: celle que le sprite porte, ou celle que nous avons gardée quand nous l'avons mis à zéro.
+        let size = match (sprite.custom_size, mirror.as_deref()) {
+            (Some(size), _) if size != Vec2::ZERO => size,
+            (_, Some(mirror)) => mirror.size,
+            _ => continue,
+        };
+        let Some(rect) = sprite_rect(&sprite, &images, &layouts) else {
+            continue;
+        };
+        let tint = sprite.color.to_linear();
+        let data = BillboardData { rect, tint: Vec4::new(tint.red, tint.green, tint.blue, tint.alpha) };
+        // Le centre du sprite à l'écran, puis son bas: c'est là que le panneau touche le sol.
+        let center = transform.translation.truncate() - anchor.map_or(Vec2::ZERO, |anchor| anchor.as_vec()) * size;
+        let bottom = center.y - size.y / 2.0;
+        let height = size.y / ELEVATION.cos();
+        let place = Transform {
+            translation: Vec3::new(center.x, height / 2.0, -bottom / ELEVATION.sin()),
+            scale: Vec3::new(size.x, height, 1.0),
+            ..default()
+        };
+        let visibility = if visible.get() { Visibility::Inherited } else { Visibility::Hidden };
+        match mirror {
+            Some(mut mirror) => {
+                mirror.size = size;
+                if let Ok((mut at, mut shown, handle)) = placed.get_mut(mirror.billboard) {
+                    *at = place;
+                    if *shown != visibility {
+                        *shown = visibility;
+                    }
+                    let current = materials.get(&handle.0).map(|material| (material.data.clone(), material.image.clone()));
+                    if current.as_ref().is_none_or(|(old, image)| *old != data || *image != sprite.image) {
+                        if let Some(mut material) = materials.get_mut(&handle.0) {
+                            material.data = data;
+                            material.image = sprite.image.clone();
+                        }
+                    }
+                }
+            }
+            None => {
+                let material = materials.add(BillboardMaterial { image: sprite.image.clone(), data });
+                let billboard = commands
+                    .spawn((Billboard { source: entity }, Mesh3d(quad.clone()), MeshMaterial3d(material), RenderLayers::layer(LAYER), place, visibility))
+                    .id();
+                commands.entity(entity).insert(Mirror { billboard, size });
+            }
+        }
+        if sprite.custom_size != Some(Vec2::ZERO) {
+            sprite.custom_size = Some(Vec2::ZERO);
+        }
     }
 }
