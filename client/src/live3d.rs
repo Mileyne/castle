@@ -156,7 +156,7 @@ fn attach(
 }
 
 /// Un personnage disparu rend sa case et retire son modèle.
-fn release(removed: On<Remove, Live3d>, characters: Query<&Live3d>, mut slots: ResMut<Slots>, mut commands: Commands) {
+fn release(removed: On<Remove<Live3d>>, characters: Query<&Live3d>, mut slots: ResMut<Slots>, mut commands: Commands) {
     if let Ok(live) = characters.get(removed.entity) {
         commands.entity(live.root).despawn();
         slots.free.push(live.slot);

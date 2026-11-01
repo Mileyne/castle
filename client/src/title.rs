@@ -10,6 +10,7 @@ use bevy::{
     input::keyboard::{Key, KeyboardInput},
     prelude::*,
 };
+use bevy::{picking::hover::Hovered, ui::Pressed, ui_widgets::Button};
 use bevy_replicon::prelude::*;
 use bevy_replicon_renet::{RenetClient, netcode::NetcodeClientTransport};
 use castle_shared::DEFAULT_PORT;
@@ -298,6 +299,7 @@ fn spawn_row(
     let color = row_color(selected);
     menu.spawn((
         Button,
+        Hovered::default(),
         RowButton(index),
         Node {
             flex_direction: FlexDirection::Row,
@@ -401,6 +403,7 @@ fn rebuild_menu(
                         let armed = menu.confirm_delete && menu.cursor == i + 1;
                         row.spawn((
                             Button,
+                            Hovered::default(),
                             DeleteButton(i),
                             Node {
                                 padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
@@ -439,6 +442,7 @@ fn rebuild_menu(
                                         let wide = !matches!(key, VKey::Char(_));
                                         row.spawn((
                                             Button,
+                                            Hovered::default(),
                                             KeyButton(r, c),
                                             Node {
                                                 width: Val::Px(if wide { 118.0 } else { 34.0 }),
@@ -522,7 +526,7 @@ fn rebuild_menu(
                     spawn_row(ui, &assets, 4 + i, menu.cursor == 4 + i, |row, color, tag| {
                         row.spawn((menu_text(&assets, 14.0, color), Tr::new(key), tag));
                         let value = format!("{} %", crate::settings::volume_tenths(channel) * 10);
-                        row.spawn((menu_text(&assets, 14.0, css::LIGHT_GRAY.into()), Text::new(value)));
+                        row.spawn((menu_style(&assets, 14.0, css::LIGHT_GRAY.into()), Text::new(value)));
                     });
                 }
                 spawn_row(ui, &assets, 7, menu.cursor == 7, |row, color, tag| {
@@ -568,29 +572,23 @@ fn parse_address(text: &str) -> Option<SocketAddr> {
 /// Un clic ou un toucher sur une entrée la sélectionne et la valide; le survol (souris) déplace la sélection.
 fn menu_pointer(
     mut menu: ResMut<Menu>,
-    rows: Query<(&Interaction, &RowButton), Changed<Interaction>>,
-    deletes: Query<(&Interaction, &DeleteButton), Changed<Interaction>>,
-    keys: Query<(&Interaction, &KeyButton), Changed<Interaction>>,
+    rows: Query<(&RowButton, &Hovered, Option<Ref<Pressed>>), Or<(Changed<Hovered>, Added<Pressed>)>>,
+    deletes: Query<&DeleteButton, Added<Pressed>>,
+    keys: Query<&KeyButton, Added<Pressed>>,
 ) {
-    for (interaction, key) in &keys {
-        if *interaction == Interaction::Pressed {
-            menu.key_click = Some((key.0, key.1));
+    for key in &keys {
+        menu.key_click = Some((key.0, key.1));
+    }
+    for (row, hovered, pressed) in &rows {
+        if pressed.is_some_and(|pressed| pressed.is_added()) {
+            menu.click = Some(row.0);
+        } else if hovered.0 && menu.cursor != row.0 {
+            menu.cursor = row.0;
+            menu.cursor_dirty = true;
         }
     }
-    for (interaction, row) in &rows {
-        match interaction {
-            Interaction::Pressed => menu.click = Some(row.0),
-            Interaction::Hovered if menu.cursor != row.0 => {
-                menu.cursor = row.0;
-                menu.cursor_dirty = true;
-            }
-            _ => {}
-        }
-    }
-    for (interaction, button) in &deletes {
-        if *interaction == Interaction::Pressed {
-            menu.delete_click = Some(button.0);
-        }
+    for button in &deletes {
+        menu.delete_click = Some(button.0);
     }
 }
 

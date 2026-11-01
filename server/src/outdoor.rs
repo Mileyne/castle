@@ -69,7 +69,7 @@ impl Grid {
 
     /// Une clairière aux bords irréguliers; renvoie son rectangle englobant.
     fn clearing(&mut self, cx: i32, cy: i32, rx: f32, ry: f32, rng: &mut Rng) -> (UVec2, UVec2) {
-        let (p1, p2) = (rng.next_f32() * 6.28, rng.next_f32() * 6.28);
+        let (p1, p2) = (rng.next_f32() * std::f32::consts::TAU, rng.next_f32() * std::f32::consts::TAU);
         let (mut min, mut max) = (IVec2::new(i32::MAX, i32::MAX), IVec2::new(i32::MIN, i32::MIN));
         for dy in -(ry as i32 + 3)..=(ry as i32 + 3) {
             for dx in -(rx as i32 + 3)..=(rx as i32 + 3) {
@@ -89,7 +89,7 @@ impl Grid {
     /// Un sentier sinueux d'un point à un autre (horizontal, puis vertical, puis horizontal), avec son tracé.
     fn path(&mut self, a: IVec2, b: IVec2, radius: i32, rng: &mut Rng) -> Vec<IVec2> {
         let mid = (a.x + b.x) / 2 + (rng.next_f32() * 6.0 - 3.0) as i32;
-        let phase = rng.next_f32() * 6.28;
+        let phase = rng.next_f32() * std::f32::consts::TAU;
         let mut points = Vec::new();
         let walk = |from: IVec2, to: IVec2, points: &mut Vec<IVec2>| {
             let steps = (to - from).abs().max_element().max(1);

@@ -634,7 +634,7 @@ fn start_server(mut commands: Commands, channels: Res<RepliconChannels>, options
 
 /// Un client authentifié reçoit une équipe de quatre héros; le Chevalier est dirigé au départ.
 fn spawn_party(
-    add: On<Add, AuthorizedClient>,
+    add: On<Add<AuthorizedClient>>,
     mut commands: Commands,
     layout: Res<Layout>,
     room: Res<Room>,
@@ -691,7 +691,7 @@ fn spawn_party(
 
 /// Quand un client part, son équipe disparaît avec lui.
 fn despawn_party(
-    remove: On<Remove, ConnectedClient>,
+    remove: On<Remove<ConnectedClient>>,
     mut commands: Commands,
     clients: Query<&ClientParty>,
     heroes: Query<(Entity, &PartyId), With<Player>>,
@@ -3450,7 +3450,7 @@ mod tests {
     /// Chaque scène que le serveur peut lancer existe dans le script de dialogue.
     #[test]
     fn every_dialogue_node_the_server_triggers_exists_in_the_script() {
-        const YARN: &str = include_str!("../../client/assets/dialogue/castle.yarn");
+        const SCRIPT: &str = include_str!("../../client/assets/dialogue/castle.ron");
         let mut used = std::collections::BTreeSet::new();
         for seed in 1u64..40 {
             let (mut world, _) = populated(seed, 1 + (seed % 3) as u32);
@@ -3462,7 +3462,7 @@ mod tests {
             assert!(used.contains(node), "la scène {node} n'est jamais déclenchée");
         }
         for node in used {
-            assert!(YARN.contains(&format!("title: {node}")), "scène {node} déclenchée mais absente du script");
+            assert!(SCRIPT.contains(&format!("(id: \"{node}\"")), "scène {node} déclenchée mais absente du script");
         }
     }
 

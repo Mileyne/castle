@@ -86,7 +86,7 @@ fn voice_of(kind: MonsterKind) -> (&'static str, f32) {
     }
 }
 
-fn count_removals(_: On<Remove, Position>, mut queue: ResMut<SfxQueue>) {
+fn count_removals(_: On<Remove<Position>>, mut queue: ResMut<SfxQueue>) {
     queue.removals += 1;
 }
 
@@ -94,7 +94,7 @@ fn place(transforms: &Query<&Transform>, entity: Entity) -> Option<Vec2> {
     transforms.get(entity).ok().map(|t| t.translation.truncate())
 }
 
-fn monster_died(removed: On<Remove, Monster>, monsters: Query<&Monster>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
+fn monster_died(removed: On<Remove<Monster>>, monsters: Query<&Monster>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
     if let Ok(monster) = monsters.get(removed.entity) {
         let (family, speed) = voice_of(monster.0);
         let name = match family {
@@ -109,11 +109,11 @@ fn monster_died(removed: On<Remove, Monster>, monsters: Query<&Monster>, transfo
     }
 }
 
-fn generator_destroyed(removed: On<Remove, Generator>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
+fn generator_destroyed(removed: On<Remove<Generator>>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
     queue.push_removal("crash", place(&transforms, removed.entity), 1.0, 1.0);
 }
 
-fn item_picked(removed: On<Remove, Pickup>, pickups: Query<&Pickup>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
+fn item_picked(removed: On<Remove<Pickup>>, pickups: Query<&Pickup>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
     if let Ok(pickup) = pickups.get(removed.entity) {
         let name = match pickup.0 {
             PickupKind::Coin => "pickup_coin",
@@ -126,19 +126,19 @@ fn item_picked(removed: On<Remove, Pickup>, pickups: Query<&Pickup>, transforms:
     }
 }
 
-fn captive_freed(removed: On<Remove, Captive>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
+fn captive_freed(removed: On<Remove<Captive>>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
     queue.push_removal("freed", place(&transforms, removed.entity), 1.0, 1.0);
 }
 
-fn door_opened(removed: On<Remove, Door>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
+fn door_opened(removed: On<Remove<Door>>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
     queue.push_removal("door", place(&transforms, removed.entity), 1.0, 1.0);
 }
 
-fn portcullis_raised(removed: On<Remove, Portcullis>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
+fn portcullis_raised(removed: On<Remove<Portcullis>>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
     queue.push_removal("portcullis", place(&transforms, removed.entity), 1.0, 1.0);
 }
 
-fn hero_downed(added: On<Add, Downed>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
+fn hero_downed(added: On<Add<Downed>>, transforms: Query<&Transform>, mut queue: ResMut<SfxQueue>) {
     queue.push("downed", place(&transforms, added.entity), 1.0, 1.0);
 }
 

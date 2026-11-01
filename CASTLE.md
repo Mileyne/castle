@@ -19,7 +19,7 @@ Jeu multijoueur en ligne inspiré de *Gauntlet*, ambiance RPG pixelisée à l'an
 | Structure | Workspace Cargo: `shared`, `server`, `client` | Serveur headless, client avec rendu |
 | Rendu | 2D, tuiles de 16 px, échelle entière; héros rendus en 96 px | Caméra qui suit le héros; sprites provisoires générés par `tools/gen_sprites.py` (planches dans `client/assets/art/`), à remplacer par du pixel-art dessiné au même découpage |
 | Localisation | **Fluent** via `bevy_fluent` 0.15 | Fichiers `.ftl` par langue dans `client/assets/locales/<langue>/`; FR et EN au départ |
-| Dialogues | **Yarn Spinner** via `bevy_yarnspinner` 0.9 | Scripts `.yarn` dans `client/assets/dialogues/`, tables de chaînes traduisibles par langue |
+| Dialogues | Format maison en **RON** (`client/assets/dialogue/castle.ron`) + interpréteur `client/src/dialogue_script.rs` | Scènes = répliques `Line(orateur, id)` et `Choice`; les textes sont les clés Fluent `dlg-<id>` (Yarn Spinner abandonné: sa dépendance bloquait la montée de version de Bevy) |
 | Niveaux | Génération procédurale par salles assemblées (à confirmer) | Alternative: niveaux écrits à la main (Tiled) |
 | iOS | Même client Rust, projet Xcode dans `ios/` | Serveur sur un fil du client (pas de second processus sur iOS), commandes tactiles qui simulent les touches (`client/src/touch.rs`); voir `ios/README.md` |
 
@@ -28,7 +28,7 @@ Jeu multijoueur en ligne inspiré de *Gauntlet*, ambiance RPG pixelisée à l'an
 - **Aucun texte affiché n'est écrit en dur dans le code.** Le code ne manipule que des clés (`class-knight`, `quest-hunt-minotaur`...). Voir `name_key` et `special_key` dans `shared/src/lib.rs`.
 - **Le serveur n'envoie jamais de texte**, seulement des clés et des paramètres. Chaque joueur d'une même partie peut ainsi jouer dans sa propre langue.
 - Les messages à variables (pluriels, genres, nombres) passent par Fluent, pas par du `format!`.
-- Les dialogues sont des scripts Yarn: les répliques ont un identifiant stable, et chaque langue a sa table de chaînes. Les choix de dialogue renvoient au serveur un identifiant, pas un texte.
+- Les dialogues sont des scènes RON: les répliques ont un identifiant stable, et chaque langue a sa table de chaînes. Les choix de dialogue renvoient au serveur un identifiant, pas un texte.
 - La langue se choisit dans les options, avec détection de la langue du système par défaut.
 - Prévoir dès le départ: police avec accents et caractères étendus, interface qui supporte des textes plus longs, et une police pixel-art adaptée aux langues non latines si on les ajoute plus tard (japonais, chinois, russe).
 - Les noms de lieux, de boss et d'artefacts sont aussi des clés, jamais des chaînes dans les données.
@@ -204,7 +204,7 @@ Objectif: tuer des monstres à plusieurs.
 ### Phase 2b — Dialogues *(en grande partie fait)*
 Objectif: les personnages parlent, dans la langue de chaque joueur.
 - [x] Boîte de dialogue pixel-art, texte progressif, choix (portrait à venir avec le vrai pixel-art)
-- [x] Intégration Yarn Spinner côté client, avancement des dialogues piloté par le serveur
+- [x] Dialogues côté client (interpréteur RON, ex-Yarn Spinner), avancement des dialogues piloté par le serveur
 - [x] Dialogues partagés: tous les joueurs voient la même scène, chacun dans sa langue
 - [x] Règle de vote ou de décision quand un choix engage le groupe
 - [ ] Répliques de caractère propres à chaque héros (réactions, remarques entre eux)

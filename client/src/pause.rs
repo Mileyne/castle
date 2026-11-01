@@ -4,6 +4,7 @@
 //! le serveur s'arrête pendant que le menu est ouvert.
 
 use bevy::{color::palettes::css, prelude::*};
+use bevy::{picking::hover::Hovered, ui::Pressed, ui_widgets::Button};
 use bevy_replicon::prelude::*;
 use castle_shared::SetPause;
 
@@ -72,15 +73,18 @@ fn toggle_pause(
 }
 
 /// Clic ou toucher sur une entrée (le survol déplace la sélection).
-fn pointer(mut pause: ResMut<PauseMenu>, buttons: Query<(&Interaction, &PauseButton), Changed<Interaction>>) {
+fn pointer(
+    mut pause: ResMut<PauseMenu>,
+    buttons: Query<(&PauseButton, &Hovered, Option<Ref<Pressed>>), Or<(Changed<Hovered>, Added<Pressed>)>>,
+) {
     if !pause.open {
         return;
     }
-    for (interaction, button) in &buttons {
-        match interaction {
-            Interaction::Pressed => pause.click = Some(button.0),
-            Interaction::Hovered => pause.cursor = button.0,
-            _ => {}
+    for (button, hovered, pressed) in &buttons {
+        if pressed.is_some_and(|pressed| pressed.is_added()) {
+            pause.click = Some(button.0);
+        } else if hovered.0 {
+            pause.cursor = button.0;
         }
     }
 }
@@ -170,6 +174,7 @@ fn sync_overlay(
                 for (i, key) in ITEMS.into_iter().enumerate() {
                     ui.spawn((
                         Button,
+                        Hovered::default(),
                         PauseButton(i),
                         Node {
                             flex_direction: FlexDirection::Row,

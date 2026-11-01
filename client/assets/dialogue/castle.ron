@@ -1,0 +1,141 @@
+// Scènes de dialogue (voir `client/src/dialogue/script.rs`): chaque réplique `Line(orateur, id)` se lit dans la clé Fluent
+// `dlg-<id>`. Un `Choice` propose des options votées par l'équipe; chacune mène à ses propres répliques (`then`).
+[
+    (id: "prologue", steps: [
+        Line("samelia", "prologue_01"),
+        Line("samelia", "prologue_02"),
+        Line("samelia", "prologue_03"),
+        Line("samelia", "prologue_04"),
+        Line("samelia", "prologue_05"),
+        Line("knight", "prologue_06"),
+        Line("sorcerer", "prologue_07"),
+        Line("ranger", "prologue_08"),
+        Line("forgebraise", "prologue_09"),
+    ]),
+    (id: "intro", steps: [
+        Line("samelia", "intro_e0"),
+        Line("knight", "intro_01"),
+        Line("sorcerer", "intro_02"),
+        Line("ranger", "intro_03"),
+        Line("forgebraise", "intro_04"),
+        Line("knight", "intro_05"),
+        Line("knight", "intro_06"),
+        Line("ranger", "intro_07"),
+        Line("forgebraise", "intro_08"),
+        Line("samelia", "intro_e5"),
+    ]),
+    (id: "royal_door", steps: [
+        Line("knight", "royal_door_01"),
+        Line("sorcerer", "royal_door_02"),
+        Line("forgebraise", "royal_door_03"),
+        Line("ranger", "royal_door_04"),
+        Line("knight", "royal_door_05"),
+        Line("knight", "royal_door_06"),
+    ]),
+    (id: "puzzle_rune", steps: [
+        Line("sorcerer", "puzzle_rune_01"),
+        Line("sorcerer", "puzzle_rune_02"),
+        Line("knight", "puzzle_rune_03"),
+    ]),
+    (id: "puzzle_gears", steps: [
+        Line("forgebraise", "puzzle_gears_01"),
+        Line("forgebraise", "puzzle_gears_02"),
+        Line("ranger", "puzzle_gears_03"),
+    ]),
+    (id: "puzzle_target", steps: [
+        Line("ranger", "puzzle_target_01"),
+        Line("ranger", "puzzle_target_02"),
+        Line("sorcerer", "puzzle_target_03"),
+    ]),
+    (id: "alcove", steps: [
+        Line("forgebraise", "alcove_01"),
+        Choice([
+            (id: "alcove_opt_key", then: [
+                Line("ranger", "alcove_02"),
+            ]),
+            (id: "alcove_opt_boom", then: [
+                Line("forgebraise", "alcove_03"),
+            ]),
+        ]),
+    ]),
+    (id: "bridge_intro", steps: [
+        Line("samelia", "bridge_e1"),
+        Line("knight", "bridge_01"),
+        Line("forgebraise", "bridge_02"),
+        Line("forgebraise", "bridge_03"),
+        Line("ranger", "bridge_04"),
+        Line("knight", "bridge_05"),
+    ]),
+    (id: "bridge_panel", steps: [
+        Line("forgebraise", "bridge_panel_01"),
+        Line("forgebraise", "bridge_panel_02"),
+        Line("knight", "bridge_panel_03"),
+    ]),
+    (id: "drawbridge_intro", steps: [
+        Line("knight", "drawbridge_01"),
+        Line("ranger", "drawbridge_02"),
+        Line("ranger", "drawbridge_03"),
+        Line("sorcerer", "drawbridge_04"),
+        Line("ranger", "drawbridge_05"),
+        Line("knight", "drawbridge_06"),
+    ]),
+    (id: "drawbridge_panel", steps: [
+        Line("ranger", "drawbridge_panel_01"),
+        Line("ranger", "drawbridge_panel_02"),
+    ]),
+    (id: "gate_intro", steps: [
+        Line("knight", "gate_01"),
+        Line("sorcerer", "gate_02"),
+        Line("sorcerer", "gate_03"),
+        Line("forgebraise", "gate_04"),
+        Line("knight", "gate_05"),
+    ]),
+    (id: "gate_panel", steps: [
+        Line("sorcerer", "gate_panel_01"),
+        Line("sorcerer", "gate_panel_02"),
+    ]),
+    (id: "knight_intro", steps: [
+        Line("knight", "knight_01"),
+        Line("sorcerer", "knight_02"),
+        Line("forgebraise", "knight_03"),
+        Line("ranger", "knight_04"),
+        Line("knight", "knight_05"),
+    ]),
+    (id: "knight_door", steps: [
+        Line("knight", "knight_door_01"),
+        Line("knight", "knight_door_02"),
+    ]),
+    (id: "castle_intro", steps: [
+        Line("knight", "castle_01"),
+        Line("sorcerer", "castle_02"),
+        Line("forgebraise", "castle_03"),
+        Line("ranger", "castle_04"),
+        Line("knight", "castle_05"),
+        Line("ranger", "castle_06"),
+        Line("knight", "castle_07"),
+    ]),
+    (id: "boss_warg", steps: [
+        Line("knight", "bw_01"),
+        Line("ranger", "bw_02"),
+        Line("sorcerer", "bw_03"),
+        Line("forgebraise", "bw_04"),
+    ]),
+    (id: "boss_troll", steps: [
+        Line("ranger", "bt_01"),
+        Line("forgebraise", "bt_02"),
+        Line("sorcerer", "bt_03"),
+        Line("knight", "bt_04"),
+    ]),
+    (id: "boss_muldant", steps: [
+        Line("samelia", "bm_01"),
+        Line("sorcerer", "bm_02"),
+        Line("ranger", "bm_03"),
+        Line("knight", "bm_04"),
+        Line("forgebraise", "bm_05"),
+    ]),
+    (id: "samelia_freed", steps: [
+        Line("samelia", "samelia_freed_01"),
+        Line("knight", "samelia_freed_02"),
+        Line("samelia", "samelia_freed_03"),
+    ]),
+]

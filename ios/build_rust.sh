@@ -3,10 +3,6 @@
 # Adapté de l'exemple mobile de Bevy (examples/mobile/build_rust_deps.sh).
 set -eux
 
-PATH=$PATH:$HOME/.cargo/bin:/opt/homebrew/bin
-# Chaîne d'outils rustup en tête (un Rust installé par Homebrew n'a pas les cibles iOS).
-RUSTUP_BIN="$(dirname "$(rustup which cargo 2>/dev/null)" 2>/dev/null || true)"
-
 PROFILE=debug
 RELFLAG=
 if [[ "$CONFIGURATION" != "Debug" ]]; then
@@ -23,7 +19,8 @@ export CARGO_TARGET_DIR="$DERIVED_FILE_DIR/cargo"
 # Xcode met sa propre chaîne d'outils en tête du PATH, ce qui casse l'édition de liens
 # (`ld: library 'System' not found`, https://github.com/rust-lang/rust/issues/80817).
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-[ -n "$RUSTUP_BIN" ] && export PATH="$RUSTUP_BIN:$PATH"
+# Xcode ne lit pas le PATH du terminal: rustup (Homebrew, ou installé par rustup.rs) est cherché ici.
+export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
 
 IS_SIMULATOR=0
 if [ "${LLVM_TARGET_TRIPLE_SUFFIX-}" = "-simulator" ]; then
