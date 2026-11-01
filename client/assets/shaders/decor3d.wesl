@@ -34,10 +34,6 @@ struct Decor {
 @group(constants::MATERIAL_BIND_GROUP) @binding(3) var walls: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(4) var walls_samp: sampler;
 
-fn sin_elevation() -> f32 {
-    return 1.0 / decor.params.x;
-}
-
 // Taille d'un pixel de l'art, en unités du monde.
 fn pixel() -> f32 {
     return decor.params.w / decor.room.z;
@@ -173,22 +169,28 @@ fn wall_top(p: vec2<f32>) -> vec3<f32> {
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
     let sun = normalize(SUN);
-    // Position non étirée (x, hauteur, y du monde 2D).
-    let here = vec3<f32>(in.world_position.x, in.world_position.y, -in.world_position.z * sin_elevation());
+    // Position dans le monde 2D (x, hauteur, y): le nord est -z dans la scène.
+    let here = vec3<f32>(in.world_position.x, in.world_position.y, -in.world_position.z);
     var base = vec3<f32>(0.0);
     var tone = vec3<f32>(AMBIENT + (1.0 - AMBIENT) / sun.y * max(dot(n, sun), 0.0));
     if decor.style.x > 0.5 {
-        // Un mur.
-        if n.z > 0.5 {
-            base = wall_face(here.x + tile_origin().x, here.y);
-            // La face tourne le dos au soleil: une lumière de remplissage, et plus sombre au pied qu'en haut.
-            tone = vec3<f32>(0.8) * mix(0.65, 1.0, clamp(here.y / decor.params.z, 0.0, 1.0));
-        } else if here.y < 3.0 {
-            // Le fond de roche, derrière la première rangée de murs: la même matière, à plat et plus sombre.
-            base = wall_top(in.uv) * 0.5;
+        // Un cube de mur: la même matière sur ses six faces.
+        let off = tile_origin();
+        if n.y > 0.9 {
+            if here.y < 3.0 {
+                // Le fond de roche, derrière la première rangée de murs: la même matière, à plat et plus sombre.
+                base = wall_top(here.xz) * 0.5;
+            } else {
+                base = wall_top(here.xz);
+            }
+        } else if n.y < -0.9 {
+            base = vec3<f32>(0.0);
         } else {
-            // Le dessus d'un bloc: les coordonnées de texture sont sa position au sol (il est raccourci, pas son motif).
-            base = wall_top(in.uv);
+            // Un côté: le long du mur (x pour le nord et le sud, y pour l'est et l'ouest) et en hauteur.
+            let along = select(here.z + off.y, here.x + off.x, abs(n.z) > 0.5);
+            base = wall_face(along, here.y);
+            // Les côtés qui tournent le dos au soleil gardent une lumière de remplissage; plus sombres au pied qu'en haut.
+            tone = max(tone, vec3<f32>(0.62)) * mix(0.7, 1.0, clamp(here.y / decor.params.z, 0.0, 1.0));
         }
         base = base * decor.tint.rgb;
     } else {

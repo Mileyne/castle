@@ -1,17 +1,16 @@
-//! Prototype (`CASTLE_DECOR3D=1`): le sol et les murs sont de vraies surfaces en 3D, éclairées par un petit shader, au lieu de blocs
-//! d'image posés à plat.
+//! Prototype (`CASTLE_DECOR3D=1`): le monde est une vraie scène 3D, vue de biais par une caméra qui suit la caméra 2D.
 //!
-//! Le sol: les blocs de décor déjà assemblés (les décalques, taches et fissures restent des sprites 2D par-dessus) (`art::rebuild_world`) servent de texture, un maillage par bloc. Les murs: de vrais blocs
-//! 3D, un seul maillage pour tout le niveau, dont la face et le dessus sont dessinés ensemble par le shader (briques et dalles de la
-//! même pierre; tronc, puis feuillage qui continue sur le dessus), selon la région. Le tout est dessiné par une caméra 3D placée
-//! derrière la caméra 2D, qui ne s'efface plus et dessine par-dessus (personnages, objets, interface): le tri par hauteur et les
-//! collisions n'ont donc pas à changer.
+//! - Le sol: les blocs de décor déjà assemblés (`art::rebuild_world`) servent de texture, un maillage par bloc.
+//! - Les murs: des cubes complets (six faces, la matière projetée sur chacune, calculée par le shader selon la région: briques de
+//!   pierre, ou tronc et feuillage). Les faces cachées le sont par la profondeur, pas par la géométrie.
+//! - Les sprites du monde (personnages, objets, grands motifs, taches au sol...): dessinés dans la scène, debout ou à plat, pour que la
+//!   profondeur règle les masquages entre eux et avec les murs. Seuls la météo et l'interface restent en 2D, par-dessus.
 //!
 //! Les deux caméras doivent avoir le même réglage d'antialiasing (`Msaa`): sinon Bevy ne leur fait pas partager l'image de la fenêtre,
 //! et la dernière écrase l'autre.
 //!
-//! La vue est orthographique et inclinée de `ELEVATION`; le sol est étiré en profondeur pour rester à l'échelle 1:1 de la carte 2D
-//! (un point (x, y) du monde 2D tombe au même endroit de l'écran). Lumières: un soleil, et jusqu'à `MAX_LIGHTS` lampes.
+//! La vue est inclinée de `ELEVATION`. Elle est orthographique, ou en perspective avec `CASTLE_FOV=<degrés>` (les côtés des cubes
+//! deviennent alors visibles). Lumières: un soleil, et jusqu'à `MAX_LIGHTS` lampes.
 
 use bevy::{
     asset::RenderAssetUsages,
@@ -25,27 +24,27 @@ use bevy::{
     sprite::Anchor,
 };
 use castle_shared::tileart::TILE_CELL;
+use bevy::window::PrimaryWindow;
 use castle_shared::{Expedition, Region, Room, TILE_SIZE, Tile};
 
 use crate::LocalPlayer;
-use crate::art::{TileMark, YSort};
+use crate::art::{Stain, TileMark, WorldTile};
 
 /// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2).
 const ELEVATION: f32 = 0.9;
-/// Hauteur d'un mur, en unités du monde. Sa face doit couvrir au moins la tuile qu'il occupe sur l'écran (la hauteur à l'écran d'une
-/// verticale est `hauteur x cos(élévation)`), pour que le sol dessiné dessous ne dépasse pas.
+/// Hauteur d'un mur, en unités du monde (`CASTLE_WALL_HEIGHT=<tuiles>` pour l'essayer; 1,5 tuile par défaut).
 fn wall_height() -> f32 {
-    TILE_SIZE * 1.02 / ELEVATION.cos() + extra_height()
+    static HEIGHT: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *HEIGHT.get_or_init(|| {
+        let tiles = std::env::var("CASTLE_WALL_HEIGHT").ok().and_then(|value| value.parse::<f32>().ok()).unwrap_or(1.5).max(0.2);
+        tiles * TILE_SIZE
+    })
 }
 
-/// Hauteur ajoutée au-dessus, en tuiles à l'écran (`CASTLE_WALL_EXTRA=<tuiles>`; 0,8 par défaut). Plus le mur est haut, plus il masque
-/// le sol derrière lui.
-fn extra_height() -> f32 {
-    static EXTRA: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-    *EXTRA.get_or_init(|| {
-        let tiles = std::env::var("CASTLE_WALL_EXTRA").ok().and_then(|value| value.parse::<f32>().ok()).unwrap_or(0.8).max(0.0);
-        tiles * TILE_SIZE / ELEVATION.cos()
-    })
+/// Champ de vision de la caméra en perspective, en degrés (`CASTLE_FOV`), ou `None` pour la vue orthographique.
+fn field_of_view() -> Option<f32> {
+    static FOV: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    *FOV.get_or_init(|| std::env::var("CASTLE_FOV").ok().and_then(|value| value.parse::<f32>().ok()).filter(|fov| *fov > 1.0 && *fov < 120.0))
 }
 
 /// Nombre maximal de lampes par bloc.
@@ -169,9 +168,9 @@ fn setup(mut commands: Commands) {
     ));
 }
 
-/// Position 3D (étirée en profondeur) d'un point du monde 2D, à la hauteur `height`.
+/// Position 3D d'un point du monde 2D (x vers la droite, y vers le nord), à la hauteur `height`: le nord est -z.
 fn to_3d(point: Vec2, height: f32) -> Vec3 {
-    Vec3::new(point.x, height, -point.y / ELEVATION.sin())
+    Vec3::new(point.x, height, -point.y)
 }
 
 /// Transforme chaque nouveau bloc de décor en maillage 3D, et cache le sprite à plat.
@@ -206,7 +205,7 @@ fn build_chunks(
     let region = expeditions.iter().last().map(|expedition| expedition.region).unwrap_or(Region::Crypts);
     let base = |style: Vec4, colors: [Vec4; 3]| DecorData {
         tint: Vec4::ONE,
-        params: Vec4::new(1.0 / ELEVATION.sin(), 0.0, wall_height(), TILE_SIZE),
+        params: Vec4::new(1.0, 0.0, wall_height(), TILE_SIZE),
         room: Vec4::new(room.size().x as f32, room.size().y as f32, TILE_CELL as f32, 0.0),
         style,
         color_a: colors[0],
@@ -272,12 +271,17 @@ fn wall_style(region: Region) -> (f32, [Vec4; 3]) {
     }
 }
 
-/// Les murs du niveau, une tuile par pixel (voir `DecorMaterial::walls`).
+/// Une tuile de mur qui touche du sol (même en diagonale) est un bloc surélevé; les tuiles plus profondes ne sont qu'un fond de roche.
+fn is_raised(room: &Room, x: i32, y: i32) -> bool {
+    room.tile(x, y) == Tile::Wall && (-1..=1).any(|dy| (-1..=1).any(|dx| room.tile(x + dx, y + dy) == Tile::Floor))
+}
+
+/// Les blocs de mur du niveau, une tuile par pixel (voir `DecorMaterial::walls`).
 fn wall_mask(room: &Room) -> Image {
     let size = room.size();
     let data = (0..size.y as i32)
         .flat_map(|y| (0..size.x as i32).map(move |x| (x, y)))
-        .map(|(x, y)| if room.tile(x, y) == Tile::Wall { 255 } else { 0 })
+        .map(|(x, y)| if is_raised(room, x, y) { 255 } else { 0 })
         .collect();
     let mut image = Image::new(
         Extent3d { width: size.x, height: size.y, depth_or_array_layers: 1 },
@@ -340,75 +344,77 @@ fn ground_mesh(room: &Room, origin: IVec2, cols: u32, rows: u32, lift: f32) -> M
 /// Hauteur du dessus plat des masses de mur (au-delà de la première rangée): juste au-dessus du sol, pour recouvrir son image.
 const MASS_HEIGHT: f32 = 1.5;
 
-/// Les murs de tout le niveau. Une tuile de mur qui touche du sol (même en diagonale) est un bloc: un dessus à la hauteur du mur et,
-/// quand rien de surélevé n'est devant elle (au sud), sa face. Les tuiles plus profondes ne sont qu'un fond de roche, à plat. La
-/// matière est calculée par le shader (`decor3d.wesl`) à partir des coordonnées de texture, qui donnent la position au sol: face et
-/// dessus s'accordent.
-///
-/// Le sol est étiré en profondeur pour rester à l'échelle 1:1 de la carte 2D, mais le dessus d'un bloc, lui, doit paraître raccourci
-/// comme toute face horizontale vue de biais (d'un facteur sin(élévation)): on ne l'étire pas. Pour que deux dessus l'un derrière
-/// l'autre se rejoignent, la profondeur est comptée depuis le début de la file de blocs surélevés de la colonne, dont le pied, lui,
-/// est bien à sa place sur le sol.
+/// Les murs de tout le niveau. Une tuile de mur qui touche du sol est un cube de six faces (on ne génère pas celles qui touchent un
+/// autre cube); les tuiles plus profondes ne sont qu'un fond de roche, à plat. La matière est calculée par le shader (`decor3d.wesl`) à
+/// partir de la position dans le monde et de la normale de la face: les six faces sont de la même matière.
 fn walls_mesh(room: &Room) -> Mesh {
     let mut quads = Quads::default();
     let height = wall_height();
     let size = room.size();
-    let sin = ELEVATION.sin();
-    let raised = |x: i32, y: i32| {
-        room.tile(x, y) == Tile::Wall && (-1..=1).any(|dy| (-1..=1).any(|dx| room.tile(x + dx, y + dy) == Tile::Floor))
-    };
-    for x in 0..size.x as i32 {
-        let mut run_start: Option<f32> = None;
-        for y in 0..size.y as i32 {
+    for y in 0..size.y as i32 {
+        for x in 0..size.x as i32 {
             if room.tile(x, y) != Tile::Wall {
-                run_start = None;
                 continue;
             }
             let sw = tile_corner(room, x, y);
-            let (se, ne) = (sw + Vec2::new(TILE_SIZE, 0.0), sw + Vec2::splat(TILE_SIZE));
-            // Les coordonnées de texture d'un dessus sont sa position au sol (le shader y calcule les dalles).
-            let ground_uv = [sw, se, ne, Vec2::new(sw.x, ne.y)];
-            if !raised(x, y) {
-                run_start = None;
+            let (se, ne, nw) = (sw + Vec2::new(TILE_SIZE, 0.0), sw + Vec2::splat(TILE_SIZE), sw + Vec2::new(0.0, TILE_SIZE));
+            let none = [Vec2::ZERO; 4];
+            if !is_raised(room, x, y) {
                 let flat = |at: Vec2| to_3d(at, MASS_HEIGHT);
-                quads.add([flat(sw), flat(se), flat(ne), flat(Vec2::new(sw.x, ne.y))], Vec3::Y, ground_uv);
+                quads.add([flat(sw), flat(se), flat(ne), flat(nw)], Vec3::Y, none);
                 continue;
             }
-            let start = *run_start.get_or_insert(sw.y);
-            // Bord sud du dessus: le pied du bloc de tête de file, puis un pas de `TILE_SIZE` par tuile, sans étirement.
-            let south = -start / sin - (sw.y - start);
-            let north = south - TILE_SIZE;
-            quads.add(
-                [Vec3::new(sw.x, height, south), Vec3::new(se.x, height, south), Vec3::new(se.x, height, north), Vec3::new(sw.x, height, north)],
-                Vec3::Y,
-                ground_uv,
-            );
-            // La face du sud, quand il n'y a rien de surélevé devant: elle monte du pied du bloc au bord sud du dessus.
-            if !raised(x, y - 1) {
-                let top = -sw.y / sin;
-                quads.add(
-                    [to_3d(sw, 0.0), to_3d(se, 0.0), Vec3::new(se.x, height, top), Vec3::new(sw.x, height, top)],
-                    Vec3::Z,
-                    [Vec2::ZERO; 4],
-                );
+            // Les huit coins du cube: le pied (hauteur 0) et le haut.
+            let (low, high) = (|at: Vec2| to_3d(at, 0.0), |at: Vec2| to_3d(at, height));
+            // Dessus et dessous.
+            quads.add([high(sw), high(se), high(ne), high(nw)], Vec3::Y, none);
+            quads.add([low(nw), low(ne), low(se), low(sw)], Vec3::NEG_Y, none);
+            // Les quatre côtés, tournés vers l'extérieur (sens trigonométrique vu de dehors), sauf contre un autre cube.
+            if !is_raised(room, x, y - 1) {
+                quads.add([low(sw), low(se), high(se), high(sw)], Vec3::Z, none);
+            }
+            if !is_raised(room, x, y + 1) {
+                quads.add([low(ne), low(nw), high(nw), high(ne)], Vec3::NEG_Z, none);
+            }
+            if !is_raised(room, x + 1, y) {
+                quads.add([low(se), low(ne), high(ne), high(se)], Vec3::X, none);
+            }
+            if !is_raised(room, x - 1, y) {
+                quads.add([low(nw), low(sw), high(sw), high(nw)], Vec3::NEG_X, none);
             }
         }
     }
     quads.into_mesh()
 }
 
-/// La caméra 3D suit la caméra 2D: même position, même zoom.
+/// La caméra 3D suit la caméra 2D: même position, même zoom (en perspective, elle recule jusqu'à voir la même hauteur à l'écran).
 fn follow_camera(
     flat: Single<(&Transform, &Projection), (With<Camera2d>, Without<DecorCamera>)>,
     mut deep: Single<(&mut Transform, &mut Projection), With<DecorCamera>>,
+    window: Single<&Window, With<PrimaryWindow>>,
 ) {
     let (flat_transform, flat_projection) = *flat;
     let target = to_3d(flat_transform.translation.truncate(), 0.0);
     let towards_camera = Vec3::new(0.0, ELEVATION.sin(), ELEVATION.cos());
-    *deep.0 = Transform::from_translation(target + towards_camera * 1000.0).looking_at(target, Vec3::Y);
-    if let (Projection::Orthographic(from), Projection::Orthographic(to)) = (flat_projection, &mut *deep.1) {
-        to.scale = from.scale;
-        to.scaling_mode = from.scaling_mode;
+    let Projection::Orthographic(from) = flat_projection else {
+        return;
+    };
+    let distance = match field_of_view() {
+        // La hauteur de la vue à l'écran, en unités du monde, à la distance de la cible.
+        Some(fov) => window.height() * from.scale / (2.0 * (fov.to_radians() / 2.0).tan()),
+        None => 1000.0,
+    };
+    *deep.0 = Transform::from_translation(target + towards_camera * distance).looking_at(target, Vec3::Y);
+    match (field_of_view(), &mut *deep.1) {
+        (Some(fov), projection @ Projection::Orthographic(_)) => {
+            *projection = Projection::Perspective(PerspectiveProjection { fov: fov.to_radians(), near: 1.0, far: 6000.0, ..default() });
+        }
+        (Some(fov), Projection::Perspective(perspective)) => perspective.fov = fov.to_radians(),
+        (None, Projection::Orthographic(to)) => {
+            to.scale = from.scale;
+            to.scaling_mode = from.scaling_mode;
+        }
+        _ => {}
     }
 }
 
@@ -501,14 +507,29 @@ fn sprite_rect(sprite: &Sprite, images: &Assets<Image>, layouts: &Assets<Texture
     Some(Vec4::new(u0, v0, u1, v1))
 }
 
-/// Dessine les sprites triés dans la scène 3D, pour que les murs les cachent comme ils cachent le sol: la caméra 2D dessine après
-/// la 3D, sans profondeur commune, donc un sprite à plat passerait toujours par-dessus un mur. Le panneau est vertical, de la hauteur
-/// du sprite à l'écran (une verticale est raccourcie de `cos(élévation)`), et pose son bas sur le sol à l'endroit où le sprite finit.
+/// Taille d'un sprite sans taille imposée (`custom_size`): celle de sa zone de texture, un pixel valant une unité du monde.
+fn natural_size(sprite: &Sprite, images: &Assets<Image>, layouts: &Assets<TextureAtlasLayout>) -> Option<Vec2> {
+    match &sprite.texture_atlas {
+        Some(atlas) => Some(layouts.get(&atlas.layout)?.textures.get(atlas.index)?.size().as_vec2()),
+        None => Some(sprite.rect.map_or_else(|| images.get(&sprite.image).map(|image| image.size().as_vec2()), |rect| Some(rect.size()))?),
+    }
+}
+
+/// Dessine tous les sprites du monde dans la scène 3D, pour que la profondeur règle ce qui en cache quoi (un mur devant un héros,
+/// un héros devant un rocher...): la caméra 2D dessine après la 3D, sans profondeur commune, donc un sprite à plat passerait toujours
+/// par-dessus un mur. Seuls les sprites sans parent (la météo est rattachée à la caméra) sont repris.
+///
+/// - Debout (par défaut): un panneau vertical de la hauteur du sprite à l'écran (une verticale est raccourcie de `cos(élévation)`),
+///   dont le bas touche le sol là où le sprite finit.
+/// - À plat (taches et fissures du sol, marques de gore): un rectangle posé sur le sol.
 fn mirror_sprites(
     mut commands: Commands,
-    mut sources: Query<(Entity, &mut Sprite, &Transform, Option<&Anchor>, &InheritedVisibility, Option<&mut Mirror>), With<YSort>>,
+    mut sources: Query<
+        (Entity, &mut Sprite, &Transform, Option<&Anchor>, &InheritedVisibility, Option<&mut Mirror>, Has<WorldTile>, Has<Stain>),
+        (Without<TileMark>, Without<ChildOf>, Without<Billboard>),
+    >,
     billboards: Query<(Entity, &Billboard)>,
-    mut placed: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<BillboardMaterial>), (With<Billboard>, Without<YSort>)>,
+    mut placed: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<BillboardMaterial>), (With<Billboard>, Without<Mirror>)>,
     images: Res<Assets<Image>>,
     layouts: Res<Assets<TextureAtlasLayout>>,
     mut materials: ResMut<Assets<BillboardMaterial>>,
@@ -522,11 +543,15 @@ fn mirror_sprites(
         }
     }
     let quad = quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0))).clone();
-    for (entity, mut sprite, transform, anchor, visible, mirror) in &mut sources {
+    for (entity, mut sprite, transform, anchor, visible, mirror, decal, stain) in &mut sources {
         // La taille d'origine: celle que le sprite porte, ou celle que nous avons gardée quand nous l'avons mis à zéro.
         let size = match (sprite.custom_size, mirror.as_deref()) {
             (Some(size), _) if size != Vec2::ZERO => size,
-            (_, Some(mirror)) => mirror.size,
+            (_, Some(mirror)) if sprite.custom_size == Some(Vec2::ZERO) => mirror.size,
+            (None, _) => match natural_size(&sprite, &images, &layouts) {
+                Some(size) => size,
+                None => continue,
+            },
             _ => continue,
         };
         let Some(rect) = sprite_rect(&sprite, &images, &layouts) else {
@@ -534,14 +559,19 @@ fn mirror_sprites(
         };
         let tint = sprite.color.to_linear();
         let data = BillboardData { rect, tint: Vec4::new(tint.red, tint.green, tint.blue, tint.alpha) };
-        // Le centre du sprite à l'écran, puis son bas: c'est là que le panneau touche le sol.
+        // Le centre du sprite dans le monde 2D, et son bas.
         let center = transform.translation.truncate() - anchor.map_or(Vec2::ZERO, |anchor| anchor.as_vec()) * size;
-        let bottom = center.y - size.y / 2.0;
-        let height = size.y / ELEVATION.cos();
-        let place = Transform {
-            translation: Vec3::new(center.x, height / 2.0, -bottom / ELEVATION.sin()),
-            scale: Vec3::new(size.x, height, 1.0),
-            ..default()
+        let place = if decal || stain {
+            // À plat sur le sol, un peu au-dessus (plus haut pour les marques que le jeu dessine plus tard).
+            Transform {
+                translation: Vec3::new(center.x, 0.3 + transform.translation.z * 0.05, -center.y),
+                rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Quat::from_rotation_z(transform.rotation.to_euler(EulerRot::ZYX).0),
+                scale: Vec3::new(size.x, size.y, 1.0),
+            }
+        } else {
+            let bottom = center.y - size.y / 2.0;
+            let height = size.y / ELEVATION.cos();
+            Transform { translation: Vec3::new(center.x, height / 2.0, -bottom), scale: Vec3::new(size.x, height, 1.0), ..default() }
         };
         let visibility = if visible.get() { Visibility::Inherited } else { Visibility::Hidden };
         match mirror {
