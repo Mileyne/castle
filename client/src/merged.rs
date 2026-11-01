@@ -430,10 +430,6 @@ impl Buffers {
         self.indices.extend(shape.indices.iter().map(|index| first + index));
     }
 
-    pub fn into_mesh(self) -> Mesh {
-        self.into_mesh_with(false)
-    }
-
     /// Le maillage, avec ses coordonnées de texture si `with_uv` (les vêtements).
     pub fn into_mesh_with(self, with_uv: bool) -> Mesh {
         let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)

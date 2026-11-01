@@ -5,9 +5,9 @@
 //! tous les modèles sont construites à l'avance, derrière un écran « Veuillez patienter » avec son avancement.
 //!
 //! Manette: stick droit = tourner autour; gâchettes L / R (ou ZL / ZR) = éloigner / rapprocher; croix gauche / droite = modèle précédent
-//! / suivant; croix haut / bas = action (repos, marche, coup); X = fusion douce / primitives fusionnées / les deux côte à côte;
+//! / suivant; croix haut / bas = action (repos, marche, coup); X = le rendu du jeu / trois rendus côte à côte;
 //! Y = rotation automatique; Select = recentrer la vue.
-//! Clavier: flèches = tourner; Q / E = zoom; A / D = modèle; W / S = action; F = fusion; Espace = rotation; R = recentrer.
+//! Clavier: flèches = tourner; Q / E = zoom; A / D = modèle; W / S = action; F = comparer; Espace = rotation; R = recentrer.
 
 use std::time::Duration;
 
@@ -22,11 +22,6 @@ use sprite_forge::{Anim, models};
 #[allow(dead_code)]
 #[path = "../../../client/src/merged.rs"]
 mod merged;
-
-// La fusion douce: les pièces se fondent en un seul corps continu (voir `client/src/smooth.rs`).
-#[allow(dead_code)]
-#[path = "../../../client/src/smooth.rs"]
-mod smooth;
 
 use merged::{Baking, ModelSource, PoseCache, PoseKey};
 
@@ -85,34 +80,28 @@ struct Entry {
     source: ModelSource,
 }
 
-/// Quel rendu montrer: les primitives fusionnées en un seul maillage (celui du jeu), leur fusion douce, les deux côte à côte, ou le
-/// même modèle sous trois rendus (sans éclairage, éclairé sans texture, éclairé avec le tissage des vêtements).
+/// Quel rendu montrer: le rendu du jeu, ou le même modèle sous trois rendus côte à côte (sans éclairage, éclairé sans texture, éclairé
+/// avec le tissage des vêtements).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Fusion {
     Primitives,
-    Soft,
-    Both,
     Shaders,
 }
 
 impl Fusion {
     fn next(self) -> Self {
         match self {
-            Self::Both => Self::Soft,
-            Self::Soft => Self::Primitives,
             Self::Primitives => Self::Shaders,
-            Self::Shaders => Self::Both,
+            Self::Shaders => Self::Primitives,
         }
     }
 }
 
-/// Ce qui dessine un exemplaire: des matériaux de Bevy (`StandardMaterial`), sur le maillage fusionné du jeu ou sur sa fusion douce.
+/// Ce qui dessine un exemplaire: des matériaux de Bevy (`StandardMaterial`), sur le maillage fusionné du jeu.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Look {
     /// Éclairé, chaque pièce selon sa matière, avec la texture de tissage sur les vêtements: le rendu par défaut du jeu.
     Lit,
-    /// La fusion douce, éclairée (un seul maillage: une matière moyenne).
-    SoftLit,
     /// Éclairé, mais vêtements unis (sans texture de tissage).
     Plain,
     /// Sans éclairage: les couleurs propres des pièces, sans lumière ni ombre.
@@ -123,7 +112,6 @@ impl Look {
     fn label(self) -> &'static str {
         match self {
             Self::Lit => "éclairé, une matière par pièce, tissage sur les vêtements (le défaut du jeu)",
-            Self::SoftLit => "éclairé, fusion douce",
             Self::Plain => "éclairé, vêtements unis (sans texture)",
             Self::Flat => "sans éclairage (couleurs pures)",
         }
@@ -154,10 +142,6 @@ struct Poses {
     /// La construction à l'avance, tant qu'elle n'est pas finie, et son temps (en secondes).
     baking: Option<Baking>,
     baking_secs: f32,
-    /// Les poses en fusion douce, construites à la demande: (maillage, sommets, millisecondes de construction).
-    soft: std::collections::HashMap<PoseKey, (Handle<Mesh>, usize, f32)>,
-    /// La fusion douce de la pose montrée: ses sommets et son temps de construction.
-    soft_stats: Option<(usize, f32)>,
     /// Les matériaux (par matière et par rendu) et la texture de tissage.
     materials: std::collections::HashMap<(merged::Surface, u8), Handle<StandardMaterial>>,
     cloth: Option<Handle<Image>>,
@@ -185,15 +169,10 @@ fn main() {
     entries.extend(EXITS.iter().enumerate().map(|(row, name)| Entry { label: format!("sortie:{name}"), source: ModelSource::Exit(row) }));
     let sources: Vec<ModelSource> = entries.iter().map(|entry| entry.source.clone()).collect();
     let baking = Baking::plan(sources, &PoseCache::default());
-    // Pour ouvrir directement sur un modèle (`MODEL_VIEWER_MODEL=hero:Sorcerer`), un rendu (`MODEL_VIEWER_FUSION=shaders|soft|primitives`)
+    // Pour ouvrir directement sur un modèle (`MODEL_VIEWER_MODEL=hero:Sorcerer`), un rendu (`MODEL_VIEWER_FUSION=shaders`)
     // et une distance (`MODEL_VIEWER_DISTANCE=2`).
     let start_model = std::env::var("MODEL_VIEWER_MODEL").ok().and_then(|key| entries.iter().position(|entry| entry.label == key)).unwrap_or(0);
-    let start_fusion = match std::env::var("MODEL_VIEWER_FUSION").as_deref() {
-        Ok("shaders") => Fusion::Shaders,
-        Ok("soft") => Fusion::Soft,
-        Ok("primitives") => Fusion::Primitives,
-        _ => Fusion::Both,
-    };
+    let start_fusion = if std::env::var("MODEL_VIEWER_FUSION").as_deref() == Ok("shaders") { Fusion::Shaders } else { Fusion::Primitives };
     let start_distance = std::env::var("MODEL_VIEWER_DISTANCE").ok().and_then(|d| d.parse().ok()).unwrap_or(DEFAULT_DISTANCE);
     App::new()
         .add_plugins((
@@ -366,15 +345,13 @@ fn place_camera(viewer: Res<Viewer>, mut camera: Single<&mut Transform, With<Cam
 /// Ce que montre chaque emplacement, selon le mode: (décalage en x, rendu).
 fn slots(fusion: Fusion) -> Vec<(f32, Look)> {
     match fusion {
-        Fusion::Both => vec![(-0.9, Look::Lit), (0.9, Look::SoftLit)],
         Fusion::Primitives => vec![(0.0, Look::Lit)],
-        Fusion::Soft => vec![(0.0, Look::SoftLit)],
         Fusion::Shaders => vec![(-1.6, Look::Flat), (0.0, Look::Plain), (1.6, Look::Lit)],
     }
 }
 
 /// Montre la pose du moment du modèle choisi: l'image de la boucle de son action. Les maillages des primitives fusionnées sont déjà
-/// construits (un par matière); la fusion douce se construit à la demande (une pose à la fois).
+/// construits (un par matière).
 #[allow(clippy::too_many_arguments)]
 fn update_model(
     mut commands: Commands,
@@ -416,32 +393,14 @@ fn update_model(
         if shown.poses[slot].as_ref() == Some(&wanted) {
             continue;
         }
-        // Les maillages à montrer, un par matière; la fusion douce n'en a qu'un, de matière moyenne.
-        let handles: merged::PoseMeshes = match look {
-            Look::SoftLit => {
-                let found = poses.soft.get(&wanted).map(|(handle, vertices, millis)| (handle.clone(), *vertices, *millis));
-                let (handle, vertices, millis) = found.unwrap_or_else(|| {
-                    let started = std::time::Instant::now();
-                    let mesh = smooth::smooth_merge(&source.parts(source.anim(family, index)), smooth::Blends::default());
-                    let vertices = mesh.count_vertices();
-                    let millis = started.elapsed().as_secs_f32() * 1000.0;
-                    let handle = meshes.add(mesh);
-                    poses.soft.insert(wanted.clone(), (handle.clone(), vertices, millis));
-                    (handle, vertices, millis)
-                });
-                poses.soft_stats = Some((vertices, millis));
-                let mut handles: merged::PoseMeshes = Default::default();
-                handles[merged::Surface::Mail.index()] = Some(handle);
-                handles
-            }
-            _ => poses.cache.get_or_build(&wanted, &mut meshes),
-        };
+        // Les maillages à montrer, un par matière (déjà construits au lancement).
+        let handles: merged::PoseMeshes = poses.cache.get_or_build(&wanted, &mut meshes);
         for surface in merged::Surface::ALL {
             let i = surface.index();
             let kind = match look {
                 Look::Flat => 0u8,
                 Look::Plain => 1,
-                Look::Lit | Look::SoftLit => 2,
+                Look::Lit => 2,
             };
             let material = poses
                 .materials
@@ -475,9 +434,7 @@ fn update_hud(viewer: Res<Viewer>, poses: Res<Poses>, diagnostics: Res<Diagnosti
     let own = entry.source.all_poses().len();
     let actions: Vec<&str> = Motion::ALL.iter().filter(|m| entry.source.families().contains(&m.family())).map(|m| m.label()).collect();
     let fusion = match viewer.fusion {
-        Fusion::Both => "à gauche: primitives fusionnées (le jeu)   à droite: fusion douce".to_string(),
-        Fusion::Primitives => "primitives fusionnées (le jeu)".to_string(),
-        Fusion::Soft => "fusion douce".to_string(),
+        Fusion::Primitives => "le rendu du jeu".to_string(),
         Fusion::Shaders => format!(
             "même modèle, de gauche à droite:\n  1 {}\n  2 {}\n  3 {}",
             Look::Flat.label(),
@@ -485,9 +442,8 @@ fn update_hud(viewer: Res<Viewer>, poses: Res<Poses>, diagnostics: Res<Diagnosti
             Look::Lit.label()
         ),
     };
-    let soft = poses.soft_stats.map_or(String::new(), |(vertices, millis)| format!("\nFusion douce de cette pose: {vertices} sommets, construite en {millis:.0} ms"));
     let text = format!(
-        "{}   [{}]   {} / {}   {fps:.0} FPS\n{fusion}\n\n{} poses pour ce modèle (actions: {})\n{} poses construites au lancement en {:.2} s: {:.1} Mo de sommets{soft}\n\nStick droit: tourner   L / R: zoom   croix: modèle / action   X: fusion   Y: rotation   Select: recentrer",
+        "{}   [{}]   {} / {}   {fps:.0} FPS\n{fusion}\n\n{} poses pour ce modèle (actions: {})\n{} poses construites au lancement en {:.2} s: {:.1} Mo de sommets\n\nStick droit: tourner   L / R: zoom   croix: modèle / action   X: fusion   Y: rotation   Select: recentrer",
         entry.label,
         viewer.motion.label(),
         viewer.model + 1,

@@ -34,9 +34,6 @@ mod decor3d;
 mod live3d;
 mod merged;
 mod prebake;
-// La fusion douce n'est pas encore dans le jeu: la visionneuse (`tools/model_viewer`) la montre.
-#[allow(dead_code)]
-mod smooth;
 mod pause;
 mod puzzle;
 mod settings;
