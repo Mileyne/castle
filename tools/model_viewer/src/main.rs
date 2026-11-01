@@ -122,8 +122,12 @@ struct Shown {
     pose: Option<(ModelSource, u8, u16)>,
 }
 
-#[derive(Asset, TypePath, AsBindGroup, Clone, Debug, Default)]
-struct ToonMaterial {}
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+struct ToonMaterial {
+    /// Multiplie la couleur (blanc: les couleurs du modèle).
+    #[uniform(0)]
+    tint: Vec4,
+}
 
 impl Material for ToonMaterial {
     fn fragment_shader() -> ShaderRef {
@@ -307,7 +311,7 @@ fn update_model(
         return;
     }
     let poses = &mut *poses;
-    let material = poses.material.get_or_insert_with(|| materials.add(ToonMaterial::default())).clone();
+    let material = poses.material.get_or_insert_with(|| materials.add(ToonMaterial { tint: Vec4::ONE })).clone();
     let source = &viewer.entries[viewer.model].source;
     let phase = (time.elapsed_secs() / viewer.motion.period()).fract();
     // Un objet, un motif ou une sortie n'ont que leur repos.

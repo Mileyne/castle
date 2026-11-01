@@ -29,22 +29,50 @@ impl Plugin for Live3dPlugin {
     }
 }
 
-/// Le matériau « toon » de tous les modèles: sans réglage, la couleur, l'éclat et le reflet viennent des sommets du maillage fusionné
-/// (voir `merged`), donc un seul matériau sert tout le monde.
-#[derive(Asset, TypePath, AsBindGroup, Clone, Debug, Default)]
-pub struct ToonMaterial {}
+/// Le matériau « toon » des modèles: la couleur, l'éclat et le reflet viennent des sommets du maillage fusionné (voir `merged`); seule la
+/// teinte (`ModelTint`) change d'un modèle à l'autre, donc il n'y a qu'une poignée de matériaux.
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+pub struct ToonMaterial {
+    /// Multiplie la couleur; son alpha rend le modèle translucide.
+    #[uniform(0)]
+    tint: Vec4,
+    blend: bool,
+}
 
 impl Material for ToonMaterial {
     fn fragment_shader() -> ShaderRef {
         "shaders/toon.wesl".into()
     }
+
+    fn alpha_mode(&self) -> AlphaMode {
+        if self.blend { AlphaMode::Blend } else { AlphaMode::Opaque }
+    }
+}
+
+/// La teinte d'un modèle (celle que le sprite portait): un héros à terre est translucide, un héros sous régénération pulse en vert,
+/// un escalier fermé est grisé... Absente, le modèle garde ses couleurs.
+#[derive(Component, Clone, Copy, PartialEq, Debug)]
+pub struct ModelTint(pub Color);
+
+/// La teinte quantifiée (un octet par canal, les valeurs au-dessus de 1 sont gardées jusqu'à 2): la clé d'un matériau.
+type TintKey = [u8; 4];
+
+const WHITE: TintKey = [127, 127, 127, 255];
+
+fn tint_key(tint: Option<&ModelTint>) -> TintKey {
+    let Some(ModelTint(color)) = tint else {
+        return WHITE;
+    };
+    let color = color.to_srgba();
+    let byte = |value: f32| (value.clamp(0.0, 2.0) * 127.0).round() as u8;
+    [byte(color.red), byte(color.green), byte(color.blue), (color.alpha.clamp(0.0, 1.0) * 255.0).round() as u8]
 }
 
 /// Les maillages fusionnés de toutes les poses construites, et le matériau commun.
 #[derive(Resource, Default)]
 pub struct Caches {
     pub poses: PoseCache,
-    material: Option<Handle<ToonMaterial>>,
+    materials: std::collections::HashMap<TintKey, Handle<ToonMaterial>>,
 }
 
 /// Un modèle 3D: ce qu'il montre, sa place dans la scène, et le maillage de sa pose du moment.
@@ -55,13 +83,11 @@ pub struct Live3d {
     /// L'entité qui porte le maillage fusionné, et la pose qu'il montre.
     body: Option<Entity>,
     shown: Option<(ModelSource, u8, u16)>,
+    /// La teinte du matériau du corps.
+    tint: TintKey,
     /// Unités du monde par mètre du modèle.
     scale: f32,
 }
-
-/// Un personnage ou un objet dont le modèle est dans la scène: son sprite n'est plus dessiné.
-#[derive(Component)]
-pub struct Direct3d;
 
 fn spawn_root(commands: &mut Commands) -> Entity {
     commands.spawn((Transform::default(), Visibility::default(), RenderLayers::layer(crate::decor3d::LAYER))).id()
@@ -69,7 +95,7 @@ fn spawn_root(commands: &mut Commands) -> Entity {
 
 fn attach(commands: &mut Commands, entity: Entity, source: ModelSource, scale: f32) {
     let root = spawn_root(commands);
-    commands.entity(entity).insert((Direct3d, Live3d { source, root, body: None, shown: None, scale }));
+    commands.entity(entity).insert(Live3d { source, root, body: None, shown: None, tint: WHITE, scale });
 }
 
 /// Le modèle d'une classe de héros.
@@ -184,7 +210,7 @@ fn release(removed: On<Remove<Live3d>>, models: Query<&Live3d>, mut commands: Co
 fn animate(
     mut commands: Commands,
     time: Res<Time>,
-    mut models: Query<(Entity, &mut Live3d, Option<&WalkCycle>, Option<&crate::Facing>, Option<&Prop>, Option<&LevelExit>, &InheritedVisibility)>,
+    mut models: Query<(Entity, &mut Live3d, Option<&WalkCycle>, Option<&crate::Facing>, Option<&Prop>, Option<&LevelExit>, Option<&ModelTint>, &InheritedVisibility)>,
     mut transforms: Query<&mut Transform>,
     mut shown: Query<&mut Visibility>,
     mut caches: ResMut<Caches>,
@@ -192,8 +218,7 @@ fn animate(
     mut materials: ResMut<Assets<ToonMaterial>>,
 ) {
     let caches = &mut *caches;
-    let material = caches.material.get_or_insert_with(|| materials.add(ToonMaterial::default())).clone();
-    for (entity, mut live, cycle, facing, prop, exit, visible) in &mut models {
+    for (entity, mut live, cycle, facing, prop, exit, tint, visible) in &mut models {
         let anim = match cycle {
             Some(cycle) => {
                 let (kind, t) = cycle.pose;
@@ -238,6 +263,20 @@ fn animate(
                 *visibility = wanted;
             }
         }
+        // La teinte: un matériau par teinte, partagés.
+        let tint = tint_key(tint);
+        let material = caches
+            .materials
+            .entry(tint)
+            .or_insert_with(|| {
+                let channel = |byte: u8| f32::from(byte) / 127.0;
+                materials.add(ToonMaterial { tint: Vec4::new(channel(tint[0]), channel(tint[1]), channel(tint[2]), f32::from(tint[3]) / 255.0), blend: tint[3] < 255 })
+            })
+            .clone();
+        if let (Some(body), true) = (live.body, live.tint != tint) {
+            commands.entity(body).insert(MeshMaterial3d(material.clone()));
+            live.tint = tint;
+        }
         // Le maillage de la pose: construit à l'avance (`prebake`), sinon à la demande.
         let (family, index) = live.source.pose(anim);
         let wanted = (live.source.clone(), family, index);
@@ -254,6 +293,7 @@ fn animate(
                     .spawn((Mesh3d(handle), MeshMaterial3d(material.clone()), ChildOf(live.root), RenderLayers::layer(crate::decor3d::LAYER)))
                     .id();
                 live.body = Some(body);
+                live.tint = tint;
             }
         }
         live.shown = Some(wanted);

@@ -4,7 +4,7 @@
 
 use std::f32::consts::TAU;
 
-use glam::{Mat3, Vec3};
+use glam::Vec3;
 
 use crate::heroes::{Pose, joints};
 use crate::monsters_more::{orc, orc_dims, wolf};

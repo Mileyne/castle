@@ -1,10 +1,10 @@
-//! Objectif du niveau: affichage en haut de l'écran, et sprites des reliques et des prisonniers.
+//! Objectif du niveau: affichage en haut de l'écran, et modèles des reliques et des prisonniers.
 
 use bevy::{color::palettes::css, prelude::*};
-use bevy::sprite::Anchor;
 use castle_shared::{Captive, Guide, Position, Quest, Relic};
 
-use crate::art::{Art, Prop, SPRITE_SIZE, object};
+use crate::art::{Prop, object};
+use crate::live3d::ModelTint;
 use crate::i18n::Tr;
 use crate::ui::ui_font;
 
@@ -91,28 +91,27 @@ fn update_quest_hud(
     }
 }
 
-/// Donne un sprite aux reliques (provisoire) et aux prisonniers (un prisonnier dans une cage).
+/// Habille les reliques (une clé teintée) et les prisonniers (un prisonnier dans une cage): ce sont des modèles 3D (voir `live3d`).
 fn dress_quest_entities(
     mut commands: Commands,
-    art: Res<Art>,
     relics: Query<(Entity, &Position), Added<Relic>>,
     captives: Query<(Entity, &Position, Has<Guide>), Added<Captive>>,
     guides: Query<(Entity, &Position), (Added<Guide>, Without<Captive>)>,
 ) {
-    let size = Vec2::splat(SPRITE_SIZE);
     for (entity, pos) in &relics {
-        let (mut sprite, anchor) = art.prop_sprite(object::KEY, 0, size);
-        sprite.color = Color::srgb(0.55, 1.0, 1.0);
-        commands.entity(entity).insert((sprite, Prop(object::KEY), anchor, Transform::from_translation(pos.0.extend(0.6))));
+        commands.entity(entity).insert((
+            Prop(object::KEY),
+            ModelTint(Color::srgb(0.55, 1.0, 1.0)),
+            Visibility::default(),
+            Transform::from_translation(pos.0.extend(0.6)),
+        ));
     }
     for (entity, pos, is_guide) in &captives {
         let row = if is_guide { object::SAMELIA_CAGED } else { object::CAPTIVE };
-        let (sprite, anchor) = art.prop_sprite(row, 0, size);
-        commands.entity(entity).insert((sprite, Prop(row), anchor, Transform::from_translation(pos.0.extend(0.6))));
+        commands.entity(entity).insert((Prop(row), Visibility::default(), Transform::from_translation(pos.0.extend(0.6))));
     }
     for (entity, pos) in &guides {
-        let (sprite, anchor) = art.prop_sprite(object::SAMELIA, 0, size);
-        commands.entity(entity).insert((sprite, Prop(object::SAMELIA), anchor, Transform::from_translation(pos.0.extend(0.6))));
+        commands.entity(entity).insert((Prop(object::SAMELIA), Visibility::default(), Transform::from_translation(pos.0.extend(0.6))));
     }
 }
 
@@ -120,17 +119,13 @@ fn dress_quest_entities(
 const DEPARTURE: f32 = 2.0;
 const HALO_RADIUS: f32 = 46.0;
 
-/// Samélia qui s'en va: son sprite reste un instant, de plus en plus lumineux, au centre d'un halo qui s'élargit.
+/// Samélia qui s'en va: son modèle reste un instant, de plus en plus lumineux, au centre d'un halo qui s'élargit.
 #[derive(Component)]
 struct Departing(f32);
 
-fn on_guide_gone(
-    gone: On<Remove<Guide>>,
-    guides: Query<(&Sprite, &Anchor, &Transform), Without<Captive>>,
-    mut commands: Commands,
-) {
-    if let Ok((sprite, anchor, transform)) = guides.get(gone.entity) {
-        commands.spawn((Departing(0.0), sprite.clone(), *anchor, *transform));
+fn on_guide_gone(gone: On<Remove<Guide>>, guides: Query<&Transform, (With<Guide>, Without<Captive>)>, mut commands: Commands) {
+    if let Ok(transform) = guides.get(gone.entity) {
+        commands.spawn((Departing(0.0), Prop(object::SAMELIA), Visibility::default(), *transform));
     }
 }
 
@@ -138,18 +133,18 @@ fn fade_departed_guides(
     mut commands: Commands,
     time: Res<Time>,
     mut gizmos: Gizmos,
-    mut departing: Query<(Entity, &mut Departing, &mut Sprite, &Transform)>,
+    mut departing: Query<(Entity, &mut Departing, &Transform)>,
 ) {
-    for (entity, mut departure, mut sprite, transform) in &mut departing {
+    for (entity, mut departure, transform) in &mut departing {
         departure.0 += time.delta_secs();
         let t = (departure.0 / DEPARTURE).clamp(0.0, 1.0);
         if t >= 1.0 {
             commands.entity(entity).despawn();
             continue;
         }
-        // Le sprite blanchit puis s'efface; des anneaux dorés s'élargissent autour de sa taille.
+        // Le modèle blanchit puis s'efface; des anneaux dorés s'élargissent autour de sa taille.
         let glow = (t * 2.0).min(1.0);
-        sprite.color = Color::srgba(1.0 + glow, 1.0 + glow, 1.0 + 0.6 * glow, 1.0 - t * t);
+        commands.entity(entity).insert(ModelTint(Color::srgba(1.0 + glow, 1.0 + glow, 1.0 + 0.6 * glow, 1.0 - t * t)));
         let center = Isometry2d::from_translation(transform.translation.truncate() + Vec2::new(0.0, 12.0));
         for k in 0..4 {
             let phase = (t * 1.4 - k as f32 * 0.15).clamp(0.0, 1.0);

@@ -5,10 +5,13 @@ import bevy_pbr::{
     render::mesh_view_bindings::view,
 };
 
+// Multiplie la couleur du modèle; son alpha le rend translucide.
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> tint: vec4<f32>;
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // La couleur (sRGB) vient des sommets; l'éclat et le reflet partagent leur canal alpha (2 + reflet pour une pièce qui brille).
-    let base_color = in.color.rgb;
+    let base_color = in.color.rgb * tint.rgb;
     let glow = select(0.0, 1.0, in.color.a >= 2.0);
     let shine = in.color.a - 2.0 * glow;
     let n = normalize(in.world_normal);
@@ -36,5 +39,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
     // Les couleurs de sprite_forge sont déjà en sRGB; la cible attend du linéaire.
-    return vec4<f32>(pow(rgb, vec3<f32>(2.2)), 1.0);
+    return vec4<f32>(pow(rgb, vec3<f32>(2.2)), tint.a);
 }

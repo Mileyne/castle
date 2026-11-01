@@ -28,7 +28,6 @@ use bevy::window::PrimaryWindow;
 use castle_shared::{Expedition, Projectile, Region, Room, TILE_SIZE, Tile};
 
 use crate::LocalPlayer;
-use crate::live3d::Direct3d;
 use crate::art::{Prop, Stain, TileMark, WorldTile, object};
 
 /// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2). Le stick droit de la manette principale la règle.
@@ -79,7 +78,7 @@ impl Plugin for Decor3dPlugin {
             )
             .add_systems(
                 Update,
-                mirror_sprites.after(crate::art::AnimateCharacters).after(crate::art::y_sort).after(crate::art::animate_props).after(follow_camera),
+                mirror_sprites.after(crate::art::AnimateCharacters).after(crate::art::animate_props).after(follow_camera),
             );
     }
 }
@@ -544,7 +543,7 @@ fn mirror_sprites(
             Option<&Anchor>,
             &InheritedVisibility,
             Option<&mut Mirror>,
-            (Has<WorldTile>, Has<Stain>, Has<Direct3d>),
+            (Has<WorldTile>, Has<Stain>),
             (Option<&Prop>, Option<&Projectile>, Option<&crate::Lift>),
         ),
         (Without<TileMark>, Without<ChildOf>, Without<Billboard>),
@@ -566,14 +565,7 @@ fn mirror_sprites(
         }
     }
     let quad = quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0))).clone();
-    for (entity, mut sprite, transform, anchor, visible, mirror, (decal, stain, direct), (prop, projectile, lift)) in &mut sources {
-        // Son modèle 3D est dans la scène: le sprite à plat ne doit plus être dessiné, et n'a pas de panneau.
-        if direct {
-            if sprite.custom_size != Some(Vec2::ZERO) {
-                sprite.custom_size = Some(Vec2::ZERO);
-            }
-            continue;
-        }
+    for (entity, mut sprite, transform, anchor, visible, mirror, (decal, stain), (prop, projectile, lift)) in &mut sources {
         // La taille d'origine: celle que le sprite porte, ou celle que nous avons gardée quand nous l'avons mis à zéro.
         let size = match (sprite.custom_size, mirror.as_deref()) {
             (Some(size), _) if size != Vec2::ZERO => size,

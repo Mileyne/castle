@@ -14,7 +14,8 @@ use bevy_replicon_renet::{
 };
 use castle_shared::*;
 
-use art::{Art, PROP_ANCHOR, Prop, SPRITE_SIZE, WalkCycle, YSort, direction_index, monster_scale, object, projectile};
+use art::{Art, Prop, SPRITE_SIZE, WalkCycle, object, projectile};
+use live3d::ModelTint;
 
 mod art;
 mod boss;
@@ -240,7 +241,6 @@ pub fn run() {
             Update,
             (
                 send_input.run_if(in_state(ClientState::Connected)).run_if(level_intro::player_can_act),
-                art::y_sort.after(smooth_positions),
                 layer_projectiles.after(smooth_positions),
                 update_exit,
                 (dress_new_entities, fade_downed).chain(),
@@ -477,44 +477,23 @@ fn dress_new_entities(
     portcullises: Query<(Entity, &Position, &Portcullis), Added<Portcullis>>,
     landmarks: Query<(Entity, &Position, &Landmark), Added<Landmark>>,
 ) {
-    // Un objet animé: sprite de la ligne `row` de la planche, ancré au sol.
+    // Un objet animé: sa ligne de planche, et un sprite sauf s'il a un modèle 3D (voir `live3d`), qui le dessine alors seul.
     let prop = |row: usize| {
         let (sprite, anchor) = art.prop_sprite(row, 0, Vec2::splat(SPRITE_SIZE));
         (sprite, Prop(row), anchor)
     };
-    for (entity, pos, class) in &players {
-        // Au départ le héros regarde vers le sud (vers le spectateur).
-        let class = class.copied().unwrap_or_default();
-        let (sprite, anchor) = art.hero_sprite(class, direction_index(Vec2::NEG_Y), 0, Vec2::splat(SPRITE_SIZE));
-        commands.entity(entity).insert((
-            sprite,
-            anchor,
-            YSort(0.00004, 6.0),
-            WalkCycle::default(),
-            Transform::from_translation(pos.0.extend(1.0)),
-        ));
+    // Un héros ou un monstre n'a pas de sprite: son modèle 3D le dessine. Il garde son cycle de marche, qui choisit sa pose.
+    for (entity, pos, _) in &players {
+        commands.entity(entity).insert((Visibility::default(), WalkCycle::default(), Transform::from_translation(pos.0.extend(1.0))));
     }
-    for (entity, pos, monster) in &monsters {
-        let (sprite, anchor) = art.monster_sprite(monster.0, direction_index(Vec2::NEG_Y), 0, Vec2::splat(SPRITE_SIZE * monster_scale(monster.0)));
-        commands.entity(entity).insert((
-            sprite,
-            anchor,
-            YSort(0.0, 0.0),
-            WalkCycle::default(),
-            Transform::from_translation(pos.0.extend(1.0)),
-        ));
+    for (entity, pos, _) in &monsters {
+        commands.entity(entity).insert((Visibility::default(), WalkCycle::default(), Transform::from_translation(pos.0.extend(1.0))));
     }
     for (entity, pos) in &generators {
-        commands.entity(entity).insert((
-            prop(object::GENERATOR),
-            Transform::from_translation(pos.0.extend(0.5)),
-        ));
+        commands.entity(entity).insert((Prop(object::GENERATOR), Visibility::default(), Transform::from_translation(pos.0.extend(0.5))));
     }
     for (entity, pos) in &turrets {
-        commands.entity(entity).insert((
-            prop(object::TURRET),
-            Transform::from_translation(pos.0.extend(0.8)),
-        ));
+        commands.entity(entity).insert((Prop(object::TURRET), Visibility::default(), Transform::from_translation(pos.0.extend(0.8))));
     }
     for (entity, pos, pickup) in &pickups {
         let index = match pickup.0 {
@@ -526,10 +505,7 @@ fn dress_new_entities(
             PickupKind::GearPart => object::GEAR_PART,
             PickupKind::TargetDisc => object::TARGET_DISC,
         };
-        commands.entity(entity).insert((
-            prop(index),
-            Transform::from_translation(pos.0.extend(0.6)),
-        ));
+        commands.entity(entity).insert((Prop(index), Visibility::default(), Transform::from_translation(pos.0.extend(0.6))));
     }
     for (entity, pos, interactable) in &interactables {
         // La porte royale est dessinée par `doors`. Les panneaux sont dans le mur: vus de face, centrés sur leur tuile
@@ -563,22 +539,14 @@ fn dress_new_entities(
                 }
             });
     }
-    for (entity, pos, landmark) in &landmarks {
-        let (sprite, anchor) = art.landmark_sprite(landmark.0);
-        commands.entity(entity).insert((sprite, anchor, YSort(0.0, 0.0), Transform::from_translation(pos.0.extend(1.0))));
+    for (entity, pos, _) in &landmarks {
+        commands.entity(entity).insert((Visibility::default(), Transform::from_translation(pos.0.extend(1.0))));
     }
-    for (entity, pos, exit) in &exits {
-        commands.entity(entity).insert((
-            art.exits.sprite_sized(art::exit_index(art::exit_row(exit.kind, exit.open), 0), Vec2::splat(art::EXIT_SIZE)),
-            PROP_ANCHOR,
-            Transform::from_translation(pos.0.extend(0.3)),
-        ));
+    for (entity, pos, _) in &exits {
+        commands.entity(entity).insert((Visibility::default(), Transform::from_translation(pos.0.extend(0.3))));
     }
     for (entity, pos) in &traps {
-        commands.entity(entity).insert((
-            prop(object::TRAP_ARMED),
-            Transform::from_translation(pos.0.extend(0.3)),
-        ));
+        commands.entity(entity).insert((Prop(object::TRAP_ARMED), Visibility::default(), Transform::from_translation(pos.0.extend(0.3))));
     }
     for (entity, pos, door) in &doors {
         // Une porte fait deux tuiles, côte à côte ou l'une sur l'autre selon le couloir.
@@ -620,30 +588,23 @@ fn dress_new_entities(
     }
 }
 
-/// La sortie change de dessin quand elle s'ouvre (pont réparé, barrière ouverte...) et vacille (torches, bannières); l'escalier,
-/// qui reste le même, est grisé tant qu'il est fermé.
-fn update_exit(time: Res<Time>, mut exits: Query<(&LevelExit, &mut Sprite)>) {
-    let frame = (time.elapsed_secs() * 12.0) as usize % art::EXIT_FRAMES;
-    for (exit, mut sprite) in &mut exits {
-        let index = art::exit_index(art::exit_row(exit.kind, exit.open), frame);
-        if let Some(atlas) = sprite.texture_atlas.as_mut() {
-            if atlas.index != index {
-                atlas.index = index;
-            }
-        }
+/// La sortie change de modèle quand elle s'ouvre (pont réparé, barrière ouverte...), géré par `live3d`; l'escalier, qui reste le même,
+/// est grisé tant qu'il est fermé.
+fn update_exit(mut commands: Commands, exits: Query<(Entity, &LevelExit, Option<&ModelTint>)>) {
+    for (entity, exit, tint) in &exits {
         let dim = exit.kind == ExitKind::Stairs && !exit.open;
         let color = if dim { Color::srgb(0.5, 0.5, 0.58) } else { Color::WHITE };
-        if sprite.color != color {
-            sprite.color = color;
+        if tint.map(|tint| tint.0) != Some(color) {
+            commands.entity(entity).insert(ModelTint(color));
         }
     }
 }
 
 /// Un héros à terre devient translucide.
 /// Un héros à terre est translucide; sous potion de régénération il pulse en vert.
-fn fade_downed(time: Res<Time>, mut players: Query<(&mut Sprite, Has<Downed>, Has<Regenerating>), With<Player>>) {
+fn fade_downed(mut commands: Commands, time: Res<Time>, mut players: Query<(Entity, Option<&ModelTint>, Has<Downed>, Has<Regenerating>), With<Player>>) {
     let pulse = 0.5 + 0.5 * (time.elapsed_secs() * 6.0).sin();
-    for (mut sprite, downed, regenerating) in &mut players {
+    for (entity, tint, downed, regenerating) in &mut players {
         let color = if downed {
             Color::WHITE.with_alpha(0.35)
         } else if regenerating {
@@ -651,8 +612,8 @@ fn fade_downed(time: Res<Time>, mut players: Query<(&mut Sprite, Has<Downed>, Ha
         } else {
             Color::WHITE
         };
-        if sprite.color != color {
-            sprite.color = color;
+        if tint.map(|tint| tint.0) != Some(color) {
+            commands.entity(entity).insert(ModelTint(color));
         }
     }
 }

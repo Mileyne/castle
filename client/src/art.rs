@@ -11,14 +11,6 @@ use bevy::{
 };
 use castle_shared::*;
 
-/// Planche des héros (rendue par `tools/sprite_forge`): une ligne par classe et par direction (8),
-/// 51 images par ligne, lues à 25 images par seconde: 25 de repos (respiration, cycle d'une seconde), 16 de marche puis
-/// 10 d'attaque (0,4 s).
-pub const HERO_IDLE_FRAMES: usize = 25;
-pub const HERO_WALK_FRAMES: usize = 16;
-pub const HERO_ATTACK_FRAMES: usize = 10;
-/// Images par ligne, pour les héros comme pour les ennemis (repos, marche, attaque).
-const HERO_FRAMES: usize = HERO_IDLE_FRAMES + HERO_WALK_FRAMES + HERO_ATTACK_FRAMES;
 /// Cadence de toutes les animations lues à l'horloge: repos, battement d'ailes, objets (images par seconde).
 const ANIMATION_FPS: f32 = 25.0;
 /// Durée du geste d'une attaque, en secondes (la frappe tombe vers 60 % du geste).
@@ -27,9 +19,6 @@ const ATTACK_DURATION: f32 = 0.4;
 const MONSTER_ATTACK_DURATION: f32 = 0.4;
 /// Côté d'une case d'un personnage, d'un monstre ou d'un objet dans sa planche (voir `DETAIL` dans `tools/sprite_forge`).
 
-/// Colonnes des planches de personnages et de monstres: une direction fait trois lignes (voir `tools/sprite_forge`).
-const SHEET_COLUMNS: u32 = 17;
-const SHEET_ROWS: u32 = 8 * HERO_FRAMES as u32 / SHEET_COLUMNS;
 /// Taille d'affichage d'un héros, d'un ennemi ou d'un objet, en unités du monde (la case fait 96 px d'art).
 pub const SPRITE_SIZE: f32 = 32.0;
 /// Les ennemis et les objets partagent le découpage de la planche des héros pour les ennemis (8 directions,
@@ -121,8 +110,6 @@ impl Atlas {
 #[derive(Resource, Clone)]
 pub struct Art {
     pub tiles: Atlas,
-    /// Sorties de niveau, dessinées en grand (cases de deux fois `CELL` pixels).
-    pub exits: Atlas,
     pub projectiles: Atlas,
     pub fx: Atlas,
     pub decals: Atlas,
@@ -211,36 +198,10 @@ fn prop_base_anchor(row: usize) -> Anchor {
 }
 
 impl Art {
-    /// Sprite d'un héros (direction et image de sa planche), affiché à la taille donnée, et son ancrage.
-    pub fn hero_sprite(&self, class: HeroClass, direction: usize, frame: usize, size: Vec2) -> (Sprite, Anchor) {
-        self.sheets.sprite("heroes", &file_name(class), sheet_index(direction, frame), size, HERO_ANCHOR)
-    }
-
-    pub fn monster_sprite(&self, kind: MonsterKind, direction: usize, frame: usize, size: Vec2) -> (Sprite, Anchor) {
-        self.sheets.sprite("monsters", &file_name(kind), sheet_index(direction, frame), size, PROP_ANCHOR)
-    }
-
-    /// Sprite d'un grand motif (arbre, colonne, fontaine...) et son ancrage: une image unique dont le pied est l'origine.
-    pub fn landmark_sprite(&self, kind: LandmarkKind) -> (Sprite, Anchor) {
-        let size = 64.0 * kind.display_scale();
-        let sprite = Sprite { image: self.sheets.image("landmarks", kind.file()), custom_size: Some(Vec2::splat(size)), ..default() };
-        (sprite, PROP_ANCHOR)
-    }
-
     /// Sprite d'un objet (ligne `object::*`, image d'animation) et son ancrage.
     pub fn prop_sprite(&self, row: usize, frame: usize, size: Vec2) -> (Sprite, Anchor) {
         self.sheets.sprite("objects", object::FILES[row], frame, size, prop_base_anchor(row))
     }
-}
-
-/// Nom du fichier d'une planche: le nom du personnage ou du monstre en minuscules (comme `tools/sprite_forge`).
-fn file_name(name: impl std::fmt::Debug) -> String {
-    format!("{name:?}").to_lowercase()
-}
-
-/// Case d'une direction et d'une image dans la planche d'un personnage ou d'un monstre.
-fn sheet_index(direction: usize, frame: usize) -> usize {
-    direction * HERO_FRAMES + frame
 }
 
 /// Objets: leur numéro est leur place dans `PROPS` (`tools/sprite_forge`); chacun a sa propre planche.
@@ -304,13 +265,8 @@ pub mod object {
     ];
 }
 
-/// Les sorties se dessinent en grand sur leur propre planche: cases de deux fois la case d'un personnage, dix images d'animation,
-/// une ligne par état.
-pub const EXIT_FRAMES: usize = 10;
-/// Taille d'affichage d'une sortie, en unités du monde (quatre tuiles).
-pub const EXIT_SIZE: f32 = 64.0;
-
-/// La ligne de la planche des sorties qui dessine une sortie, selon son genre et si elle est ouverte.
+/// Les sorties de niveau sont des modèles 3D (voir `live3d`).
+/// La ligne de modèle qui dessine une sortie, selon son genre et si elle est ouverte (dans l'ordre de `sprite_forge::live_exit`).
 pub fn exit_row(kind: ExitKind, open: bool) -> usize {
     match (kind, open) {
         (ExitKind::Stairs, _) => 0,
@@ -322,11 +278,6 @@ pub fn exit_row(kind: ExitKind, open: bool) -> usize {
         (ExitKind::Drawbridge, true) => 6,
         (ExitKind::Hidden, _) => 0,
     }
-}
-
-/// Case de la planche des sorties pour une ligne et une image d'animation.
-pub fn exit_index(row: usize, frame: usize) -> usize {
-    row * EXIT_FRAMES + frame
 }
 
 /// Les grosses bêtes sont dessinées un peu plus grandes que les autres (rapport à la taille d'un sprite ordinaire).
@@ -363,10 +314,6 @@ pub fn class_row(class: HeroClass) -> usize {
     }
 }
 
-/// Les héros font 96 px pour une boîte de collision de 12 unités: le sprite est remonté pour que
-/// les pieds, situés vers le bas de la case, restent au bas de la boîte.
-pub const HERO_ANCHOR: Anchor = Anchor(Vec2::new(0.0, -0.228));
-
 /// Direction parmi les huit de la planche (0 = est, puis sens trigonométrique, 6 = sud).
 pub fn direction_index(facing: Vec2) -> usize {
     ((facing.to_angle() / FRAC_PI_4).round() as i32).rem_euclid(8) as usize
@@ -379,26 +326,6 @@ pub const PROP_ANCHOR: Anchor = Anchor(Vec2::new(0.0, -0.417));
 
 /// Les panneaux de mur sont dessinés centrés dans leur case (vus de face), pas posés au sol.
 pub const WALL_ANCHOR: Anchor = Anchor(Vec2::ZERO);
-
-/// Une entité dessinée devant ou derrière les autres selon sa position vers le haut ou le bas de l'écran (les héros, les monstres
-/// et les grands motifs): celle qui est plus bas est devant. Le premier nombre est une petite avance pour départager deux entités au même
-/// endroit; le second, de combien l'origine de l'entité est au-dessus de ses pieds (6 pour un héros, dont l'origine est le centre de sa
-/// boîte de collision): c'est la hauteur des pieds qui compte, pas celle de l'origine.
-#[derive(Component)]
-pub struct YSort(pub f32, pub f32);
-
-/// Profondeur de l'ensemble des entités triées (voir `YSort`) et pente: un monde de 2 000 unités de haut reste entre 0,8 et 1,2.
-const SORT_DEPTH: f32 = 1.0;
-const SORT_SLOPE: f32 = 0.0002;
-
-pub fn y_sort(mut sorted: Query<(&mut Transform, &YSort)>) {
-    for (mut transform, sort) in &mut sorted {
-        let z = SORT_DEPTH - (transform.translation.y - sort.1) * SORT_SLOPE + sort.0;
-        if (transform.translation.z - z).abs() > 1e-6 {
-            transform.translation.z = z;
-        }
-    }
-}
 
 /// Ligne d'objet affichée par une entité: l'animation (impulsions, rotation) choisit l'image.
 #[derive(Component)]
@@ -441,10 +368,10 @@ fn load_set(assets: &AssetServer, layouts: &mut Assets<TextureAtlasLayout>, them
     };
     info!("sprites: cases de {cell} px ({sprite_folder})");
     let mut sheet_layouts = std::collections::HashMap::new();
-    for &(dir, name, x, y, w, h) in metas {
-        // Personnages et monstres: huit directions de `HERO_FRAMES` images sur `SHEET_COLUMNS` colonnes; objets: une ligne.
-        let (columns, rows) = if dir == "objects" { (PROP_FRAMES as u32, 1) } else { (SHEET_COLUMNS, SHEET_ROWS) };
-        let layout = layouts.add(TextureAtlasLayout::from_grid(UVec2::new(w, h), columns, rows, None, None));
+    for &(dir, name, x, y, w, h) in metas.iter().filter(|meta| meta.0 == "objects") {
+        // Les objets (panneaux de mur, portes, herses): une ligne de `PROP_FRAMES` images. Les personnages, les monstres, les motifs et
+        // les sorties sont des modèles 3D (voir `live3d`).
+        let layout = layouts.add(TextureAtlasLayout::from_grid(UVec2::new(w, h), PROP_FRAMES as u32, 1, None, None));
         sheet_layouts.insert(format!("{dir}/{name}"), (layout, SheetCrop { x, y, w, h }));
     }
     let sheets = Sheets {
@@ -471,7 +398,6 @@ fn load_set(assets: &AssetServer, layouts: &mut Assets<TextureAtlasLayout>, them
     };
     Art {
         tiles: atlas("tiles.png", TILE_COLUMNS as u32, TILE_ROWS, TILE_CELL, false),
-        exits: atlas(&format!("{}exits.basis", if lite { "lite/" } else { "" }), EXIT_FRAMES as u32, 7, cell * 2, true),
         projectiles: atlas("projectiles.png", 4, 1, 64, true),
         fx: atlas("fx.png", 2, 1, 96, true),
         decals: atlas("decals.png", 13, 1, 128, true),
@@ -601,7 +527,6 @@ fn run_transition(
         let new = &*art;
         let pairs: Vec<(&Atlas, &Atlas)> = vec![
             (&old.tiles, &new.tiles),
-            (&old.exits, &new.exits),
             (&old.projectiles, &new.projectiles),
             (&old.fx, &new.fx),
             (&old.decals, &new.decals),
@@ -1054,14 +979,11 @@ pub(crate) fn rebuild_world(
     commands.insert_resource(dungeon.layout);
 }
 
-/// Animation des héros: la ligne de la planche suit la direction du regard (8 directions), et le cycle de
-/// marche avance avec la distance parcourue; à l'arrêt, le héros respire.
-fn animate_heroes(
-    time: Res<Time>,
-    mut heroes: Query<(&mut Sprite, &Transform, &Facing, &Strikes, &mut WalkCycle), With<HeroClass>>,
-) {
+/// Animation des héros: le cycle de marche avance avec la distance parcourue, un coup lance le geste de l'arme, et la pose du modèle 3D
+/// (repos, marche, coup) en découle (voir `live3d`); à l'arrêt, le héros respire.
+fn animate_heroes(time: Res<Time>, mut heroes: Query<(&Transform, &Strikes, &mut WalkCycle), With<HeroClass>>) {
     let dt = time.delta_secs();
-    for (mut sprite, transform, facing, strikes, mut cycle) in &mut heroes {
+    for (transform, strikes, mut cycle) in &mut heroes {
         let here = transform.translation.truncate();
         let moved = cycle.last.map_or(0.0, |last| last.distance(here));
         cycle.last = Some(here);
@@ -1076,39 +998,23 @@ fn animate_heroes(
             cycle.attack_elapsed = Some(0.0);
         }
         cycle.last_strikes = Some(strikes.0);
-        let attack_frame = cycle.attack_elapsed.map(|elapsed| elapsed / ATTACK_DURATION).filter(|p| *p < 1.0);
-        cycle.attack_elapsed = attack_frame.map(|p| p * ATTACK_DURATION + dt);
-        let frame = if let Some(progress) = attack_frame {
-            HERO_IDLE_FRAMES + HERO_WALK_FRAMES + ((progress * HERO_ATTACK_FRAMES as f32) as usize).min(HERO_ATTACK_FRAMES - 1)
-        } else if cycle.moving_for > 0.0 {
-            HERO_IDLE_FRAMES + (cycle.phase * HERO_WALK_FRAMES as f32) as usize % HERO_WALK_FRAMES
-        } else {
-            (time.elapsed_secs() * ANIMATION_FPS) as usize % HERO_IDLE_FRAMES
-        };
-        cycle.pose = if let Some(progress) = attack_frame {
+        let attack_progress = cycle.attack_elapsed.map(|elapsed| elapsed / ATTACK_DURATION).filter(|p| *p < 1.0);
+        cycle.attack_elapsed = attack_progress.map(|p| p * ATTACK_DURATION + dt);
+        cycle.pose = if let Some(progress) = attack_progress {
             (PoseKind::Attack, progress)
         } else if cycle.moving_for > 0.0 {
             (PoseKind::Walk, cycle.phase)
         } else {
             (PoseKind::Idle, time.elapsed_secs().fract())
         };
-        let index = sheet_index(direction_index(facing.0), frame);
-        if let Some(atlas) = sprite.texture_atlas.as_mut() {
-            if atlas.index != index {
-                atlas.index = index;
-            }
-        }
     }
 }
 
-/// Animation des monstres: la direction suit leur déplacement (ils n'ont pas de regard répliqué), le squelette
-/// marche au rythme de la distance parcourue et la chauve-souris bat des ailes en permanence.
-fn animate_monsters(
-    time: Res<Time>,
-    mut monsters: Query<(&mut Sprite, &Position, &Transform, &Monster, &Strikes, &mut WalkCycle)>,
-) {
+/// Animation des monstres: la direction suit leur déplacement (ils n'ont pas de regard répliqué), le cycle de marche avance avec la
+/// distance parcourue et la chauve-souris bat des ailes en permanence.
+fn animate_monsters(time: Res<Time>, mut monsters: Query<(&Position, &Transform, &Monster, &Strikes, &mut WalkCycle)>) {
     let dt = time.delta_secs();
-    for (mut sprite, pos, transform, monster, strikes, mut cycle) in &mut monsters {
+    for (pos, transform, monster, strikes, mut cycle) in &mut monsters {
         let delta = pos.0 - transform.translation.truncate();
         let here = transform.translation.truncate();
         let moved = cycle.last.map_or(0.0, |last| last.distance(here));
@@ -1129,15 +1035,6 @@ fn animate_monsters(
         cycle.last_strikes = Some(strikes.0);
         let attack_progress = cycle.attack_elapsed.map(|elapsed| elapsed / MONSTER_ATTACK_DURATION).filter(|p| *p < 1.0);
         cycle.attack_elapsed = attack_progress.map(|p| p * MONSTER_ATTACK_DURATION + dt);
-        let frame = match monster.0 {
-            _ if attack_progress.is_some() => {
-                let progress = attack_progress.unwrap_or(0.0);
-                HERO_IDLE_FRAMES + HERO_WALK_FRAMES + ((progress * HERO_ATTACK_FRAMES as f32) as usize).min(HERO_ATTACK_FRAMES - 1)
-            }
-            MonsterKind::Bat => HERO_IDLE_FRAMES + (time.elapsed_secs() * ANIMATION_FPS) as usize % HERO_WALK_FRAMES,
-            _ if cycle.moving_for > 0.0 => HERO_IDLE_FRAMES + (cycle.phase * HERO_WALK_FRAMES as f32) as usize % HERO_WALK_FRAMES,
-            _ => (time.elapsed_secs() * ANIMATION_FPS) as usize % HERO_IDLE_FRAMES,
-        };
         cycle.pose = if let Some(progress) = attack_progress {
             (PoseKind::Attack, progress)
         } else if monster.0 == MonsterKind::Bat {
@@ -1147,12 +1044,6 @@ fn animate_monsters(
         } else {
             (PoseKind::Idle, time.elapsed_secs().fract())
         };
-        let index = sheet_index(cycle.direction, frame);
-        if let Some(atlas) = sprite.texture_atlas.as_mut() {
-            if atlas.index != index {
-                atlas.index = index;
-            }
-        }
     }
 }
 
@@ -1262,10 +1153,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_image_of_a_character_fits_in_its_sheet() {
-        let cells = (SHEET_COLUMNS * SHEET_ROWS) as usize;
-        assert_eq!(cells, 8 * HERO_FRAMES, "la planche contient huit directions de HERO_FRAMES images");
-        assert_eq!(sheet_index(7, HERO_FRAMES - 1), cells - 1);
+    fn every_object_has_its_sheet_name() {
         assert_eq!(object::FILES.len(), 28);
     }
 
@@ -1289,13 +1177,12 @@ mod tests {
         use basis_universal::Transcoder;
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/art/medieval");
         for (folder, metas) in [("", crate::sprite_meta::SHEETS), ("lite", crate::sprite_meta_lite::SHEETS)] {
-            for &(dir, name, _, _, w, h) in metas {
+            for &(dir, name, _, _, w, h) in metas.iter().filter(|meta| meta.0 == "objects") {
                 let path = root.join(folder).join(dir).join(format!("{name}.basis"));
                 let data = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
                 let mut transcoder = Transcoder::new();
                 let info = transcoder.image_info(&data, 0).unwrap_or_else(|| panic!("{}: en-tête illisible", path.display()));
-                let (columns, rows) = if dir == "objects" { (PROP_FRAMES as u32, 1) } else { (SHEET_COLUMNS, SHEET_ROWS) };
-                assert_eq!((info.m_orig_width, info.m_orig_height), (columns * w, rows * h), "{}", path.display());
+                assert_eq!((info.m_orig_width, info.m_orig_height), (PROP_FRAMES as u32 * w, h), "{}", path.display());
             }
         }
     }
