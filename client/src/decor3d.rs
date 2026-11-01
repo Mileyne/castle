@@ -448,22 +448,38 @@ fn update_materials(
         Vec4::new(tint.red, tint.green, tint.blue, 1.0)
     });
     let lantern = hero.map(|hero| (to_3d(hero.translation.truncate(), LANTERN_HEIGHT), hero.translation.truncate()));
+    let wall = wall_height();
+    // Les lampes sont données dans le monde 2D (x, hauteur, y): le shader a besoin de distances non étirées.
+    let mut light_pos = [Vec4::ZERO; MAX_LIGHTS];
+    let mut light_color = [Vec4::ZERO; MAX_LIGHTS];
+    let mut count = 0.0;
+    if let Some((_, flat)) = lantern {
+        light_pos[0] = Vec4::new(flat.x, LANTERN_HEIGHT, flat.y, LANTERN_RADIUS);
+        light_color[0] = LANTERN_COLOR.extend(1.0);
+        count = 1.0;
+    }
     for chunk in &chunks {
+        // `get_mut` marque la matière modifiée, donc renvoyée au GPU à chaque image: on n'y touche que si quelque chose change.
+        let Some(current) = materials.get(&chunk.material) else {
+            continue;
+        };
+        let data = &current.data;
+        if data.tint == tint
+            && data.params.y == count
+            && data.params.z == wall
+            && data.light_pos == light_pos
+            && data.light_color == light_color
+        {
+            continue;
+        }
         let Some(mut material) = materials.get_mut(&chunk.material) else {
             continue;
         };
         material.data.tint = tint;
-        material.data.params.z = wall_height();
-        // Les lampes sont données dans le monde 2D (x, hauteur, y): le shader a besoin de distances non étirées.
-        material.data.light_pos = [Vec4::ZERO; MAX_LIGHTS];
-        material.data.light_color = [Vec4::ZERO; MAX_LIGHTS];
-        let mut count = 0.0;
-        if let Some((_, flat)) = lantern {
-            material.data.light_pos[0] = Vec4::new(flat.x, LANTERN_HEIGHT, flat.y, LANTERN_RADIUS);
-            material.data.light_color[0] = LANTERN_COLOR.extend(1.0);
-            count = 1.0;
-        }
         material.data.params.y = count;
+        material.data.params.z = wall;
+        material.data.light_pos = light_pos;
+        material.data.light_color = light_color;
     }
 }
 
