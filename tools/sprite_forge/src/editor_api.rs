@@ -445,6 +445,30 @@ pub fn live_parts(key: &str, theme: Theme, anim: Anim) -> Vec<LivePart> {
     tuning::set_active(tuning::load(theme));
     let parts = build_parts(&model, anim, theme);
     tuning::set_active(Tuning::default());
+    to_live(parts)
+}
+
+/// Les pièces d'un grand motif du décor (rocher, colonne, statue, fontaine: dans l'ordre de `LandmarkKind::ALL`), posé au sol par
+/// son pied. Ses planches montrent 4,8 mètres sur 64 unités du monde.
+pub fn live_landmark(index: usize) -> Vec<LivePart> {
+    to_live(crate::landmarks::build(index))
+}
+
+/// Le nombre de sorties de niveau (les lignes de leur planche, dans l'ordre de `exit_row` côté jeu).
+pub const EXIT_COUNT: usize = crate::props::EXITS.len();
+
+/// Les pièces de la sortie de la ligne `row` à l'instant `t` (de 0 à 1: la boucle d'animation des torches et bannières).
+pub fn live_exit(row: usize, t: f32, theme: Theme) -> Vec<LivePart> {
+    let Some(prop) = crate::props::EXITS.get(row) else {
+        return Vec::new();
+    };
+    tuning::set_active(tuning::load(theme));
+    let parts = crate::props::build_exit(*prop, t, theme);
+    tuning::set_active(Tuning::default());
+    to_live(parts)
+}
+
+fn to_live(parts: Vec<Part>) -> Vec<LivePart> {
     parts
         .into_iter()
         .map(|part| LivePart {

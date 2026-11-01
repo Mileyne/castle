@@ -17,10 +17,10 @@ use bevy::{
     render::render_resource::{AsBindGroup, ShaderType, TextureFormat},
     shader::ShaderRef,
 };
-use castle_shared::{HeroClass, Monster, Position};
-use sprite_forge::{Anim, LivePart, LiveShape, Theme, live_parts};
+use castle_shared::{ExitKind, HeroClass, Landmark, LandmarkKind, LevelExit, Monster};
+use sprite_forge::{Anim, LivePart, LiveShape, Theme, live_exit, live_landmark, live_parts};
 
-use crate::art::{HERO_ANCHOR, PROP_ANCHOR, PoseKind, Prop, SPRITE_SIZE, WalkCycle, monster_scale, object};
+use crate::art::{EXIT_FRAMES, HERO_ANCHOR, PROP_ANCHOR, PoseKind, Prop, SPRITE_SIZE, WalkCycle, exit_row, monster_scale, object};
 
 /// Cases de l'image: `GRID` x `GRID` de `SLOT` pixels, chacune montrant un carré de `CELL_M` mètres de côté.
 const GRID: usize = 12;
@@ -62,7 +62,7 @@ impl Plugin for Live3dPlugin {
         }
         app.add_plugins(MaterialPlugin::<ToonMaterial>::default()).init_resource::<Caches>().init_resource::<Slots>().add_observer(release);
         if direct() {
-            app.add_systems(Update, (attach_direct, attach_props, animate).chain().after(crate::art::AnimateCharacters));
+            app.add_systems(Update, (attach_direct, attach_props, attach_landmarks, attach_exits, animate).chain().after(crate::art::AnimateCharacters));
         } else {
             app.add_systems(Startup, setup)
                 .add_systems(Update, (attach, animate).chain().after(crate::art::AnimateCharacters))
@@ -110,7 +110,7 @@ struct Slots {
 /// Un personnage dessiné en 3D: son modèle, sa case, et ses pièces.
 #[derive(Component)]
 pub struct Live3d {
-    key: String,
+    source: ModelSource,
     /// Case de l'atlas, ou `DIRECT` quand le modèle est dans la scène du décor.
     slot: usize,
     root: Entity,
@@ -120,6 +120,31 @@ pub struct Live3d {
 }
 
 const DIRECT: usize = usize::MAX;
+
+/// D'où vient le modèle d'un personnage ou d'un objet dans `sprite_forge`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum ModelSource {
+    /// Un modèle réglable (héros, monstre, objet): sa clé, voir `sprite_forge::models`.
+    Key(String),
+    /// Un grand motif du décor: son indice dans `LandmarkKind::ALL`.
+    Landmark(usize),
+    /// Une sortie de niveau: la ligne de sa planche (voir `art::exit_row`).
+    Exit(usize),
+}
+
+impl ModelSource {
+    /// Les pièces du modèle dans la pose donnée (pour une sortie, `Idle(t)` donne le point de sa boucle d'animation).
+    fn parts(&self, anim: Anim) -> Vec<LivePart> {
+        match self {
+            Self::Key(key) => live_parts(key, Theme::Medieval, anim),
+            Self::Landmark(index) => live_landmark(*index),
+            Self::Exit(row) => {
+                let (Anim::Idle(t) | Anim::Walk(t) | Anim::Attack(t)) = anim;
+                live_exit(*row, t, Theme::Medieval)
+            }
+        }
+    }
+}
 
 fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut slots: ResMut<Slots>) {
     let side = (GRID * SLOT) as u32;
@@ -175,7 +200,7 @@ fn attach(
         commands.entity(entity).insert((
             Sprite { image: slots.atlas.clone(), rect: Some(slot_rect(slot)), custom_size: Some(size * CELL_SCALE), ..default() },
             anchor,
-            Live3d { key, slot, root, parts: Vec::new(), scale: 1.0 },
+            Live3d { source: ModelSource::Key(key), slot, root, parts: Vec::new(), scale: 1.0 },
         ));
     }
 }
@@ -189,7 +214,7 @@ fn attach_direct(mut commands: Commands, fresh: Query<(Entity, Option<&HeroClass
             _ => continue,
         };
         let root = spawn_root(&mut commands);
-        commands.entity(entity).insert((Direct3d, Live3d { key, slot: DIRECT, root, parts: Vec::new(), scale: size * CELL_SCALE / CELL_M }));
+        commands.entity(entity).insert((Direct3d, Live3d { source: ModelSource::Key(key), slot: DIRECT, root, parts: Vec::new(), scale: size * CELL_SCALE / CELL_M }));
     }
 }
 
@@ -227,7 +252,35 @@ fn attach_props(mut commands: Commands, fresh: Query<(Entity, &Prop), (Added<Pro
         };
         let root = spawn_root(&mut commands);
         // Un objet occupe une case de 32 unités qui montre 2,4 mètres.
-        commands.entity(entity).insert((Direct3d, Live3d { key, slot: DIRECT, root, parts: Vec::new(), scale: SPRITE_SIZE / 2.4 }));
+        commands.entity(entity).insert((Direct3d, Live3d { source: ModelSource::Key(key), slot: DIRECT, root, parts: Vec::new(), scale: SPRITE_SIZE / 2.4 }));
+    }
+}
+
+/// Un grand motif du décor (rocher, colonne, statue, fontaine) qui vient d'apparaître reçoit son modèle dans la scène.
+fn attach_landmarks(mut commands: Commands, fresh: Query<(Entity, &Landmark), (Added<Landmark>, Without<Live3d>)>) {
+    for (entity, landmark) in &fresh {
+        let Some(index) = LandmarkKind::ALL.iter().position(|kind| *kind == landmark.0) else {
+            continue;
+        };
+        let root = spawn_root(&mut commands);
+        // Sa planche montre 4,8 mètres sur 64 unités du monde (la fontaine est dessinée plus petite dans sa case).
+        let scale = 64.0 * landmark.0.display_scale() / 4.8;
+        commands.entity(entity).insert((Direct3d, Live3d { source: ModelSource::Landmark(index), slot: DIRECT, root, parts: Vec::new(), scale }));
+    }
+}
+
+/// Une sortie de niveau qui vient d'apparaître reçoit son modèle dans la scène (pas celles que le jeu ne dessine pas).
+fn attach_exits(mut commands: Commands, fresh: Query<(Entity, &LevelExit), (Added<LevelExit>, Without<Live3d>)>) {
+    for (entity, exit) in &fresh {
+        if exit.kind == ExitKind::Hidden {
+            continue;
+        }
+        let root = spawn_root(&mut commands);
+        // Sa planche montre 4,8 mètres sur 64 unités du monde.
+        commands.entity(entity).insert((
+            Direct3d,
+            Live3d { source: ModelSource::Exit(exit_row(exit.kind, exit.open)), slot: DIRECT, root, parts: Vec::new(), scale: 64.0 / 4.8 },
+        ));
     }
 }
 
@@ -297,14 +350,14 @@ fn part_transform(part: &LivePart) -> Transform {
 fn animate(
     mut commands: Commands,
     time: Res<Time>,
-    mut characters: Query<(Entity, &mut Live3d, Option<&WalkCycle>, Option<&crate::Facing>, Option<&Prop>, &InheritedVisibility)>,
+    mut characters: Query<(Entity, &mut Live3d, Option<&WalkCycle>, Option<&crate::Facing>, Option<&Prop>, Option<&LevelExit>, &InheritedVisibility)>,
     mut transforms: Query<&mut Transform>,
     mut shown: Query<&mut Visibility>,
     mut caches: ResMut<Caches>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ToonMaterial>>,
 ) {
-    for (entity, mut live, cycle, facing, prop, visible) in &mut characters {
+    for (entity, mut live, cycle, facing, prop, exit, visible) in &mut characters {
         let anim = match cycle {
             Some(cycle) => {
                 let (kind, t) = cycle.pose;
@@ -314,18 +367,22 @@ fn animate(
                     PoseKind::Attack => Anim::Attack(t),
                 }
             }
+            // Une sortie: sa boucle de dix images (torches et bannières qui vacillent), comme sa planche.
+            None if exit.is_some() => Anim::Idle(((time.elapsed_secs() * 12.0) as usize % EXIT_FRAMES) as f32 / EXIT_FRAMES as f32),
             // Un objet: vingt images en boucle, comme sa planche.
             None => Anim::Idle((time.elapsed_secs() * 1.25).fract()),
         };
         // Un objet qui change d'état (un piège qui se désarme...) change de modèle.
-        if let Some(prop) = prop {
-            if let Some(key) = prop_model(prop.0) {
-                if key != live.key {
-                    live.key = key;
-                    for old in live.parts.drain(..) {
-                        commands.entity(old).despawn();
-                    }
-                }
+        let changed = match (prop, exit) {
+            (Some(prop), _) => prop_model(prop.0).map(ModelSource::Key),
+            // Une sortie qui s'ouvre (pont réparé, barrière ouverte...) change de modèle.
+            (_, Some(exit)) => Some(ModelSource::Exit(exit_row(exit.kind, exit.open))),
+            _ => None,
+        };
+        if let Some(source) = changed.filter(|source| *source != live.source) {
+            live.source = source;
+            for old in live.parts.drain(..) {
+                commands.entity(old).despawn();
             }
         }
         // Le regard: les héros ont le leur (répliqué); les monstres suivent leur dernier déplacement (une des huit directions).
@@ -337,7 +394,7 @@ fn animate(
         let yaw = look.x.atan2(-look.y);
         let at = transforms.get(entity).map(|at| at.translation.truncate()).unwrap_or_default();
         if let Ok(mut root) = transforms.get_mut(live.root) {
-            root.rotation = if prop.is_some() { Quat::IDENTITY } else { Quat::from_rotation_y(yaw) };
+            root.rotation = if cycle.is_some() { Quat::from_rotation_y(yaw) } else { Quat::IDENTITY };
             if live.slot == DIRECT {
                 // Dans la scène du décor: sur le sol à la position du personnage (le nord est -z), à l'échelle du monde.
                 root.translation = Vec3::new(at.x, 0.0, -at.y);
@@ -352,7 +409,7 @@ fn animate(
                 }
             }
         }
-        let list = live_parts(&live.key, Theme::Medieval, anim);
+        let list = live.source.parts(anim);
         if live.parts.len() != list.len() {
             for old in live.parts.drain(..) {
                 commands.entity(old).despawn();
