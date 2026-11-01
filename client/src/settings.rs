@@ -152,19 +152,17 @@ pub fn reset_view() {
     VIEW_TILT.store(VIEW_TILT_DEFAULT.to_bits(), Ordering::Relaxed);
 }
 
-/// Le matériau (de Bevy, `StandardMaterial`) qui dessine les personnages, les monstres et les objets.
+/// Comment les personnages, les monstres et les objets sont éclairés. Dans les deux cas, ce sont des matériaux de Bevy (`StandardMaterial`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ModelShader {
-    /// Un éclairage physique doux.
-    Matte,
-    /// Métallique et peu rugueux (le défaut): l'armure brille.
-    Glossy,
-    /// Sans éclairage: les couleurs pures des pièces (le plus léger).
+    /// Éclairés par le soleil du décor, chaque pièce selon sa matière (l'acier brille, le tissu est mat et tissé): le défaut.
+    Lit,
+    /// Sans éclairage: les couleurs pures des pièces, sans texture (le plus léger).
     Flat,
 }
 
 impl ModelShader {
-    pub const ALL: [ModelShader; 3] = [Self::Matte, Self::Glossy, Self::Flat];
+    pub const ALL: [ModelShader; 2] = [Self::Lit, Self::Flat];
 
     fn index(self) -> u8 {
         Self::ALL.iter().position(|shader| *shader == self).unwrap_or(0) as u8
@@ -177,27 +175,29 @@ impl ModelShader {
     /// La clé de traduction de son nom.
     pub fn name_key(self) -> &'static str {
         match self {
-            Self::Matte => "shader-matte",
-            Self::Glossy => "shader-glossy",
+            Self::Lit => "shader-lit",
             Self::Flat => "shader-flat",
         }
     }
 
-    /// Le mot enregistré dans le fichier des réglages.
+    /// Le mot enregistré dans le fichier des réglages (les anciens « matte » et « glossy » valent « lit »).
     fn word(self) -> &'static str {
         match self {
-            Self::Matte => "matte",
-            Self::Glossy => "glossy",
+            Self::Lit => "lit",
             Self::Flat => "flat",
         }
     }
 
     fn from_word(word: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|shader| shader.word() == word)
+        match word {
+            "lit" | "matte" | "glossy" => Some(Self::Lit),
+            "flat" => Some(Self::Flat),
+            _ => None,
+        }
     }
 }
 
-static MODEL_SHADER: AtomicU8 = AtomicU8::new(1);
+static MODEL_SHADER: AtomicU8 = AtomicU8::new(0);
 
 /// Le shader des modèles en vigueur.
 pub fn model_shader() -> ModelShader {
@@ -295,7 +295,7 @@ pub fn set_touch_ui(on: bool) {
 }
 
 fn load() {
-    // `CASTLE_SHADER=matte|glossy|flat` impose un shader pour essayer, sans toucher aux réglages enregistrés.
+    // `CASTLE_SHADER=lit|flat` impose un shader pour essayer, sans toucher aux réglages enregistrés.
     let forced = std::env::var("CASTLE_SHADER").ok().and_then(|word| ModelShader::from_word(&word));
     if let Some(shader) = forced {
         MODEL_SHADER.store(shader.index(), Ordering::Relaxed);

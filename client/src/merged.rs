@@ -22,8 +22,135 @@ use sprite_forge::{Anim, LivePart, LiveShape, Theme, live_exit, live_landmark, l
 /// Images de la boucle d'une sortie de niveau (torches et bannières qui vacillent).
 pub const EXIT_FRAMES: usize = 10;
 
-/// Poids d'un sommet du maillage fusionné, en octets: position et normale (3 flottants chacune) et couleur (4 flottants).
+/// Poids d'un sommet du maillage fusionné, en octets: position et normale (3 flottants chacune) et couleur (4 flottants); les vêtements
+/// ont en plus des coordonnées de texture (2 flottants).
 pub const VERTEX_BYTES: usize = 12 + 12 + 16;
+
+/// La matière d'une pièce: de quoi dépend son matériau (rugosité, métal, texture). Un modèle est découpé en un maillage par matière.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Surface {
+    /// Tissu et cuir (tabard, robe, cape, pantalon, bottes): mat, avec une texture de tissage.
+    Cloth,
+    /// Peau, visage, cheveux, barbe: légèrement lisse.
+    Skin,
+    /// Cotte de mailles, bois, cuir verni: semi-métallique.
+    Mail,
+    /// Acier, laiton, fer (casque, épaulières, lames): métal poli.
+    Metal,
+    /// Les pièces qui brillent (orbe, étincelles, braise): elles ne sont pas éclairées.
+    Glow,
+}
+
+/// Le nombre de matières.
+pub const SURFACES: usize = 5;
+
+impl Surface {
+    pub const ALL: [Surface; SURFACES] = [Self::Cloth, Self::Skin, Self::Mail, Self::Metal, Self::Glow];
+
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    /// La matière d'une pièce, d'après son éclat, sa couche et son reflet (`shiny` dans `sprite_forge`: 0,8 pour l'acier et le laiton,
+    /// environ 0,3 pour les mailles, 0 pour le tissu).
+    pub fn of(part: &LivePart) -> Self {
+        if part.glow {
+            Self::Glow
+        } else if part.layer == sprite_forge::LiveLayer::Body {
+            Self::Skin
+        } else if part.shine >= 0.6 {
+            Self::Metal
+        } else if part.shine >= 0.2 {
+            Self::Mail
+        } else {
+            Self::Cloth
+        }
+    }
+}
+
+/// Les maillages d'une pose, un par matière (certaines matières peuvent manquer).
+pub type PoseMeshes = [Option<Handle<Mesh>>; SURFACES];
+
+/// Le matériau de Bevy d'une matière. `lit`: éclairé par le soleil et la lumière ambiante, avec la rugosité et le métal de la matière;
+/// sinon, les couleurs pures. `tint` multiplie la couleur (et la rend translucide si son alpha est inférieur à 1); `cloth` est la
+/// texture de tissage des vêtements (`None`: vêtements unis).
+pub fn surface_material(surface: Surface, lit: bool, tint: Color, cloth: Option<&Handle<Image>>) -> StandardMaterial {
+    let (roughness, metallic, reflectance) = match surface {
+        Surface::Cloth => (0.92, 0.0, 0.3),
+        Surface::Skin => (0.6, 0.0, 0.4),
+        Surface::Mail => (0.45, 0.5, 0.5),
+        Surface::Metal => (0.25, 0.9, 0.6),
+        Surface::Glow => (0.5, 0.0, 0.5),
+    };
+    StandardMaterial {
+        base_color: tint,
+        base_color_texture: if lit && surface == Surface::Cloth { cloth.cloned() } else { None },
+        perceptual_roughness: roughness,
+        metallic,
+        reflectance,
+        unlit: !lit || surface == Surface::Glow,
+        alpha_mode: if tint.alpha() < 1.0 { AlphaMode::Blend } else { AlphaMode::Opaque },
+        ..default()
+    }
+}
+
+/// La texture de tissage des vêtements: un tissage simple (fils qui passent dessus puis dessous) un peu irrégulier, en tons clairs qui
+/// assombrissent légèrement la couleur de la pièce. Elle se répète, avec ses réductions successives (sans elles, le tissage scintillerait
+/// de loin).
+pub fn weave_image() -> Image {
+    use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    const SIZE: usize = 64;
+    const MIPS: usize = 7;
+    let noise = |x: usize, y: usize| {
+        let mut h = (x as u32).wrapping_mul(374761393) ^ (y as u32).wrapping_mul(668265263);
+        h = (h ^ (h >> 13)).wrapping_mul(1274126177);
+        ((h ^ (h >> 16)) & 255) as f32 / 255.0
+    };
+    // Le niveau principal: des cases de 8 pixels (4 cm), un fil horizontal ou vertical selon le damier, renflé au milieu et sombre aux
+    // bords, avec un peu de grain.
+    let mut level: Vec<f32> = (0..SIZE * SIZE)
+        .map(|i| {
+            let (x, y) = (i % SIZE, i / SIZE);
+            let (cx, cy) = ((x % 8) as f32 - 3.5, (y % 8) as f32 - 3.5);
+            let horizontal = ((x / 8) + (y / 8)) % 2 == 0;
+            let across = if horizontal { cy } else { cx };
+            let thread = 1.0 - 0.5 * (across / 3.5).powi(2);
+            (0.62 + 0.38 * thread) * (0.92 + 0.08 * noise(x, y))
+        })
+        .collect();
+    let mut data = Vec::new();
+    let mut size = SIZE;
+    for _ in 0..MIPS {
+        data.extend(level.iter().flat_map(|v| {
+            // La texture est lue comme du sRGB.
+            let byte = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            [byte, byte, byte, 255]
+        }));
+        // La réduction suivante: la moyenne de quatre pixels.
+        let next = (size / 2).max(1);
+        level = (0..next * next)
+            .map(|i| {
+                let (x, y) = ((i % next) * 2, (i / next) * 2);
+                let at = |dx: usize, dy: usize| level[((y + dy).min(size - 1)) * size + (x + dx).min(size - 1)];
+                (at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1)) / 4.0
+            })
+            .collect();
+        size = next;
+    }
+    let mut image = Image::new(Extent3d { width: SIZE as u32, height: SIZE as u32, depth_or_array_layers: 1 }, TextureDimension::D2, vec![255; SIZE * SIZE * 4], TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
+    image.texture_descriptor.mip_level_count = MIPS as u32;
+    image.data = Some(data);
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        ..default()
+    });
+    image
+}
 
 /// D'où vient un modèle dans `sprite_forge`.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -108,10 +235,10 @@ impl ModelSource {
     }
 }
 
-/// Les maillages fusionnés déjà construits, par pose.
+/// Les maillages fusionnés déjà construits, par pose (un par matière).
 #[derive(Default)]
 pub struct PoseCache {
-    poses: HashMap<PoseKey, Handle<Mesh>>,
+    poses: HashMap<PoseKey, PoseMeshes>,
     /// Sommets de toutes les poses gardées (pour dire ce que ça pèse).
     pub vertices: usize,
 }
@@ -135,16 +262,20 @@ impl PoseCache {
         self.vertices = 0;
     }
 
-    /// Le maillage d'une pose, construit à la demande si on ne l'a pas encore.
-    pub fn get_or_build(&mut self, key: &PoseKey, meshes: &mut Assets<Mesh>) -> Handle<Mesh> {
+    /// Les maillages d'une pose, construits à la demande si on ne les a pas encore.
+    pub fn get_or_build(&mut self, key: &PoseKey, meshes: &mut Assets<Mesh>) -> PoseMeshes {
         if let Some(found) = self.poses.get(key) {
             return found.clone();
         }
-        let mesh = merge(&key.0.parts(key.0.anim(key.1, key.2)));
-        self.vertices += mesh.count_vertices();
-        let handle = meshes.add(mesh);
-        self.poses.insert(key.clone(), handle.clone());
-        handle
+        let mut handles: PoseMeshes = Default::default();
+        for (slot, mesh) in handles.iter_mut().zip(merge(&key.0.parts(key.0.anim(key.1, key.2)))) {
+            if let Some(mesh) = mesh {
+                self.vertices += mesh.count_vertices();
+                *slot = Some(meshes.add(mesh));
+            }
+        }
+        self.poses.insert(key.clone(), handles.clone());
+        handles
     }
 }
 
@@ -251,7 +382,25 @@ pub struct Buffers {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub colors: Vec<[f32; 4]>,
+    /// Coordonnées de texture (une projection plane selon l'axe dominant de la normale), gardées seulement pour les vêtements.
+    pub uvs: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
+}
+
+/// Côté, en mètres, d'une répétition de la texture de tissage.
+const WEAVE_TILE: f32 = 0.32;
+
+/// Les coordonnées de texture d'un point: la face du cube qui regarde le plus la normale, projetée à plat.
+fn box_uv(position: Vec3, normal: Vec3) -> [f32; 2] {
+    let n = normal.abs();
+    let (u, v) = if n.x >= n.y && n.x >= n.z {
+        (position.z, position.y)
+    } else if n.y >= n.z {
+        (position.x, position.z)
+    } else {
+        (position.x, position.y)
+    };
+    [u / WEAVE_TILE, v / WEAVE_TILE]
 }
 
 /// La couleur d'un sommet pour les matériaux de Bevy: la couleur sRGB de `sprite_forge` passée en linéaire. Une pièce qui brille (orbe,
@@ -271,29 +420,44 @@ impl Buffers {
         // Une normale suit l'inverse de l'échelle (puis la rotation): une sphère aplatie garde des normales justes.
         let inverse_scale = Vec3::new(1.0 / place.scale.x.max(1e-4), 1.0 / place.scale.y.max(1e-4), 1.0 / place.scale.z.max(1e-4));
         for (position, normal) in shape.positions.iter().zip(&shape.normals) {
-            self.positions.push((place.rotation * (Vec3::from(*position) * place.scale) + place.translation).to_array());
-            self.normals.push((place.rotation * (Vec3::from(*normal) * inverse_scale)).normalize_or_zero().to_array());
+            let at = place.rotation * (Vec3::from(*position) * place.scale) + place.translation;
+            let facing = (place.rotation * (Vec3::from(*normal) * inverse_scale)).normalize_or_zero();
+            self.positions.push(at.to_array());
+            self.normals.push(facing.to_array());
+            self.uvs.push(box_uv(at, facing));
             self.colors.push(vertex_color(part.color, part.glow));
         }
         self.indices.extend(shape.indices.iter().map(|index| first + index));
     }
 
     pub fn into_mesh(self) -> Mesh {
-        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
+        self.into_mesh_with(false)
+    }
+
+    /// Le maillage, avec ses coordonnées de texture si `with_uv` (les vêtements).
+    pub fn into_mesh_with(self, with_uv: bool) -> Mesh {
+        let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
             .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.positions)
             .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals)
             .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, self.colors)
-            .with_inserted_indices(Indices::U32(self.indices))
+            .with_inserted_indices(Indices::U32(self.indices));
+        if with_uv { mesh.with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs) } else { mesh }
     }
 }
 
-/// Toutes les pièces dans un seul maillage. Chaque sommet porte la couleur de sa pièce.
-pub fn merge(parts: &[LivePart]) -> Mesh {
-    let mut buffers = Buffers::default();
+/// Toutes les pièces d'une pose en un maillage par matière (`None` pour une matière absente). Chaque sommet porte la couleur de sa pièce.
+pub fn merge(parts: &[LivePart]) -> [Option<Mesh>; SURFACES] {
+    let mut buffers: [Buffers; SURFACES] = Default::default();
     for part in parts {
-        buffers.push_part(part);
+        buffers[Surface::of(part).index()].push_part(part);
     }
-    buffers.into_mesh()
+    let mut meshes: [Option<Mesh>; SURFACES] = Default::default();
+    for (surface, (slot, buffer)) in Surface::ALL.into_iter().zip(meshes.iter_mut().zip(buffers)) {
+        if !buffer.positions.is_empty() {
+            *slot = Some(buffer.into_mesh_with(surface == Surface::Cloth));
+        }
+    }
+    meshes
 }
 
 #[cfg(test)]
@@ -350,35 +514,77 @@ mod tests {
         LivePart { shape, center, rot: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], scale: [1.0; 3], color: [1.0, 0.5, 0.25], glow, shine: 0.3, layer: sprite_forge::LiveLayer::Outfit }
     }
 
+    fn all_vertices(meshes: &[Option<Mesh>; SURFACES]) -> usize {
+        meshes.iter().flatten().map(Mesh::count_vertices).sum()
+    }
+
     #[test]
     fn merging_keeps_every_vertex_and_every_triangle() {
         let parts = [part(LiveShape::Sphere, [0.0; 3], false), part(LiveShape::Cube, [2.0, 0.0, 0.0], true)];
         let (sphere, cube) = (base(LiveShape::Sphere), base(LiveShape::Cube));
-        let mesh = merge(&parts);
-        assert_eq!(mesh.count_vertices(), sphere.positions.len() + cube.positions.len());
-        assert_eq!(mesh.indices().map(|i| i.len()), Some(sphere.indices.len() + cube.indices.len()));
+        let meshes = merge(&parts);
+        assert_eq!(all_vertices(&meshes), sphere.positions.len() + cube.positions.len());
+        let triangles: usize = meshes.iter().flatten().filter_map(|mesh| mesh.indices().map(|i| i.len())).sum();
+        assert_eq!(triangles, sphere.indices.len() + cube.indices.len());
     }
 
     #[test]
-    fn parts_are_placed_and_carry_their_own_colour_and_glow() {
-        let mesh = merge(&[part(LiveShape::Cube, [10.0, 0.0, 0.0], true)]);
-        let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
+    fn parts_are_split_by_material_and_carry_their_own_colour() {
+        // Un cube qui brille: la matière « lumière »; sa couleur est linéaire, trois fois plus vive.
+        let meshes = merge(&[part(LiveShape::Cube, [10.0, 0.0, 0.0], true)]);
+        assert!(meshes.iter().enumerate().all(|(i, mesh)| mesh.is_some() == (i == Surface::Glow.index())));
+        let mesh = meshes[Surface::Glow.index()].as_ref().expect("la matière lumière");
+        let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
             panic!("positions manquantes");
         };
         assert!(positions.iter().all(|p| p[0] >= 9.0 && p[0] <= 11.0), "le cube est centré en x = 10");
         let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR) else {
             panic!("couleurs manquantes");
         };
-        // La couleur est linéaire; une pièce qui brille est trois fois plus vive.
         let linear = Color::srgb(1.0, 0.5, 0.25).to_linear();
         assert!(colors.iter().all(|c| (c[0] - linear.red * 3.0).abs() < 1e-4 && (c[1] - linear.green * 3.0).abs() < 1e-4 && c[3] == 1.0));
     }
 
     #[test]
+    fn a_pieces_material_follows_its_shine_and_layer() {
+        let mut piece = part(LiveShape::Sphere, [0.0; 3], false);
+        piece.shine = 0.0;
+        assert_eq!(Surface::of(&piece), Surface::Cloth);
+        piece.shine = 0.3;
+        assert_eq!(Surface::of(&piece), Surface::Mail);
+        piece.shine = 0.8;
+        assert_eq!(Surface::of(&piece), Surface::Metal);
+        piece.layer = sprite_forge::LiveLayer::Body;
+        assert_eq!(Surface::of(&piece), Surface::Skin, "la peau reste de la peau, même brillante");
+        piece.glow = true;
+        assert_eq!(Surface::of(&piece), Surface::Glow);
+    }
+
+    #[test]
+    fn only_clothes_carry_texture_coordinates() {
+        let mut cloth = part(LiveShape::Sphere, [0.0; 3], false);
+        cloth.shine = 0.0;
+        let mut metal = part(LiveShape::Sphere, [1.0; 3], false);
+        metal.shine = 0.9;
+        let meshes = merge(&[cloth, metal]);
+        assert!(meshes[Surface::Cloth.index()].as_ref().is_some_and(|mesh| mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_some()));
+        assert!(meshes[Surface::Metal.index()].as_ref().is_some_and(|mesh| mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_none()));
+    }
+
+    #[test]
+    fn the_weave_texture_has_all_its_reductions() {
+        let image = weave_image();
+        assert_eq!(image.texture_descriptor.mip_level_count, 7);
+        // 64x64 + 32x32 + ... + 1x1, quatre octets par pixel.
+        assert_eq!(image.data.as_ref().map(Vec::len), Some((64 * 64 + 32 * 32 + 16 * 16 + 8 * 8 + 4 * 4 + 2 * 2 + 1) * 4));
+    }
+
+    #[test]
     fn indices_never_point_outside_their_part() {
         let parts = [part(LiveShape::Capsule(1.5), [0.0; 3], false), part(LiveShape::Frustum(1.0, 0.5), [0.0, 3.0, 0.0], false)];
-        let mesh = merge(&parts);
-        let count = mesh.count_vertices() as u32;
-        assert!(mesh.indices().is_some_and(|indices| indices.iter().all(|i| (i as u32) < count)));
+        for mesh in merge(&parts).iter().flatten() {
+            let count = mesh.count_vertices() as u32;
+            assert!(mesh.indices().is_some_and(|indices| indices.iter().all(|i| (i as u32) < count)));
+        }
     }
 }

@@ -10,7 +10,7 @@ use castle_shared::{ExitKind, HeroClass, Landmark, LandmarkKind, LevelExit, Mons
 use sprite_forge::{Anim, models};
 
 use crate::art::{PoseKind, Prop, SPRITE_SIZE, WalkCycle, exit_row, monster_scale, object};
-use crate::merged::{ModelSource, PoseCache};
+use crate::merged::{ModelSource, PoseCache, SURFACES, Surface, surface_material, weave_image};
 use crate::settings::ModelShader;
 
 /// Les modèles de `sprite_forge` montrent 2,4 mètres dans une case de sprite: un mètre vaut `taille de la case / 2,4` unités du monde.
@@ -48,11 +48,13 @@ fn tint_key(tint: Option<&ModelTint>) -> TintKey {
     [byte(color.red), byte(color.green), byte(color.blue), (color.alpha.clamp(0.0, 1.0) * 255.0).round() as u8]
 }
 
-/// Les maillages fusionnés de toutes les poses construites, et les matériaux (un par shader et par teinte, partagés).
+/// Les maillages fusionnés de toutes les poses construites, et les matériaux (un par matière, éclairage et teinte, partagés).
 #[derive(Resource, Default)]
 pub struct Caches {
     pub poses: PoseCache,
-    materials: std::collections::HashMap<(ModelShader, TintKey), Handle<StandardMaterial>>,
+    materials: std::collections::HashMap<(Surface, ModelShader, TintKey), Handle<StandardMaterial>>,
+    /// La texture de tissage des vêtements, créée à la première utilisation.
+    cloth: Option<Handle<Image>>,
 }
 
 /// Un modèle 3D: ce qu'il montre, sa place dans la scène, et le maillage de sa pose du moment.
@@ -60,8 +62,8 @@ pub struct Caches {
 pub struct Live3d {
     source: ModelSource,
     root: Entity,
-    /// L'entité qui porte le maillage fusionné, et la pose qu'il montre.
-    body: Option<Entity>,
+    /// Les entités qui portent les maillages fusionnés (une par matière), et la pose qu'ils montrent.
+    bodies: [Option<Entity>; SURFACES],
     shown: Option<(ModelSource, u8, u16)>,
     /// La teinte et le shader du matériau du corps.
     tint: TintKey,
@@ -76,7 +78,7 @@ fn spawn_root(commands: &mut Commands) -> Entity {
 
 fn attach(commands: &mut Commands, entity: Entity, source: ModelSource, scale: f32) {
     let root = spawn_root(commands);
-    commands.entity(entity).insert(Live3d { source, root, body: None, shown: None, tint: WHITE, shader: None, scale });
+    commands.entity(entity).insert(Live3d { source, root, bodies: [None; SURFACES], shown: None, tint: WHITE, shader: None, scale });
 }
 
 /// Le modèle d'une classe de héros.
@@ -197,6 +199,7 @@ fn animate(
     mut caches: ResMut<Caches>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let caches = &mut *caches;
     let shader = crate::settings::model_shader();
@@ -245,60 +248,65 @@ fn animate(
                 *visibility = wanted;
             }
         }
-        // La teinte et le shader: un matériau par couple, partagés.
+        // La teinte et l'éclairage: un matériau par matière, partagés. Le changer remplace les matériaux des corps déjà posés.
         let tint = tint_key(tint);
-        let material = material_for(caches, &mut materials, shader, tint);
-        if let (Some(body), true) = (live.body, live.tint != tint || live.shader != Some(shader)) {
-            commands.entity(body).insert(MeshMaterial3d(material.clone()));
-            live.tint = tint;
-            live.shader = Some(shader);
-        }
-        // Le maillage de la pose: construit à l'avance (`prebake`), sinon à la demande.
+        let cloth = caches.cloth.get_or_insert_with(|| images.add(weave_image())).clone();
+        let restyle = live.tint != tint || live.shader != Some(shader);
+        // Les maillages de la pose: construits à l'avance (`prebake`), sinon à la demande.
         let (family, index) = live.source.pose(anim);
         let wanted = (live.source.clone(), family, index);
-        if live.shown.as_ref() == Some(&wanted) {
+        let new_pose = live.shown.as_ref() != Some(&wanted);
+        if !restyle && !new_pose {
             continue;
         }
-        let handle = caches.poses.get_or_build(&wanted, &mut meshes);
-        match live.body {
-            Some(body) => {
-                commands.entity(body).insert(Mesh3d(handle));
+        let pose = if new_pose { Some(caches.poses.get_or_build(&wanted, &mut meshes)) } else { None };
+        for surface in Surface::ALL {
+            let slot = surface.index();
+            let material = restyle.then(|| material_for(caches, &mut materials, &cloth, surface, shader, tint));
+            match (live.bodies[slot], pose.as_ref().map(|meshes| meshes[slot].clone())) {
+                // La pose change: le corps montre le maillage de sa matière, ou se cache s'il n'y en a pas.
+                (Some(body), Some(Some(handle))) => {
+                    commands.entity(body).insert((Mesh3d(handle), Visibility::Inherited));
+                }
+                (Some(body), Some(None)) => {
+                    commands.entity(body).insert(Visibility::Hidden);
+                }
+                (None, Some(Some(handle))) => {
+                    let material = material.clone().unwrap_or_else(|| material_for(caches, &mut materials, &cloth, surface, shader, tint));
+                    live.bodies[slot] = Some(
+                        commands
+                            .spawn((Mesh3d(handle), MeshMaterial3d(material), ChildOf(live.root), RenderLayers::layer(crate::decor3d::LAYER)))
+                            .id(),
+                    );
+                }
+                _ => {}
             }
-            None => {
-                let body = commands
-                    .spawn((Mesh3d(handle), MeshMaterial3d(material.clone()), ChildOf(live.root), RenderLayers::layer(crate::decor3d::LAYER)))
-                    .id();
-                live.body = Some(body);
-                live.tint = tint;
-                live.shader = Some(shader);
+            if let (Some(body), Some(material)) = (live.bodies[slot], material) {
+                commands.entity(body).insert(MeshMaterial3d(material));
             }
         }
+        live.tint = tint;
+        live.shader = Some(shader);
         live.shown = Some(wanted);
     }
 }
 
-/// Le matériau d'un shader et d'une teinte, créé la première fois.
-fn material_for(caches: &mut Caches, standard: &mut Assets<StandardMaterial>, shader: ModelShader, tint: TintKey) -> Handle<StandardMaterial> {
+/// Le matériau d'une matière, d'un éclairage et d'une teinte, créé la première fois.
+fn material_for(
+    caches: &mut Caches,
+    standard: &mut Assets<StandardMaterial>,
+    cloth: &Handle<Image>,
+    surface: Surface,
+    shader: ModelShader,
+    tint: TintKey,
+) -> Handle<StandardMaterial> {
     caches
         .materials
-        .entry((shader, tint))
+        .entry((surface, shader, tint))
         .or_insert_with(|| {
             let channel = |byte: u8| f32::from(byte) / 127.0;
-            let base_color = Color::srgba(channel(tint[0]), channel(tint[1]), channel(tint[2]), f32::from(tint[3]) / 255.0);
-            let (roughness, metallic, reflectance, unlit) = match shader {
-                ModelShader::Matte => (0.75, 0.0, 0.5, false),
-                ModelShader::Glossy => (0.3, 0.6, 0.6, false),
-                ModelShader::Flat => (0.5, 0.0, 0.5, true),
-            };
-            standard.add(StandardMaterial {
-                base_color,
-                perceptual_roughness: roughness,
-                metallic,
-                reflectance,
-                unlit,
-                alpha_mode: if tint[3] < 255 { AlphaMode::Blend } else { AlphaMode::Opaque },
-                ..default()
-            })
+            let color = Color::srgba(channel(tint[0]), channel(tint[1]), channel(tint[2]), f32::from(tint[3]) / 255.0);
+            standard.add(surface_material(surface, shader == ModelShader::Lit, color, Some(cloth)))
         })
         .clone()
 }
