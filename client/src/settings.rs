@@ -91,14 +91,14 @@ pub fn cycle_volume(channel: Channel) {
 }
 
 /// Hauteur des murs de la vue 3D, en tuiles.
-pub const VIEW_WALL_TILES: f32 = 3.0;
+pub const VIEW_WALL_TILES: f32 = 2.0;
 /// Cadrage de la vue 3D par défaut: la part de terrain montrée, 1 étant celle de la version 2D (plus grand: plus loin).
-pub const VIEW_ZOOM_DEFAULT: f32 = 1.25;
+pub const VIEW_ZOOM_DEFAULT: f32 = 1.0;
 /// Limites du cadrage: de très près à très loin.
 const VIEW_ZOOM_RANGE: (f32, f32) = (0.5, 2.5);
 /// Inclinaison et angle de la vue par défaut, en degrés. Le stick droit de la manette principale les modifie en jouant (voir `turn_view`).
-pub const VIEW_TILT_DEFAULT: f32 = 52.0;
-pub const VIEW_ANGLE_DEFAULT: f32 = -15.0;
+pub const VIEW_TILT_DEFAULT: f32 = 55.0;
+pub const VIEW_ANGLE_DEFAULT: f32 = 10.0;
 /// Limites de l'inclinaison: de presque à l'horizontale à presque vue d'en haut.
 const VIEW_TILT_RANGE: (f32, f32) = (25.0, 80.0);
 
@@ -441,9 +441,9 @@ mod view_tests {
     fn the_view_turns_wraps_clamps_and_resets() {
         reset_view();
         assert_eq!((view_angle(), view_tilt()), (VIEW_ANGLE_DEFAULT, VIEW_TILT_DEFAULT));
-        // L'angle fait le tour: -15 + 200 = 185, soit -175.
+        // L'angle fait le tour: 10 + 200 = 210, soit -150.
         turn_view(200.0, 0.0);
-        assert!((view_angle() - -175.0).abs() < 1e-3, "{}", view_angle());
+        assert!((view_angle() - -150.0).abs() < 1e-3, "{}", view_angle());
         // L'inclinaison reste dans ses bornes.
         turn_view(0.0, 500.0);
         assert_eq!(view_tilt(), 80.0);
