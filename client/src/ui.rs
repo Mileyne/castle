@@ -237,8 +237,9 @@ fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
 }
 
 /// Met les vignettes du thème courant dans le panneau d'équipe.
-fn update_portraits(art: Res<crate::art::Art>, mut slots: Query<(&PortraitSlot, &mut ImageNode)>) {
-    if !art.is_changed() {
+fn update_portraits(art: Res<crate::art::Art>, mut slots: Query<(&PortraitSlot, &mut ImageNode)>, fresh: Query<(), Added<PortraitSlot>>) {
+    // Les vignettes se posent quand les images changent, et quand l'interface vient d'être construite (elle l'est après le chargement).
+    if !art.is_changed() && fresh.is_empty() {
         return;
     }
     for (slot, mut image) in &mut slots {
