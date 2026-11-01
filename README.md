@@ -30,3 +30,4 @@ Pour jouer directement depuis les sources: `./play.sh` (le client démarre le se
 ## Documentation
 
 [CASTLE.md](CASTLE.md): conception du jeu, fonctionnalités et feuille de route.
+- `tools/model_viewer`: visionneuse des modèles 3D des personnages, un exécutable à part (`scripts/models.sh`). Elle montre chaque étape du rendu des personnages (primitives superposées, maillage fusionné...), seule ou en comparaison côte à côte avec son coût (entités, sommets, mise en pose), sous tous les angles à la manette: stick droit pour tourner, L / R pour le zoom, croix pour le modèle et l'animation, A étape suivante, X comparer, Y rotation automatique, Select recentrer. Les étapes sont listées dans `STAGES`: on en ajoute une à chaque avancée.

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["shared", "server", "client", "tools/sprite_forge", "tools/sprite_editor", "tools/live3d"]
+members = ["shared", "server", "client", "tools/sprite_forge", "tools/sprite_editor", "tools/live3d", "tools/model_viewer"]
 
 [workspace.dependencies]
 bevy = { version = "0.20", default-features = false }

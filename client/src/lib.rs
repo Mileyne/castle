@@ -34,6 +34,8 @@ mod lighting;
 mod decor3d;
 #[cfg(feature = "live3d")]
 mod live3d;
+#[cfg(feature = "live3d")]
+mod merged;
 mod pause;
 mod puzzle;
 mod settings;

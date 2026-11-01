@@ -4623,6 +4623,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "model_viewer"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "sprite_forge",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

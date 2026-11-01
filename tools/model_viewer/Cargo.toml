@@ -1,0 +1,9 @@
+[package]
+name = "model_viewer"
+version = "0.1.0"
+edition = "2024"
+description = "Visionneuse des modèles 3D des personnages: montre, étape après étape, comment ils sont rendus (manette: tourner, zoomer, comparer)"
+
+[dependencies]
+bevy = { workspace = true, default-features = true }
+sprite_forge = { path = "../sprite_forge" }

@@ -71,34 +71,26 @@ impl Plugin for Live3dPlugin {
     }
 }
 
-#[derive(ShaderType, Clone, Debug)]
-struct ToonData {
-    color: Vec4,
-    params: Vec4,
-}
-
-#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
-struct ToonMaterial {
-    #[uniform(0)]
-    data: ToonData,
-    blend: bool,
-}
+/// Le matériau « toon » de tous les personnages et objets: sans réglage, la couleur, l'éclat et le reflet viennent des sommets du
+/// maillage fusionné (voir `merged`), donc un seul matériau sert tout le monde.
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug, Default)]
+struct ToonMaterial {}
 
 impl Material for ToonMaterial {
     fn fragment_shader() -> ShaderRef {
         "shaders/toon.wesl".into()
     }
-
-    fn alpha_mode(&self) -> AlphaMode {
-        if self.blend { AlphaMode::Blend } else { AlphaMode::Opaque }
-    }
 }
 
 #[derive(Resource, Default)]
 struct Caches {
-    meshes: std::collections::HashMap<(u8, i32, i32), Handle<Mesh>>,
-    materials: std::collections::HashMap<[u8; 6], Handle<ToonMaterial>>,
+    /// Le maillage fusionné de chaque pose déjà vue: (modèle, famille de pose, image de la boucle).
+    poses: std::collections::HashMap<(ModelSource, u8, u16), Handle<Mesh>>,
+    material: Option<Handle<ToonMaterial>>,
 }
+
+/// Au-delà de ce nombre de poses gardées, on repart de zéro: les maillages en cours d'usage restent tenus par leur personnage.
+const MAX_CACHED_POSES: usize = 600;
 
 /// L'image où se dessinent les personnages, et les cases libres.
 #[derive(Resource, Default)]
@@ -114,7 +106,9 @@ pub struct Live3d {
     /// Case de l'atlas, ou `DIRECT` quand le modèle est dans la scène du décor.
     slot: usize,
     root: Entity,
-    parts: Vec<Entity>,
+    /// L'entité qui porte le maillage fusionné, et la pose qu'il montre.
+    body: Option<Entity>,
+    shown: Option<(ModelSource, u8, u16)>,
     /// Unités du monde par mètre du modèle (scène du décor seulement).
     scale: f32,
 }
@@ -122,7 +116,7 @@ pub struct Live3d {
 const DIRECT: usize = usize::MAX;
 
 /// D'où vient le modèle d'un personnage ou d'un objet dans `sprite_forge`.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 enum ModelSource {
     /// Un modèle réglable (héros, monstre, objet): sa clé, voir `sprite_forge::models`.
     Key(String),
@@ -133,6 +127,28 @@ enum ModelSource {
 }
 
 impl ModelSource {
+    /// La pose du modèle la plus proche de `anim` parmi celles qu'il a vraiment (les images de ses planches): sa famille, son indice
+    /// dans la boucle, et la pose exacte à construire.
+    fn pose(&self, anim: Anim) -> (u8, u16, Anim) {
+        let (Anim::Idle(t) | Anim::Walk(t) | Anim::Attack(t)) = anim;
+        let (steps, family) = match (self, anim) {
+            (Self::Landmark(_), _) => return (0, 0, Anim::Idle(0.0)),
+            (Self::Exit(_), _) => (EXIT_FRAMES, 0u8),
+            (Self::Key(key), Anim::Idle(_)) if key.starts_with("prop:") => (20, 0),
+            (_, Anim::Idle(_)) => (25, 0),
+            (_, Anim::Walk(_)) => (16, 1),
+            (_, Anim::Attack(_)) => (10, 2),
+        };
+        let index = ((t.clamp(0.0, 0.9999) * steps as f32) as usize).min(steps - 1);
+        let t = index as f32 / steps as f32;
+        let exact = match (self, family) {
+            (Self::Key(_), 1) => Anim::Walk(t),
+            (Self::Key(_), 2) => Anim::Attack(t),
+            _ => Anim::Idle(t),
+        };
+        (family, index as u16, exact)
+    }
+
     /// Les pièces du modèle dans la pose donnée (pour une sortie, `Idle(t)` donne le point de sa boucle d'animation).
     fn parts(&self, anim: Anim) -> Vec<LivePart> {
         match self {
@@ -200,7 +216,7 @@ fn attach(
         commands.entity(entity).insert((
             Sprite { image: slots.atlas.clone(), rect: Some(slot_rect(slot)), custom_size: Some(size * CELL_SCALE), ..default() },
             anchor,
-            Live3d { source: ModelSource::Key(key), slot, root, parts: Vec::new(), scale: 1.0 },
+            Live3d { source: ModelSource::Key(key), slot, root, body: None, shown: None, scale: 1.0 },
         ));
     }
 }
@@ -214,7 +230,7 @@ fn attach_direct(mut commands: Commands, fresh: Query<(Entity, Option<&HeroClass
             _ => continue,
         };
         let root = spawn_root(&mut commands);
-        commands.entity(entity).insert((Direct3d, Live3d { source: ModelSource::Key(key), slot: DIRECT, root, parts: Vec::new(), scale: size * CELL_SCALE / CELL_M }));
+        commands.entity(entity).insert((Direct3d, Live3d { source: ModelSource::Key(key), slot: DIRECT, root, body: None, shown: None, scale: size * CELL_SCALE / CELL_M }));
     }
 }
 
@@ -252,7 +268,7 @@ fn attach_props(mut commands: Commands, fresh: Query<(Entity, &Prop), (Added<Pro
         };
         let root = spawn_root(&mut commands);
         // Un objet occupe une case de 32 unités qui montre 2,4 mètres.
-        commands.entity(entity).insert((Direct3d, Live3d { source: ModelSource::Key(key), slot: DIRECT, root, parts: Vec::new(), scale: SPRITE_SIZE / 2.4 }));
+        commands.entity(entity).insert((Direct3d, Live3d { source: ModelSource::Key(key), slot: DIRECT, root, body: None, shown: None, scale: SPRITE_SIZE / 2.4 }));
     }
 }
 
@@ -265,7 +281,7 @@ fn attach_landmarks(mut commands: Commands, fresh: Query<(Entity, &Landmark), (A
         let root = spawn_root(&mut commands);
         // Sa planche montre 4,8 mètres sur 64 unités du monde (la fontaine est dessinée plus petite dans sa case).
         let scale = 64.0 * landmark.0.display_scale() / 4.8;
-        commands.entity(entity).insert((Direct3d, Live3d { source: ModelSource::Landmark(index), slot: DIRECT, root, parts: Vec::new(), scale }));
+        commands.entity(entity).insert((Direct3d, Live3d { source: ModelSource::Landmark(index), slot: DIRECT, root, body: None, shown: None, scale }));
     }
 }
 
@@ -279,7 +295,7 @@ fn attach_exits(mut commands: Commands, fresh: Query<(Entity, &LevelExit), (Adde
         // Sa planche montre 4,8 mètres sur 64 unités du monde.
         commands.entity(entity).insert((
             Direct3d,
-            Live3d { source: ModelSource::Exit(exit_row(exit.kind, exit.open)), slot: DIRECT, root, parts: Vec::new(), scale: 64.0 / 4.8 },
+            Live3d { source: ModelSource::Exit(exit_row(exit.kind, exit.open)), slot: DIRECT, root, body: None, shown: None, scale: 64.0 / 4.8 },
         ));
     }
 }
@@ -298,54 +314,6 @@ fn release(removed: On<Remove<Live3d>>, characters: Query<&Live3d>, mut slots: R
     }
 }
 
-fn mesh_for(caches: &mut Caches, meshes: &mut Assets<Mesh>, shape: LiveShape) -> Handle<Mesh> {
-    let key = match shape {
-        LiveShape::Sphere => (0, 0, 0),
-        LiveShape::Cube => (1, 0, 0),
-        LiveShape::Capsule(_) => (2, 0, 0),
-        LiveShape::Frustum(a, b) => (3, (a * 50.0).round() as i32, (b * 50.0).round() as i32),
-    };
-    caches
-        .meshes
-        .entry(key)
-        .or_insert_with(|| {
-            meshes.add(match shape {
-                LiveShape::Sphere => Sphere::new(1.0).mesh().uv(20, 12),
-                LiveShape::Cube => Cuboid::new(2.0, 2.0, 2.0).into(),
-                LiveShape::Capsule(_) => Capsule3d::new(1.0, 2.0).mesh().rings(4).latitudes(8).longitudes(16).build(),
-                LiveShape::Frustum(a, b) => ConicalFrustum { radius_top: b, radius_bottom: a, height: 2.0 }.mesh().resolution(20).build(),
-            })
-        })
-        .clone()
-}
-
-fn material_for(caches: &mut Caches, materials: &mut Assets<ToonMaterial>, part: &LivePart) -> Handle<ToonMaterial> {
-    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let key = [byte(part.color[0]), byte(part.color[1]), byte(part.color[2]), part.glow as u8, byte(part.shine), 0];
-    caches
-        .materials
-        .entry(key)
-        .or_insert_with(|| {
-            materials.add(ToonMaterial {
-                data: ToonData {
-                    color: Vec4::new(part.color[0], part.color[1], part.color[2], 1.0),
-                    params: Vec4::new(if part.glow { 1.0 } else { 0.0 }, part.shine, 1.0, 0.0),
-                },
-                blend: false,
-            })
-        })
-        .clone()
-}
-
-fn part_transform(part: &LivePart) -> Transform {
-    let mut scale = Vec3::from(part.scale);
-    if let LiveShape::Capsule(h) = part.shape {
-        // La capsule de référence a une demi-longueur de 2 pour un rayon de 1: on l'étire pour que le total fasse `rayon * (h + 1)`.
-        scale.y = part.scale[0] * (h + 1.0) / 2.0;
-    }
-    Transform { translation: Vec3::from(part.center), rotation: Quat::from_mat3(&Mat3::from_cols_array_2d(&part.rot)), scale }
-}
-
 /// Met chaque modèle dans la pose du sprite (repos, marche, coup) et tourne son regard dans le sens où le personnage va.
 fn animate(
     mut commands: Commands,
@@ -357,6 +325,10 @@ fn animate(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ToonMaterial>>,
 ) {
+    let material = caches.material.get_or_insert_with(|| materials.add(ToonMaterial::default())).clone();
+    if caches.poses.len() > MAX_CACHED_POSES {
+        caches.poses.clear();
+    }
     for (entity, mut live, cycle, facing, prop, exit, visible) in &mut characters {
         let anim = match cycle {
             Some(cycle) => {
@@ -381,9 +353,6 @@ fn animate(
         };
         if let Some(source) = changed.filter(|source| *source != live.source) {
             live.source = source;
-            for old in live.parts.drain(..) {
-                commands.entity(old).despawn();
-            }
         }
         // Le regard: les héros ont le leur (répliqué); les monstres suivent leur dernier déplacement (une des huit directions).
         let look = match (facing, cycle) {
@@ -409,34 +378,30 @@ fn animate(
                 }
             }
         }
-        let list = live.source.parts(anim);
-        if live.parts.len() != list.len() {
-            for old in live.parts.drain(..) {
-                commands.entity(old).despawn();
-            }
-            let direct = live.slot == DIRECT;
-            live.parts = list
-                .iter()
-                .map(|part| {
-                    let mut spawned = commands.spawn((
-                        Mesh3d(mesh_for(&mut caches, &mut meshes, part.shape)),
-                        MeshMaterial3d(material_for(&mut caches, &mut materials, part)),
-                        part_transform(part),
-                        ChildOf(live.root),
-                    ));
-                    if direct {
-                        spawned.insert(RenderLayers::layer(crate::decor3d::LAYER));
-                    }
-                    spawned.id()
-                })
-                .collect();
+        // Le maillage de la pose: construit une fois par pose, puis repris du cache.
+        let (family, index, exact) = live.source.pose(anim);
+        let wanted = (live.source.clone(), family, index);
+        if live.shown.as_ref() == Some(&wanted) {
             continue;
         }
-        for (child, part) in live.parts.iter().zip(&list) {
-            if let Ok(mut place) = transforms.get_mut(*child) {
-                *place = part_transform(part);
+        let handle = caches
+            .poses
+            .entry(wanted.clone())
+            .or_insert_with(|| meshes.add(crate::merged::merge(&live.source.parts(exact))))
+            .clone();
+        match live.body {
+            Some(body) => {
+                commands.entity(body).insert(Mesh3d(handle));
+            }
+            None => {
+                let mut spawned = commands.spawn((Mesh3d(handle), MeshMaterial3d(material.clone()), ChildOf(live.root)));
+                if live.slot == DIRECT {
+                    spawned.insert(RenderLayers::layer(crate::decor3d::LAYER));
+                }
+                live.body = Some(spawned.id());
             }
         }
+        live.shown = Some(wanted);
     }
 }
 
