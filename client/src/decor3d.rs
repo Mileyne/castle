@@ -28,6 +28,7 @@ use bevy::window::PrimaryWindow;
 use castle_shared::{Expedition, Region, Room, TILE_SIZE, Tile};
 
 use crate::LocalPlayer;
+use crate::live3d::Direct3d;
 use crate::settings::View3d;
 use crate::art::{Stain, TileMark, WorldTile};
 
@@ -65,7 +66,7 @@ const LANTERN_COLOR: Vec3 = Vec3::new(1.0, 0.72, 0.4);
 
 /// Couche de rendu du décor: la caméra 3D des personnages (`live3d`, couche 0) ne doit pas le dessiner dans son atlas, ni la
 /// caméra du décor les personnages.
-const LAYER: usize = 1;
+pub const LAYER: usize = 1;
 
 /// Le prototype est-il demandé (`CASTLE_DECOR3D=1`)?
 pub fn enabled() -> bool {
@@ -85,7 +86,7 @@ impl Plugin for Decor3dPlugin {
                 Update,
                 (keep_the_image, apply_view, build_chunks.after(crate::art::rebuild_world), follow_camera, update_materials).chain(),
             )
-            .add_systems(Update, mirror_sprites.after(crate::art::AnimateCharacters).after(crate::art::y_sort));
+            .add_systems(Update, mirror_sprites.after(crate::art::AnimateCharacters).after(crate::art::y_sort).after(crate::art::animate_props));
     }
 }
 
@@ -554,7 +555,7 @@ fn natural_size(sprite: &Sprite, images: &Assets<Image>, layouts: &Assets<Textur
 fn mirror_sprites(
     mut commands: Commands,
     mut sources: Query<
-        (Entity, &mut Sprite, &Transform, Option<&Anchor>, &InheritedVisibility, Option<&mut Mirror>, Has<WorldTile>, Has<Stain>),
+        (Entity, &mut Sprite, &Transform, Option<&Anchor>, &InheritedVisibility, Option<&mut Mirror>, Has<WorldTile>, Has<Stain>, Has<Direct3d>),
         (Without<TileMark>, Without<ChildOf>, Without<Billboard>),
     >,
     billboards: Query<(Entity, &Billboard)>,
@@ -572,7 +573,14 @@ fn mirror_sprites(
         }
     }
     let quad = quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0))).clone();
-    for (entity, mut sprite, transform, anchor, visible, mirror, decal, stain) in &mut sources {
+    for (entity, mut sprite, transform, anchor, visible, mirror, decal, stain, direct) in &mut sources {
+        // Son modèle 3D est dans la scène: le sprite à plat ne doit plus être dessiné, et n'a pas de panneau.
+        if direct {
+            if sprite.custom_size != Some(Vec2::ZERO) {
+                sprite.custom_size = Some(Vec2::ZERO);
+            }
+            continue;
+        }
         // La taille d'origine: celle que le sprite porte, ou celle que nous avons gardée quand nous l'avons mis à zéro.
         let size = match (sprite.custom_size, mirror.as_deref()) {
             (Some(size), _) if size != Vec2::ZERO => size,

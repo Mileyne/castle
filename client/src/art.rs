@@ -1157,7 +1157,7 @@ fn animate_monsters(
 }
 
 /// Animation des objets: vingt images (impulsion de lumière, pièce qui tourne, engrenages...).
-fn animate_props(time: Res<Time>, art: Res<Art>, mut props: Query<(&mut Sprite, &Prop, &mut Anchor)>) {
+pub(crate) fn animate_props(time: Res<Time>, art: Res<Art>, mut props: Query<(&mut Sprite, &Prop, &mut Anchor)>) {
     let frame = (time.elapsed_secs() * ANIMATION_FPS) as usize % PROP_FRAMES;
     for (mut sprite, prop, mut anchor) in &mut props {
         // Chaque objet a sa planche (et sa zone rognée): un piège qui se désarme, un panneau qui s'active en change.

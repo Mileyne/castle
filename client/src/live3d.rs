@@ -2,12 +2,16 @@
 //! lus dans des planches de sprites. Actif par défaut sur ordinateur (option de compilation `live3d`, activée par défaut);
 //! `CASTLE_LIVE3D=0` revient aux sprites.
 //!
+//! Avec le décor en 3D (`CASTLE_DECOR3D=1`, voir `decor3d`), les modèles (personnages, et objets qui en ont un) ne passent plus par
+//! l'atlas: ce sont des entités de la scène du décor, posées sur le sol à leur position réelle. Ils sont donc vus sous l'angle et
+//! l'inclinaison choisis, nets à tout cadrage, et masqués par les murs par la profondeur.
+//!
 //! Chaque personnage a une case dans une grande image (`ATLAS`): une caméra 3D à part y dessine, chaque image, tous les modèles
 //! posés sur une grille. Dans le monde 2D, le personnage reste un sprite qui montre sa case: il garde donc sa place dans le tri
 //! par hauteur avec le décor et les grands motifs, ses ombres et sa teinte.
 
 use bevy::{
-    camera::{ClearColorConfig, RenderTarget, ScalingMode},
+    camera::{ClearColorConfig, RenderTarget, ScalingMode, visibility::RenderLayers},
     core_pipeline::tonemapping::Tonemapping,
     prelude::*,
     render::render_resource::{AsBindGroup, ShaderType, TextureFormat},
@@ -16,7 +20,7 @@ use bevy::{
 use castle_shared::{HeroClass, Monster, Position};
 use sprite_forge::{Anim, LivePart, LiveShape, Theme, live_parts};
 
-use crate::art::{HERO_ANCHOR, PROP_ANCHOR, PoseKind, SPRITE_SIZE, WalkCycle, monster_scale};
+use crate::art::{HERO_ANCHOR, PROP_ANCHOR, PoseKind, Prop, SPRITE_SIZE, WalkCycle, monster_scale, object};
 
 /// Cases de l'image: `GRID` x `GRID` de `SLOT` pixels, chacune montrant un carré de `CELL_M` mètres de côté.
 const GRID: usize = 12;
@@ -40,20 +44,30 @@ pub fn enabled() -> bool {
     }
 }
 
+/// Les modèles sont-ils dessinés directement dans la scène du décor en 3D (et non dans l'atlas)?
+fn direct() -> bool {
+    crate::decor3d::enabled()
+}
+
+/// Un personnage ou un objet dont le modèle est dans la scène du décor: son sprite n'est plus dessiné à plat.
+#[derive(Component)]
+pub struct Direct3d;
+
 pub struct Live3dPlugin;
 
 impl Plugin for Live3dPlugin {
     fn build(&self, app: &mut App) {
-        if !enabled() {
+        if !enabled() && !direct() {
             return;
         }
-        app.add_plugins(MaterialPlugin::<ToonMaterial>::default())
-            .init_resource::<Caches>()
-            .init_resource::<Slots>()
-            .add_systems(Startup, setup)
-            .add_systems(Update, (attach, animate).chain().after(crate::art::AnimateCharacters))
-            .add_systems(Update, shoot)
-            .add_observer(release);
+        app.add_plugins(MaterialPlugin::<ToonMaterial>::default()).init_resource::<Caches>().init_resource::<Slots>().add_observer(release);
+        if direct() {
+            app.add_systems(Update, (attach_direct, attach_props, animate).chain().after(crate::art::AnimateCharacters));
+        } else {
+            app.add_systems(Startup, setup)
+                .add_systems(Update, (attach, animate).chain().after(crate::art::AnimateCharacters))
+                .add_systems(Update, shoot);
+        }
     }
 }
 
@@ -97,10 +111,15 @@ struct Slots {
 #[derive(Component)]
 pub struct Live3d {
     key: String,
+    /// Case de l'atlas, ou `DIRECT` quand le modèle est dans la scène du décor.
     slot: usize,
     root: Entity,
     parts: Vec<Entity>,
+    /// Unités du monde par mètre du modèle (scène du décor seulement).
+    scale: f32,
 }
+
+const DIRECT: usize = usize::MAX;
 
 fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut slots: ResMut<Slots>) {
     let side = (GRID * SLOT) as u32;
@@ -156,16 +175,73 @@ fn attach(
         commands.entity(entity).insert((
             Sprite { image: slots.atlas.clone(), rect: Some(slot_rect(slot)), custom_size: Some(size * CELL_SCALE), ..default() },
             anchor,
-            Live3d { key, slot, root, parts: Vec::new() },
+            Live3d { key, slot, root, parts: Vec::new(), scale: 1.0 },
         ));
     }
+}
+
+/// Un héros ou un monstre qui vient d'apparaître reçoit son modèle dans la scène du décor.
+fn attach_direct(mut commands: Commands, fresh: Query<(Entity, Option<&HeroClass>, Option<&Monster>), Added<WalkCycle>>) {
+    for (entity, class, monster) in &fresh {
+        let (key, size) = match (class, monster) {
+            (Some(class), _) => (format!("hero:{class:?}"), SPRITE_SIZE),
+            (None, Some(monster)) => (format!("monster:{:?}", monster.0), SPRITE_SIZE * monster_scale(monster.0)),
+            _ => continue,
+        };
+        let root = spawn_root(&mut commands);
+        commands.entity(entity).insert((Direct3d, Live3d { key, slot: DIRECT, root, parts: Vec::new(), scale: size * CELL_SCALE / CELL_M }));
+    }
+}
+
+/// Le modèle de `sprite_forge` d'un objet, quand il en a un et qu'il se pose au sol (pas les panneaux de mur, ni les portes et
+/// herses, dont l'orientation dépend de leur place).
+fn prop_model(row: usize) -> Option<String> {
+    const GROUND: [usize; 14] = [
+        object::GENERATOR,
+        object::TURRET,
+        object::COIN,
+        object::FOOD,
+        object::KEY,
+        object::TRAP_ARMED,
+        object::TRAP_OFF,
+        object::POTION,
+        object::INGREDIENT,
+        object::GEAR_PART,
+        object::TARGET_DISC,
+        object::CAPTIVE,
+        object::SAMELIA,
+        object::SAMELIA_CAGED,
+    ];
+    if !GROUND.contains(&row) {
+        return None;
+    }
+    // Les modèles d'objets sont listés dans l'ordre des planches (`object::FILES`).
+    sprite_forge::models().into_iter().filter(|model| model.group == "Objets").nth(row).map(|model| model.key)
+}
+
+/// Un objet qui vient d'apparaître reçoit son modèle dans la scène du décor, quand il en a un.
+fn attach_props(mut commands: Commands, fresh: Query<(Entity, &Prop), (Added<Prop>, Without<Live3d>)>) {
+    for (entity, prop) in &fresh {
+        let Some(key) = prop_model(prop.0) else {
+            continue;
+        };
+        let root = spawn_root(&mut commands);
+        // Un objet occupe une case de 32 unités qui montre 2,4 mètres.
+        commands.entity(entity).insert((Direct3d, Live3d { key, slot: DIRECT, root, parts: Vec::new(), scale: SPRITE_SIZE / 2.4 }));
+    }
+}
+
+fn spawn_root(commands: &mut Commands) -> Entity {
+    commands.spawn((Transform::default(), Visibility::default(), RenderLayers::layer(crate::decor3d::LAYER))).id()
 }
 
 /// Un personnage disparu rend sa case et retire son modèle.
 fn release(removed: On<Remove<Live3d>>, characters: Query<&Live3d>, mut slots: ResMut<Slots>, mut commands: Commands) {
     if let Ok(live) = characters.get(removed.entity) {
         commands.entity(live.root).despawn();
-        slots.free.push(live.slot);
+        if live.slot != DIRECT {
+            slots.free.push(live.slot);
+        }
     }
 }
 
@@ -220,44 +296,81 @@ fn part_transform(part: &LivePart) -> Transform {
 /// Met chaque modèle dans la pose du sprite (repos, marche, coup) et tourne son regard dans le sens où le personnage va.
 fn animate(
     mut commands: Commands,
-    mut characters: Query<(&mut Live3d, &WalkCycle, Option<&crate::Facing>)>,
+    time: Res<Time>,
+    mut characters: Query<(Entity, &mut Live3d, Option<&WalkCycle>, Option<&crate::Facing>, Option<&Prop>, &InheritedVisibility)>,
     mut transforms: Query<&mut Transform>,
+    mut shown: Query<&mut Visibility>,
     mut caches: ResMut<Caches>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ToonMaterial>>,
 ) {
-    for (mut live, cycle, facing) in &mut characters {
-        let (kind, t) = cycle.pose;
-        let anim = match kind {
-            PoseKind::Idle => Anim::Idle(t),
-            PoseKind::Walk => Anim::Walk(t),
-            PoseKind::Attack => Anim::Attack(t),
+    for (entity, mut live, cycle, facing, prop, visible) in &mut characters {
+        let anim = match cycle {
+            Some(cycle) => {
+                let (kind, t) = cycle.pose;
+                match kind {
+                    PoseKind::Idle => Anim::Idle(t),
+                    PoseKind::Walk => Anim::Walk(t),
+                    PoseKind::Attack => Anim::Attack(t),
+                }
+            }
+            // Un objet: vingt images en boucle, comme sa planche.
+            None => Anim::Idle((time.elapsed_secs() * 1.25).fract()),
         };
+        // Un objet qui change d'état (un piège qui se désarme...) change de modèle.
+        if let Some(prop) = prop {
+            if let Some(key) = prop_model(prop.0) {
+                if key != live.key {
+                    live.key = key;
+                    for old in live.parts.drain(..) {
+                        commands.entity(old).despawn();
+                    }
+                }
+            }
+        }
         // Le regard: les héros ont le leur (répliqué); les monstres suivent leur dernier déplacement (une des huit directions).
-        let look = match facing {
-            Some(facing) if facing.0.length_squared() > 0.01 => facing.0.normalize(),
-            _ => Vec2::from_angle(cycle.direction as f32 * std::f32::consts::FRAC_PI_4),
+        let look = match (facing, cycle) {
+            (Some(facing), _) if facing.0.length_squared() > 0.01 => facing.0.normalize(),
+            (_, Some(cycle)) => Vec2::from_angle(cycle.direction as f32 * std::f32::consts::FRAC_PI_4),
+            _ => Vec2::NEG_Y,
         };
         let yaw = look.x.atan2(-look.y);
+        let at = transforms.get(entity).map(|at| at.translation.truncate()).unwrap_or_default();
         if let Ok(mut root) = transforms.get_mut(live.root) {
-            root.rotation = Quat::from_rotation_y(yaw);
+            root.rotation = if prop.is_some() { Quat::IDENTITY } else { Quat::from_rotation_y(yaw) };
+            if live.slot == DIRECT {
+                // Dans la scène du décor: sur le sol à la position du personnage (le nord est -z), à l'échelle du monde.
+                root.translation = Vec3::new(at.x, 0.0, -at.y);
+                root.scale = Vec3::splat(live.scale);
+            }
+        }
+        if live.slot == DIRECT {
+            if let Ok(mut visibility) = shown.get_mut(live.root) {
+                let wanted = if visible.get() { Visibility::Inherited } else { Visibility::Hidden };
+                if *visibility != wanted {
+                    *visibility = wanted;
+                }
+            }
         }
         let list = live_parts(&live.key, Theme::Medieval, anim);
         if live.parts.len() != list.len() {
             for old in live.parts.drain(..) {
                 commands.entity(old).despawn();
             }
+            let direct = live.slot == DIRECT;
             live.parts = list
                 .iter()
                 .map(|part| {
-                    commands
-                        .spawn((
-                            Mesh3d(mesh_for(&mut caches, &mut meshes, part.shape)),
-                            MeshMaterial3d(material_for(&mut caches, &mut materials, part)),
-                            part_transform(part),
-                            ChildOf(live.root),
-                        ))
-                        .id()
+                    let mut spawned = commands.spawn((
+                        Mesh3d(mesh_for(&mut caches, &mut meshes, part.shape)),
+                        MeshMaterial3d(material_for(&mut caches, &mut materials, part)),
+                        part_transform(part),
+                        ChildOf(live.root),
+                    ));
+                    if direct {
+                        spawned.insert(RenderLayers::layer(crate::decor3d::LAYER));
+                    }
+                    spawned.id()
                 })
                 .collect();
             continue;
