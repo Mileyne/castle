@@ -171,7 +171,6 @@ pub fn cycle_pad_choice() {
 }
 
 /// Une manette est branchée: son nom dit si c'est une Nintendo ou une 8BitDo (disposition Nintendo) ou non.
-#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
 pub fn note_controller(name: &str) {
     let name = name.to_lowercase();
     let nintendo = ["8bitdo", "nintendo", "switch", "joy-con", "pro controller", "sn30"].iter().any(|n| name.contains(n));
@@ -276,7 +275,40 @@ pub struct SettingsPlugin;
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
         load();
-        app.add_systems(Update, apply_ui_scale);
+        app.add_systems(Update, (apply_ui_scale, note_connected_pads));
+        if std::env::var_os("CASTLE_PAD_DEBUG").is_some() {
+            app.add_systems(Update, log_pad_inputs);
+        }
+    }
+}
+
+/// Une manette vient d'être reconnue par le système (clavier-souris mis à part): on note sa disposition d'après son nom, sur toutes les
+/// plateformes (sur iOS et tvOS, `gamecontroller` le fait aussi).
+fn note_connected_pads(pads: Query<(&Name, &Gamepad), Added<Gamepad>>) {
+    for (name, pad) in &pads {
+        note_controller(name.as_str());
+        let layout = if PAD_DETECTED.load(Ordering::Relaxed) == 2 { "Nintendo" } else { "Xbox" };
+        info!("gamepad connected: {name} (vendor {:?}, product {:?}): {layout} layout", pad.vendor_id(), pad.product_id());
+    }
+}
+
+/// `CASTLE_PAD_DEBUG=1`: écrit ce que chaque manette envoie (boutons tenus et axes poussés), pour comprendre une manette mal reconnue.
+fn log_pad_inputs(pads: Query<(&Name, &Gamepad)>, time: Res<Time>, mut next: Local<f32>) {
+    if time.elapsed_secs() < *next {
+        return;
+    }
+    *next = time.elapsed_secs() + 0.25;
+    for (name, pad) in &pads {
+        let buttons: Vec<String> = pad.get_pressed().map(|button| format!("{button:?}")).collect();
+        let axes: Vec<String> = pad
+            .analog()
+            .all_axes_and_values()
+            .filter(|(_, value)| value.abs() > 0.2)
+            .map(|(axis, value)| format!("{axis:?}={value:.2}"))
+            .collect();
+        if !buttons.is_empty() || !axes.is_empty() {
+            info!("PAD {name}: buttons {buttons:?} axes {axes:?}");
+        }
     }
 }
 

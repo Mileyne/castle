@@ -372,7 +372,11 @@ fn update_fps(
     }
     *next = time.elapsed_secs() + 0.25;
     let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|d| d.smoothed()).unwrap_or(0.0);
-    let shown = format!("{fps:.0} FPS");
+    let mut shown = format!("{fps:.0} FPS");
+    // Avec la vue 3D, l'inclinaison et l'angle de la caméra (le stick droit de la manette principale les change).
+    if crate::settings::view3d_enabled() {
+        shown.push_str(&format!("  {:.0}° {:.0}°", crate::settings::view_tilt(), crate::settings::view_angle()));
+    }
     if text.0 != shown {
         text.0 = shown;
     }
