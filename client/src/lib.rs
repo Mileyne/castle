@@ -353,6 +353,12 @@ struct FireHold {
     special_sent: bool,
 }
 
+/// La direction demandée à l'écran (haut = vers le haut de l'écran) en direction du monde, quand la caméra est tournée de `yaw`
+/// autour du décor (0: elle est au sud et regarde vers le nord). Avec un angle nul, rien ne change.
+fn screen_to_world(direction: Vec2, yaw: f32) -> Vec2 {
+    Vec2::from_angle(yaw).rotate(direction)
+}
+
 /// Envoie direction, tir, pouvoir et action quand ils changent, et le héros choisi.
 ///
 /// Les commandes sont les mêmes partout (voir `controls.rs`): Espace / B tire, et maintenu assez longtemps lance le pouvoir
@@ -392,7 +398,7 @@ fn send_input(
         let step = std::f32::consts::TAU / 32.0;
         dir = Vec2::from_angle((stick.0.to_angle() / step).round() * step);
     }
-    let dir = if pause.open { Vec2::ZERO } else { dir.normalize_or_zero() };
+    let dir = if pause.open { Vec2::ZERO } else { screen_to_world(dir.normalize_or_zero(), settings::view_yaw()) };
     // Le tir: une pression brève frappe; maintenue, elle lance le pouvoir (une fois) à la place de frapper.
     let fire_down = held(KeyCode::Space);
     if fire_down {
@@ -841,5 +847,33 @@ fn fade_particles(
         if particle.0.is_finished() {
             commands.entity(entity).despawn();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(a: Vec2, b: Vec2) -> bool {
+        a.distance(b) < 1e-5
+    }
+
+    #[test]
+    fn without_a_camera_angle_the_directions_are_unchanged() {
+        for dir in [Vec2::Y, Vec2::X, Vec2::new(0.6, -0.8)] {
+            assert!(close(screen_to_world(dir, 0.0), dir));
+        }
+    }
+
+    /// Une caméra tournée vers l'est (angle de +90°) regarde vers l'ouest: le haut de l'écran est l'ouest, la droite est le nord.
+    #[test]
+    fn up_on_the_screen_follows_the_camera() {
+        let quarter = std::f32::consts::FRAC_PI_2;
+        assert!(close(screen_to_world(Vec2::Y, quarter), Vec2::NEG_X));
+        assert!(close(screen_to_world(Vec2::X, quarter), Vec2::Y));
+        // Un angle de -15° (la caméra un peu à l'ouest du sud) fait monter vers le nord-est.
+        let up = screen_to_world(Vec2::Y, (-15.0f32).to_radians());
+        assert!(up.x > 0.2 && up.y > 0.9, "{up}");
+        assert!((up.length() - 1.0).abs() < 1e-5);
     }
 }

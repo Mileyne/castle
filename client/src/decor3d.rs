@@ -39,7 +39,7 @@ fn elevation() -> f32 {
 
 /// Angle de la caméra autour du décor, en radians (0: elle est au sud et regarde vers le nord). Réglage du joueur.
 fn yaw() -> f32 {
-    crate::settings::view_value(View3d::Angle).to_radians()
+    crate::settings::view_yaw()
 }
 
 /// Part de terrain montrée, 1 pour le cadrage de la version 2D. Réglage du joueur.

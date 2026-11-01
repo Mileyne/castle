@@ -95,6 +95,11 @@ pub fn view3d_enabled() -> bool {
     std::env::var_os("CASTLE_DECOR3D").is_some()
 }
 
+/// Angle de la caméra autour du décor, en radians; zéro sans la vue 3D. Les commandes de direction en tiennent compte.
+pub fn view_yaw() -> f32 {
+    if view3d_enabled() { view_value(View3d::Angle).to_radians() } else { 0.0 }
+}
+
 /// Un réglage de la vue 3D.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum View3d {
@@ -116,9 +121,9 @@ impl View3d {
     /// Les valeurs proposées, et l'indice de celle par défaut.
     fn steps(self) -> (&'static [f32], u8) {
         match self {
-            Self::Wall => (&[0.5, 1.0, 1.5, 2.0, 3.0, 4.0], 2),
+            Self::Wall => (&[0.5, 1.0, 1.5, 2.0, 3.0, 4.0], 4),
             Self::Tilt => (&[25.0, 35.0, 45.0, 52.0, 60.0, 70.0, 80.0], 3),
-            Self::Angle => (&[-60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0], 4),
+            Self::Angle => (&[-60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0], 3),
             Self::Zoom => (&[50.0, 65.0, 80.0, 100.0, 125.0, 160.0, 200.0], 3),
         }
     }
