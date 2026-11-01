@@ -90,6 +90,79 @@ pub fn cycle_volume(channel: Channel) {
     save();
 }
 
+/// Les réglages de la vue 3D sont-ils proposés? (Le décor en 3D est un prototype: `CASTLE_DECOR3D=1`.)
+pub fn view3d_enabled() -> bool {
+    std::env::var_os("CASTLE_DECOR3D").is_some()
+}
+
+/// Un réglage de la vue 3D.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum View3d {
+    /// Hauteur des murs, en tuiles.
+    Wall,
+    /// Inclinaison de la caméra au-dessus de l'horizon, en degrés.
+    Tilt,
+    /// Angle de la caméra autour du décor, en degrés (0: elle regarde vers le nord).
+    Angle,
+    /// Cadrage: part de terrain montrée, en pour cent (plus petit: plus près).
+    Zoom,
+}
+
+impl View3d {
+    pub const ALL: [View3d; 4] = [Self::Wall, Self::Tilt, Self::Angle, Self::Zoom];
+
+    const KEYS: [&'static str; 4] = ["view_wall", "view_tilt", "view_angle", "view_zoom"];
+
+    /// Les valeurs proposées, et l'indice de celle par défaut.
+    fn steps(self) -> (&'static [f32], u8) {
+        match self {
+            Self::Wall => (&[0.5, 1.0, 1.5, 2.0, 3.0, 4.0], 2),
+            Self::Tilt => (&[25.0, 35.0, 45.0, 52.0, 60.0, 70.0, 80.0], 3),
+            Self::Angle => (&[-60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0], 4),
+            Self::Zoom => (&[50.0, 65.0, 80.0, 100.0, 125.0, 160.0, 200.0], 3),
+        }
+    }
+
+    fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// Indice choisi pour chaque réglage de la vue 3D (255: pas de choix, valeur par défaut).
+static VIEW3D: [AtomicU8; 4] = [AtomicU8::new(255), AtomicU8::new(255), AtomicU8::new(255), AtomicU8::new(255)];
+
+fn view_index(view: View3d) -> usize {
+    let (steps, default) = view.steps();
+    match VIEW3D[view.index()].load(Ordering::Relaxed) {
+        255 => default as usize,
+        chosen => (chosen as usize).min(steps.len() - 1),
+    }
+}
+
+/// La valeur du réglage: tuiles, degrés ou pour cent selon le réglage.
+pub fn view_value(view: View3d) -> f32 {
+    view.steps().0[view_index(view)]
+}
+
+/// La valeur du réglage, à afficher.
+pub fn view_label(view: View3d) -> String {
+    let value = view_value(view);
+    match view {
+        View3d::Wall => format!("{value}").replace('.', ","),
+        View3d::Tilt | View3d::Angle => format!("{value:.0}°"),
+        View3d::Zoom => format!("{value:.0} %"),
+    }
+}
+
+/// Passe à la valeur suivante (`delta` = 1) ou précédente (-1) et l'enregistre; au bout, la liste reprend de l'autre côté si `wrap`.
+pub fn view_step(view: View3d, delta: i8, wrap: bool) {
+    let count = view.steps().0.len() as i16;
+    let next = view_index(view) as i16 + i16::from(delta);
+    let next = if wrap { next.rem_euclid(count) } else { next.clamp(0, count - 1) };
+    VIEW3D[view.index()].store(next as u8, Ordering::Relaxed);
+    save();
+}
+
 /// Choix du joueur: 0 automatique (d'après le nom de la manette), 1 Xbox, 2 Nintendo.
 static PAD_CHOICE: AtomicU8 = AtomicU8::new(0);
 /// Disposition reconnue d'après le nom de la manette branchée: 0 inconnue, 1 Xbox, 2 Nintendo.
@@ -185,6 +258,10 @@ fn load() {
                 VOLUMES[i].store(tenths.min(10), Ordering::Relaxed);
                 continue;
             }
+            if let (Some(i), Ok(chosen)) = (View3d::KEYS.iter().position(|k| *k == key), value.parse::<u8>()) {
+                VIEW3D[i].store(chosen, Ordering::Relaxed);
+                continue;
+            }
         }
         match line.trim() {
             "touch_ui=on" => TOUCH_CHOICE.store(2, Ordering::Relaxed),
@@ -217,7 +294,13 @@ fn save() {
         _ => "",
     };
     let volumes: String = Channel::KEYS.iter().zip(&VOLUMES).map(|(k, v)| format!("{k}={}\n", v.load(Ordering::Relaxed))).collect();
-    if let Err(err) = castle_shared::save::write_settings(&format!("{touch}{pad}{size}{volumes}")) {
+    let views: String = View3d::KEYS
+        .iter()
+        .zip(&VIEW3D)
+        .filter(|(_, v)| v.load(Ordering::Relaxed) != 255)
+        .map(|(k, v)| format!("{k}={}\n", v.load(Ordering::Relaxed)))
+        .collect();
+    if let Err(err) = castle_shared::save::write_settings(&format!("{touch}{pad}{size}{volumes}{views}")) {
         warn!("cannot write settings: {err}");
     }
 }

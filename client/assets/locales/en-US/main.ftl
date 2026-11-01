@@ -270,3 +270,9 @@ dlg-samelia_freed_03 = The hardest part is still ahead: Lord Muldant is at the v
 settings-music = Music volume:
 settings-voice = Voice volume:
 settings-sfx = Sound effects volume:
+
+# Vue 3D (prototype)
+settings-wall = Wall height:
+settings-tilt = View tilt:
+settings-angle = View angle:
+settings-zoom = Zoom:

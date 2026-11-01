@@ -229,7 +229,7 @@ impl Menu {
             // Valider, Retour.
             Screen::NewName(_) | Screen::JoinAddress => 2,
             // Commandes tactiles, langue, disposition de la manette, taille de l'interface, Retour.
-            Screen::Settings => 8,
+            Screen::Settings => 8 + if crate::settings::view3d_enabled() { crate::settings::View3d::ALL.len() } else { 0 },
             Screen::Connecting => 0,
         }
     }
@@ -529,7 +529,25 @@ fn rebuild_menu(
                         row.spawn((menu_style(&assets, 14.0, css::LIGHT_GRAY.into()), Text::new(value)));
                     });
                 }
-                spawn_row(ui, &assets, 7, menu.cursor == 7, |row, color, tag| {
+                let mut back = 7;
+                if crate::settings::view3d_enabled() {
+                    for (i, (key, view)) in [
+                        ("settings-wall", crate::settings::View3d::Wall),
+                        ("settings-tilt", crate::settings::View3d::Tilt),
+                        ("settings-angle", crate::settings::View3d::Angle),
+                        ("settings-zoom", crate::settings::View3d::Zoom),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        spawn_row(ui, &assets, 7 + i, menu.cursor == 7 + i, |row, color, tag| {
+                            row.spawn((menu_text(&assets, 14.0, color), Tr::new(key), tag));
+                            row.spawn((menu_style(&assets, 14.0, css::LIGHT_GRAY.into()), Text::new(crate::settings::view_label(view))));
+                        });
+                    }
+                    back += crate::settings::View3d::ALL.len();
+                }
+                spawn_row(ui, &assets, back, menu.cursor == back, |row, color, tag| {
                     row.spawn((menu_text(&assets, 14.0, color), Tr::new("menu-back"), tag));
                 });
                 line(ui, "settings-touch-hint", 8.0, css::LIGHT_GRAY.into());
@@ -753,6 +771,13 @@ fn menu_input(
             menu.dirty = true;
         }
     }
+    if menu.screen == Screen::Settings && crate::settings::view3d_enabled() && (7..7 + crate::settings::View3d::ALL.len()).contains(&menu.cursor) {
+        let step = i8::from(keys.just_pressed(KeyCode::ArrowRight)) - i8::from(keys.just_pressed(KeyCode::ArrowLeft));
+        if step != 0 {
+            crate::settings::view_step(crate::settings::View3d::ALL[menu.cursor - 7], step, false);
+            menu.dirty = true;
+        }
+    }
     match menu.screen {
         Screen::Main if enter => match menu.cursor {
             0 => menu.go(Screen::Saves(GameMode::Solo)),
@@ -775,6 +800,9 @@ fn menu_input(
                 4 => crate::settings::cycle_volume(crate::settings::Channel::Music),
                 5 => crate::settings::cycle_volume(crate::settings::Channel::Voice),
                 6 => crate::settings::cycle_volume(crate::settings::Channel::Sfx),
+                n if crate::settings::view3d_enabled() && (7..7 + crate::settings::View3d::ALL.len()).contains(&n) => {
+                    crate::settings::view_step(crate::settings::View3d::ALL[n - 7], 1, true)
+                }
                 _ => {
                     menu.go(Screen::Main);
                     return;

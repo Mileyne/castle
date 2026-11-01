@@ -270,3 +270,9 @@ dlg-samelia_freed_03 = Le plus dur reste à faire : Lord Muldant est tout en hau
 settings-music = Volume de la musique :
 settings-voice = Volume des voix :
 settings-sfx = Volume des bruitages :
+
+# Vue 3D (prototype)
+settings-wall = Hauteur des murs :
+settings-tilt = Inclinaison de la vue :
+settings-angle = Angle de la vue :
+settings-zoom = Cadrage :

@@ -28,17 +28,26 @@ use bevy::window::PrimaryWindow;
 use castle_shared::{Expedition, Region, Room, TILE_SIZE, Tile};
 
 use crate::LocalPlayer;
+use crate::settings::View3d;
 use crate::art::{Stain, TileMark, WorldTile};
 
-/// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2).
-const ELEVATION: f32 = 0.9;
-/// Hauteur d'un mur, en unités du monde (`CASTLE_WALL_HEIGHT=<tuiles>` pour l'essayer; 1,5 tuile par défaut).
+/// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2). Réglage du joueur.
+fn elevation() -> f32 {
+    crate::settings::view_value(View3d::Tilt).to_radians()
+}
+
+/// Angle de la caméra autour du décor, en radians (0: elle est au sud et regarde vers le nord). Réglage du joueur.
+fn yaw() -> f32 {
+    crate::settings::view_value(View3d::Angle).to_radians()
+}
+
+/// Part de terrain montrée, 1 pour le cadrage de la version 2D. Réglage du joueur.
+fn zoom() -> f32 {
+    crate::settings::view_value(View3d::Zoom) / 100.0
+}
+/// Hauteur d'un mur, en unités du monde. Réglage du joueur (en tuiles).
 fn wall_height() -> f32 {
-    static HEIGHT: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-    *HEIGHT.get_or_init(|| {
-        let tiles = std::env::var("CASTLE_WALL_HEIGHT").ok().and_then(|value| value.parse::<f32>().ok()).unwrap_or(1.5).max(0.2);
-        tiles * TILE_SIZE
-    })
+    crate::settings::view_value(View3d::Wall) * TILE_SIZE
 }
 
 /// Champ de vision de la caméra en perspective, en degrés (`CASTLE_FOV`), ou `None` pour la vue orthographique.
@@ -74,7 +83,7 @@ impl Plugin for Decor3dPlugin {
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
-                (keep_the_image, build_chunks.after(crate::art::rebuild_world), follow_camera, update_materials).chain(),
+                (keep_the_image, apply_view, build_chunks.after(crate::art::rebuild_world), follow_camera, update_materials).chain(),
             )
             .add_systems(Update, mirror_sprites.after(crate::art::AnimateCharacters).after(crate::art::y_sort));
     }
@@ -395,13 +404,16 @@ fn follow_camera(
 ) {
     let (flat_transform, flat_projection) = *flat;
     let target = to_3d(flat_transform.translation.truncate(), 0.0);
-    let towards_camera = Vec3::new(0.0, ELEVATION.sin(), ELEVATION.cos());
+    let (elevation, yaw) = (elevation(), yaw());
+    // La direction de la cible vers la caméra: au sud pour un angle nul, puis tournée autour de la verticale.
+    let towards_camera = Vec3::new(yaw.sin() * elevation.cos(), elevation.sin(), yaw.cos() * elevation.cos());
     let Projection::Orthographic(from) = flat_projection else {
         return;
     };
+    let scale = from.scale * zoom();
     let distance = match field_of_view() {
         // La hauteur de la vue à l'écran, en unités du monde, à la distance de la cible.
-        Some(fov) => window.height() * from.scale / (2.0 * (fov.to_radians() / 2.0).tan()),
+        Some(fov) => window.height() * scale / (2.0 * (fov.to_radians() / 2.0).tan()),
         None => 1000.0,
     };
     *deep.0 = Transform::from_translation(target + towards_camera * distance).looking_at(target, Vec3::Y);
@@ -411,10 +423,26 @@ fn follow_camera(
         }
         (Some(fov), Projection::Perspective(perspective)) => perspective.fov = fov.to_radians(),
         (None, Projection::Orthographic(to)) => {
-            to.scale = from.scale;
+            to.scale = scale;
             to.scaling_mode = from.scaling_mode;
         }
         _ => {}
+    }
+}
+
+/// Un changement de la hauteur des murs oblige à refaire le décor: les maillages des murs en dépendent.
+fn apply_view(
+    mut commands: Commands,
+    chunks: Query<Entity, With<Decor3d>>,
+    built: Query<Entity, (With<TileMark>, With<Built>)>,
+    mut last: Local<Option<f32>>,
+) {
+    let wall = wall_height();
+    if last.replace(wall).is_some_and(|before| before != wall) {
+        chunks.iter().for_each(|entity| commands.entity(entity).despawn());
+        built.iter().for_each(|entity| {
+            commands.entity(entity).remove::<Built>();
+        });
     }
 }
 
@@ -436,6 +464,7 @@ fn update_materials(
             continue;
         };
         material.data.tint = tint;
+        material.data.params.z = wall_height();
         // Les lampes sont données dans le monde 2D (x, hauteur, y): le shader a besoin de distances non étirées.
         material.data.light_pos = [Vec4::ZERO; MAX_LIGHTS];
         material.data.light_color = [Vec4::ZERO; MAX_LIGHTS];
@@ -520,7 +549,7 @@ fn natural_size(sprite: &Sprite, images: &Assets<Image>, layouts: &Assets<Textur
 /// par-dessus un mur. Seuls les sprites sans parent (la météo est rattachée à la caméra) sont repris.
 ///
 /// - Debout (par défaut): un panneau vertical de la hauteur du sprite à l'écran (une verticale est raccourcie de `cos(élévation)`),
-///   dont le bas touche le sol là où le sprite finit.
+///   dont le bas touche le sol à la position du sprite.
 /// - À plat (taches et fissures du sol, marques de gore): un rectangle posé sur le sol.
 fn mirror_sprites(
     mut commands: Commands,
@@ -569,9 +598,14 @@ fn mirror_sprites(
                 scale: Vec3::new(size.x, size.y, 1.0),
             }
         } else {
-            let bottom = center.y - size.y / 2.0;
-            let height = size.y / ELEVATION.cos();
-            Transform { translation: Vec3::new(center.x, height / 2.0, -bottom), scale: Vec3::new(size.x, height, 1.0), ..default() }
+            // Debout sur le sol à la position du sprite dans le monde (celle des collisions): c'est elle qui se compare aux murs. Le panneau
+            // fait face à la caméra, quel que soit son angle.
+            let height = size.y / elevation().cos();
+            Transform {
+                translation: Vec3::new(center.x, height / 2.0, -transform.translation.y),
+                rotation: Quat::from_rotation_y(yaw()),
+                scale: Vec3::new(size.x, height, 1.0),
+            }
         };
         let visibility = if visible.get() { Visibility::Inherited } else { Visibility::Hidden };
         match mirror {
