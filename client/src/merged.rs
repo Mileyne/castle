@@ -2,7 +2,7 @@
 //!
 //! Un héros se compose de 90 à 155 primitives (sphères, cubes, capsules, cônes). Les dessiner une à une coûte une entité, un
 //! `Transform` et un appel de dessin chacune, à chaque image. Ici toutes les pièces d'une pose sont posées dans un même maillage,
-//! avec leur couleur, leur éclat et leur reflet dans la couleur des sommets: un personnage devient une entité et un appel de dessin.
+//! avec leur couleur dans les sommets: un personnage devient une entité et un appel de dessin.
 //! Le maillage d'une pose se construit une fois, puis se garde: `PoseCache`. Un modèle étant en 3D, une seule pose sert les huit
 //! directions du regard (on tourne l'entité); seules les actions comptent (repos, marche, coup), à raison d'une image par case de leur
 //! boucle. `Baking` les construit toutes à l'avance, par petits morceaux (écran « Veuillez patienter » du jeu et de la visionneuse).
@@ -245,7 +245,7 @@ pub fn part_transform(part: &LivePart) -> Transform {
     Transform { translation: Vec3::from(part.center), rotation: Quat::from_mat3(&Mat3::from_cols_array_2d(&part.rot)), scale }
 }
 
-/// Le tampon de sommets d'un maillage fusionné: position, normale et couleur (avec l'éclat et le reflet dans l'alpha).
+/// Le tampon de sommets d'un maillage fusionné: position, normale et couleur (linéaire et opaque, comme les matériaux de Bevy la lisent).
 #[derive(Default)]
 pub struct Buffers {
     pub positions: Vec<[f32; 3]>,
@@ -254,10 +254,12 @@ pub struct Buffers {
     pub indices: Vec<u32>,
 }
 
-/// L'alpha d'une couleur de sommet: l'éclat et le reflet partagent le canal alpha (2 + reflet pour une pièce qui brille, reflet sinon;
-/// aucune surface n'est transparente).
-pub fn glow_shine(glow: bool, shine: f32) -> f32 {
-    (if glow { 2.0 } else { 0.0 }) + shine.clamp(0.0, 1.0)
+/// La couleur d'un sommet pour les matériaux de Bevy: la couleur sRGB de `sprite_forge` passée en linéaire. Une pièce qui brille (orbe,
+/// étincelles) reçoit une couleur plus vive, qui la fait ressortir.
+pub fn vertex_color(color: [f32; 3], glow: bool) -> [f32; 4] {
+    let linear = Color::srgb(color[0], color[1], color[2]).to_linear();
+    let boost = if glow { 3.0 } else { 1.0 };
+    [linear.red * boost, linear.green * boost, linear.blue * boost, 1.0]
 }
 
 impl Buffers {
@@ -271,7 +273,7 @@ impl Buffers {
         for (position, normal) in shape.positions.iter().zip(&shape.normals) {
             self.positions.push((place.rotation * (Vec3::from(*position) * place.scale) + place.translation).to_array());
             self.normals.push((place.rotation * (Vec3::from(*normal) * inverse_scale)).normalize_or_zero().to_array());
-            self.colors.push([part.color[0], part.color[1], part.color[2], glow_shine(part.glow, part.shine)]);
+            self.colors.push(vertex_color(part.color, part.glow));
         }
         self.indices.extend(shape.indices.iter().map(|index| first + index));
     }
@@ -285,29 +287,7 @@ impl Buffers {
     }
 }
 
-impl Buffers {
-    /// Le maillage avec des couleurs linéaires et opaques, pour les matériaux de Bevy (qui lisent la couleur des sommets comme du
-    /// linéaire, et n'ont pas besoin de l'éclat ni du reflet que le shader du jeu cache dans l'alpha).
-    pub fn into_linear_mesh(mut self) -> Mesh {
-        for color in &mut self.colors {
-            let linear = Color::srgb(color[0], color[1], color[2]).to_linear();
-            *color = [linear.red, linear.green, linear.blue, 1.0];
-        }
-        self.into_mesh()
-    }
-}
-
-/// Comme `merge`, avec des couleurs linéaires pour les matériaux de Bevy (voir `Buffers::into_linear_mesh`).
-pub fn merge_linear(parts: &[LivePart]) -> Mesh {
-    let mut buffers = Buffers::default();
-    for part in parts {
-        buffers.push_part(part);
-    }
-    buffers.into_linear_mesh()
-}
-
-/// Toutes les pièces dans un seul maillage. Chaque sommet porte la couleur de sa pièce (sRGB, comme dans `sprite_forge`) et, dans son
-/// canal alpha, son éclat (la pièce brille, sans ombre) et son reflet.
+/// Toutes les pièces dans un seul maillage. Chaque sommet porte la couleur de sa pièce.
 pub fn merge(parts: &[LivePart]) -> Mesh {
     let mut buffers = Buffers::default();
     for part in parts {
@@ -389,8 +369,9 @@ mod tests {
         let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR) else {
             panic!("couleurs manquantes");
         };
-        // La pièce brille (2) et son reflet vaut 0,3.
-        assert!(colors.iter().all(|c| c[..3] == [1.0, 0.5, 0.25] && (c[3] - 2.3).abs() < 1e-5));
+        // La couleur est linéaire; une pièce qui brille est trois fois plus vive.
+        let linear = Color::srgb(1.0, 0.5, 0.25).to_linear();
+        assert!(colors.iter().all(|c| (c[0] - linear.red * 3.0).abs() < 1e-4 && (c[1] - linear.green * 3.0).abs() < 1e-4 && c[3] == 1.0));
     }
 
     #[test]

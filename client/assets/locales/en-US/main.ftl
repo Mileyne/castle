@@ -272,3 +272,8 @@ settings-voice = Voice volume:
 settings-sfx = Sound effects volume:
 
 loading-wait = Please wait
+
+settings-shader = Character shading:
+shader-matte = Matte
+shader-glossy = Glossy
+shader-flat = Unlit

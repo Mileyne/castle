@@ -272,3 +272,8 @@ settings-voice = Volume des voix :
 settings-sfx = Volume des bruitages :
 
 loading-wait = Veuillez patienter
+
+settings-shader = Rendu des personnages :
+shader-matte = Mat
+shader-glossy = Brillant
+shader-flat = Sans lumière

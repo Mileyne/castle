@@ -152,6 +152,64 @@ pub fn reset_view() {
     VIEW_TILT.store(VIEW_TILT_DEFAULT.to_bits(), Ordering::Relaxed);
 }
 
+/// Le matériau (de Bevy, `StandardMaterial`) qui dessine les personnages, les monstres et les objets.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ModelShader {
+    /// Un éclairage physique doux.
+    Matte,
+    /// Métallique et peu rugueux (le défaut): l'armure brille.
+    Glossy,
+    /// Sans éclairage: les couleurs pures des pièces (le plus léger).
+    Flat,
+}
+
+impl ModelShader {
+    pub const ALL: [ModelShader; 3] = [Self::Matte, Self::Glossy, Self::Flat];
+
+    fn index(self) -> u8 {
+        Self::ALL.iter().position(|shader| *shader == self).unwrap_or(0) as u8
+    }
+
+    pub fn next(self) -> Self {
+        Self::ALL[(self.index() as usize + 1) % Self::ALL.len()]
+    }
+
+    /// La clé de traduction de son nom.
+    pub fn name_key(self) -> &'static str {
+        match self {
+            Self::Matte => "shader-matte",
+            Self::Glossy => "shader-glossy",
+            Self::Flat => "shader-flat",
+        }
+    }
+
+    /// Le mot enregistré dans le fichier des réglages.
+    fn word(self) -> &'static str {
+        match self {
+            Self::Matte => "matte",
+            Self::Glossy => "glossy",
+            Self::Flat => "flat",
+        }
+    }
+
+    fn from_word(word: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|shader| shader.word() == word)
+    }
+}
+
+static MODEL_SHADER: AtomicU8 = AtomicU8::new(1);
+
+/// Le shader des modèles en vigueur.
+pub fn model_shader() -> ModelShader {
+    ModelShader::ALL[usize::from(MODEL_SHADER.load(Ordering::Relaxed)).min(ModelShader::ALL.len() - 1)]
+}
+
+/// Passe au shader suivant et l'enregistre.
+pub fn cycle_model_shader() {
+    MODEL_SHADER.store(model_shader().next().index(), Ordering::Relaxed);
+    save();
+}
+
 /// Choix du joueur: 0 automatique (d'après le nom de la manette), 1 Xbox, 2 Nintendo.
 static PAD_CHOICE: AtomicU8 = AtomicU8::new(0);
 /// Disposition reconnue d'après le nom de la manette branchée: 0 inconnue, 1 Xbox, 2 Nintendo.
@@ -237,6 +295,11 @@ pub fn set_touch_ui(on: bool) {
 }
 
 fn load() {
+    // `CASTLE_SHADER=matte|glossy|flat` impose un shader pour essayer, sans toucher aux réglages enregistrés.
+    let forced = std::env::var("CASTLE_SHADER").ok().and_then(|word| ModelShader::from_word(&word));
+    if let Some(shader) = forced {
+        MODEL_SHADER.store(shader.index(), Ordering::Relaxed);
+    }
     let Some(text) = castle_shared::save::read_settings() else {
         return;
     };
@@ -246,6 +309,12 @@ fn load() {
                 VOLUMES[i].store(tenths.min(10), Ordering::Relaxed);
                 continue;
             }
+        }
+        if let Some(shader) = line.trim().strip_prefix("model_shader=").and_then(ModelShader::from_word) {
+            if forced.is_none() {
+                MODEL_SHADER.store(shader.index(), Ordering::Relaxed);
+            }
+            continue;
         }
         match line.trim() {
             "touch_ui=on" => TOUCH_CHOICE.store(2, Ordering::Relaxed),
@@ -278,7 +347,8 @@ fn save() {
         _ => "",
     };
     let volumes: String = Channel::KEYS.iter().zip(&VOLUMES).map(|(k, v)| format!("{k}={}\n", v.load(Ordering::Relaxed))).collect();
-    if let Err(err) = castle_shared::save::write_settings(&format!("{touch}{pad}{size}{volumes}")) {
+    let shader = format!("model_shader={}\n", model_shader().word());
+    if let Err(err) = castle_shared::save::write_settings(&format!("{touch}{pad}{size}{volumes}{shader}")) {
         warn!("cannot write settings: {err}");
     }
 }

@@ -5,12 +5,13 @@
 //! Chaque modèle est une seule entité qui porte le maillage fusionné de sa pose du moment. Les poses de tous les modèles d'un niveau
 //! sont construites à l'avance (voir `prebake`); une pose manquante se construit à la demande.
 
-use bevy::{camera::visibility::RenderLayers, prelude::*, render::render_resource::AsBindGroup, shader::ShaderRef};
+use bevy::{camera::visibility::RenderLayers, prelude::*};
 use castle_shared::{ExitKind, HeroClass, Landmark, LandmarkKind, LevelExit, Monster, MonsterKind};
 use sprite_forge::{Anim, models};
 
 use crate::art::{PoseKind, Prop, SPRITE_SIZE, WalkCycle, exit_row, monster_scale, object};
 use crate::merged::{ModelSource, PoseCache};
+use crate::settings::ModelShader;
 
 /// Les modèles de `sprite_forge` montrent 2,4 mètres dans une case de sprite: un mètre vaut `taille de la case / 2,4` unités du monde.
 const METERS_PER_SPRITE: f32 = 2.4;
@@ -22,30 +23,9 @@ pub struct Live3dPlugin;
 
 impl Plugin for Live3dPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<ToonMaterial>::default())
-            .init_resource::<Caches>()
+        app.init_resource::<Caches>()
             .add_observer(release)
             .add_systems(Update, (attach_characters, attach_props, attach_landmarks, attach_exits, animate).chain().after(crate::art::AnimateCharacters));
-    }
-}
-
-/// Le matériau « toon » des modèles: la couleur, l'éclat et le reflet viennent des sommets du maillage fusionné (voir `merged`); seule la
-/// teinte (`ModelTint`) change d'un modèle à l'autre, donc il n'y a qu'une poignée de matériaux.
-#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
-pub struct ToonMaterial {
-    /// Multiplie la couleur; son alpha rend le modèle translucide.
-    #[uniform(0)]
-    tint: Vec4,
-    blend: bool,
-}
-
-impl Material for ToonMaterial {
-    fn fragment_shader() -> ShaderRef {
-        "shaders/toon.wesl".into()
-    }
-
-    fn alpha_mode(&self) -> AlphaMode {
-        if self.blend { AlphaMode::Blend } else { AlphaMode::Opaque }
     }
 }
 
@@ -68,11 +48,11 @@ fn tint_key(tint: Option<&ModelTint>) -> TintKey {
     [byte(color.red), byte(color.green), byte(color.blue), (color.alpha.clamp(0.0, 1.0) * 255.0).round() as u8]
 }
 
-/// Les maillages fusionnés de toutes les poses construites, et le matériau commun.
+/// Les maillages fusionnés de toutes les poses construites, et les matériaux (un par shader et par teinte, partagés).
 #[derive(Resource, Default)]
 pub struct Caches {
     pub poses: PoseCache,
-    materials: std::collections::HashMap<TintKey, Handle<ToonMaterial>>,
+    materials: std::collections::HashMap<(ModelShader, TintKey), Handle<StandardMaterial>>,
 }
 
 /// Un modèle 3D: ce qu'il montre, sa place dans la scène, et le maillage de sa pose du moment.
@@ -83,8 +63,9 @@ pub struct Live3d {
     /// L'entité qui porte le maillage fusionné, et la pose qu'il montre.
     body: Option<Entity>,
     shown: Option<(ModelSource, u8, u16)>,
-    /// La teinte du matériau du corps.
+    /// La teinte et le shader du matériau du corps.
     tint: TintKey,
+    shader: Option<ModelShader>,
     /// Unités du monde par mètre du modèle.
     scale: f32,
 }
@@ -95,7 +76,7 @@ fn spawn_root(commands: &mut Commands) -> Entity {
 
 fn attach(commands: &mut Commands, entity: Entity, source: ModelSource, scale: f32) {
     let root = spawn_root(commands);
-    commands.entity(entity).insert(Live3d { source, root, body: None, shown: None, tint: WHITE, scale });
+    commands.entity(entity).insert(Live3d { source, root, body: None, shown: None, tint: WHITE, shader: None, scale });
 }
 
 /// Le modèle d'une classe de héros.
@@ -215,9 +196,10 @@ fn animate(
     mut shown: Query<&mut Visibility>,
     mut caches: ResMut<Caches>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ToonMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let caches = &mut *caches;
+    let shader = crate::settings::model_shader();
     for (entity, mut live, cycle, facing, prop, exit, tint, visible) in &mut models {
         let anim = match cycle {
             Some(cycle) => {
@@ -263,19 +245,13 @@ fn animate(
                 *visibility = wanted;
             }
         }
-        // La teinte: un matériau par teinte, partagés.
+        // La teinte et le shader: un matériau par couple, partagés.
         let tint = tint_key(tint);
-        let material = caches
-            .materials
-            .entry(tint)
-            .or_insert_with(|| {
-                let channel = |byte: u8| f32::from(byte) / 127.0;
-                materials.add(ToonMaterial { tint: Vec4::new(channel(tint[0]), channel(tint[1]), channel(tint[2]), f32::from(tint[3]) / 255.0), blend: tint[3] < 255 })
-            })
-            .clone();
-        if let (Some(body), true) = (live.body, live.tint != tint) {
+        let material = material_for(caches, &mut materials, shader, tint);
+        if let (Some(body), true) = (live.body, live.tint != tint || live.shader != Some(shader)) {
             commands.entity(body).insert(MeshMaterial3d(material.clone()));
             live.tint = tint;
+            live.shader = Some(shader);
         }
         // Le maillage de la pose: construit à l'avance (`prebake`), sinon à la demande.
         let (family, index) = live.source.pose(anim);
@@ -294,8 +270,35 @@ fn animate(
                     .id();
                 live.body = Some(body);
                 live.tint = tint;
+                live.shader = Some(shader);
             }
         }
         live.shown = Some(wanted);
     }
+}
+
+/// Le matériau d'un shader et d'une teinte, créé la première fois.
+fn material_for(caches: &mut Caches, standard: &mut Assets<StandardMaterial>, shader: ModelShader, tint: TintKey) -> Handle<StandardMaterial> {
+    caches
+        .materials
+        .entry((shader, tint))
+        .or_insert_with(|| {
+            let channel = |byte: u8| f32::from(byte) / 127.0;
+            let base_color = Color::srgba(channel(tint[0]), channel(tint[1]), channel(tint[2]), f32::from(tint[3]) / 255.0);
+            let (roughness, metallic, reflectance, unlit) = match shader {
+                ModelShader::Matte => (0.75, 0.0, 0.5, false),
+                ModelShader::Glossy => (0.3, 0.6, 0.6, false),
+                ModelShader::Flat => (0.5, 0.0, 0.5, true),
+            };
+            standard.add(StandardMaterial {
+                base_color,
+                perceptual_roughness: roughness,
+                metallic,
+                reflectance,
+                unlit,
+                alpha_mode: if tint[3] < 255 { AlphaMode::Blend } else { AlphaMode::Opaque },
+                ..default()
+            })
+        })
+        .clone()
 }

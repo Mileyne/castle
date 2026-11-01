@@ -13,7 +13,7 @@ use crate::title::{HostAddress, ReturnToTitle, TitleActive};
 use crate::ui::ui_font;
 
 /// Entrées: reprendre, commandes tactiles (oui/non), volumes, abandonner.
-const ITEMS: [&str; 6] = ["pause-resume", "settings-touch", "settings-music", "settings-voice", "settings-sfx", "pause-quit"];
+const ITEMS: [&str; 7] = ["pause-resume", "settings-touch", "settings-music", "settings-voice", "settings-sfx", "settings-shader", "pause-quit"];
 
 const CHANNELS: [crate::settings::Channel; 3] = [crate::settings::Channel::Music, crate::settings::Channel::Voice, crate::settings::Channel::Sfx];
 
@@ -116,6 +116,10 @@ fn navigate(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, mut pause: 
                 crate::settings::cycle_volume(CHANNELS[pause.cursor - 2]);
                 pause.redraw = true;
             }
+            5 => {
+                crate::settings::cycle_model_shader();
+                pause.redraw = true;
+            }
             _ => commands.trigger(ReturnToTitle(None)),
         }
     }
@@ -194,6 +198,8 @@ fn sync_overlay(
                         } else if (2..=4).contains(&i) {
                             let value = format!("{} %", crate::settings::volume_tenths(CHANNELS[i - 2]) * 10);
                             row.spawn((Text::new(value), font(16.0), TextColor(css::LIGHT_GRAY.into())));
+                        } else if i == 5 {
+                            row.spawn((Text::default(), Tr::new(crate::settings::model_shader().name_key()), font(16.0), TextColor(css::LIGHT_GRAY.into())));
                         }
                     });
                 }

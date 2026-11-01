@@ -159,7 +159,18 @@ fn keep_the_image(mut cameras: Query<&mut Camera, (With<Camera2d>, Changed<Camer
     }
 }
 
+/// La direction du soleil du décor (celle du shader `decor3d.wesl`), pour que les modèles éclairés par Bevy aient la même lumière.
+const SUN_FROM: Vec3 = Vec3::new(-0.45, 0.75, 0.5);
+
 fn setup(mut commands: Commands) {
+    // Le soleil des matériaux de Bevy, sur la seule couche des modèles (le sol et les murs ont leur propre éclairage, dans leur shader),
+    // sans ombres portées (elles coûteraient une passe de plus).
+    commands.spawn((
+        DirectionalLight { illuminance: 9000.0, shadow_maps_enabled: false, ..default() },
+        Transform::from_translation(SUN_FROM * 10.0).looking_at(Vec3::ZERO, Vec3::Y),
+        RenderLayers::layer(LAYER),
+    ));
+    commands.insert_resource(GlobalAmbientLight { color: Color::WHITE, brightness: 450.0, ..default() });
     commands.spawn((
         DecorCamera,
         Camera3d::default(),

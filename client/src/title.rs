@@ -229,7 +229,7 @@ impl Menu {
             // Valider, Retour.
             Screen::NewName(_) | Screen::JoinAddress => 2,
             // Commandes tactiles, langue, disposition de la manette, taille de l'interface, Retour.
-            Screen::Settings => 8,
+            Screen::Settings => 9,
             Screen::Connecting => 0,
         }
     }
@@ -530,6 +530,10 @@ fn rebuild_menu(
                     });
                 }
                 spawn_row(ui, &assets, 7, menu.cursor == 7, |row, color, tag| {
+                    row.spawn((menu_text(&assets, 14.0, color), Tr::new("settings-shader"), tag));
+                    row.spawn((menu_text(&assets, 14.0, css::LIGHT_GRAY.into()), Tr::new(crate::settings::model_shader().name_key())));
+                });
+                spawn_row(ui, &assets, 8, menu.cursor == 8, |row, color, tag| {
                     row.spawn((menu_text(&assets, 14.0, color), Tr::new("menu-back"), tag));
                 });
                 line(ui, "settings-touch-hint", 8.0, css::LIGHT_GRAY.into());
@@ -775,6 +779,7 @@ fn menu_input(
                 4 => crate::settings::cycle_volume(crate::settings::Channel::Music),
                 5 => crate::settings::cycle_volume(crate::settings::Channel::Voice),
                 6 => crate::settings::cycle_volume(crate::settings::Channel::Sfx),
+                7 => crate::settings::cycle_model_shader(),
                 _ => {
                     menu.go(Screen::Main);
                     return;

@@ -16,7 +16,7 @@
 use bevy::prelude::*;
 use sprite_forge::{LiveLayer, LivePart, LiveShape};
 
-use crate::merged::{Buffers, glow_shine, part_transform};
+use crate::merged::{Buffers, part_transform, vertex_color};
 
 /// Réglages de fusion d'une couche.
 #[derive(Clone, Copy, Debug)]
@@ -48,7 +48,7 @@ struct Solid {
     inverse_rotation: Quat,
     scale: Vec3,
     color: [f32; 3],
-    glow_shine: f32,
+    glow: bool,
     /// Rayon d'une sphère qui contient la pièce.
     bound: f32,
 }
@@ -71,7 +71,7 @@ impl Solid {
             inverse_rotation: place.rotation.inverse(),
             scale: place.scale,
             color: part.color,
-            glow_shine: glow_shine(part.glow, part.shine),
+            glow: part.glow,
             bound: (place.scale * half).length(),
         }
     }
@@ -222,20 +222,20 @@ impl Field {
         candidates.retain(|(d, _)| *d - nearest < self.blend * 3.0);
         let mut total = 0.0;
         let mut rgb = Vec3::ZERO;
-        let mut best = (f32::MAX, 0.0);
+        let mut best = (f32::MAX, false);
         for (d, solid) in &candidates {
             let weight = (-(d - nearest) / (self.blend * 0.6)).exp();
             total += weight;
             rgb += Vec3::from(solid.color) * weight;
             if *d < best.0 {
-                best = (*d, solid.glow_shine);
+                best = (*d, solid.glow);
             }
         }
         if total <= 0.0 {
-            return [0.5, 0.5, 0.5, 0.0];
+            return vertex_color([0.5, 0.5, 0.5], false);
         }
         let rgb = rgb / total;
-        [rgb.x, rgb.y, rgb.z, best.1]
+        vertex_color([rgb.x, rgb.y, rgb.z], best.1)
     }
 
     /// La normale: le gradient du champ de distance.

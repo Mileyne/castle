@@ -14,8 +14,6 @@ use std::time::Duration;
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
     prelude::*,
-    render::render_resource::AsBindGroup,
-    shader::ShaderRef,
     window::PresentMode,
 };
 use sprite_forge::{Anim, models};
@@ -88,7 +86,7 @@ struct Entry {
 }
 
 /// Quel rendu montrer: les primitives fusionnées en un seul maillage (celui du jeu), leur fusion douce, les deux côte à côte, ou le
-/// même modèle sous quatre shaders (le toon du jeu, puis trois matériaux de Bevy).
+/// même modèle sous trois matériaux de Bevy (mat, brillant, sans éclairage).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Fusion {
     Primitives,
@@ -108,33 +106,26 @@ impl Fusion {
     }
 }
 
-/// Ce qui dessine un exemplaire: le shader toon du jeu (sur le maillage fusionné ou sa fusion douce), ou un matériau de Bevy.
+/// Ce qui dessine un exemplaire: un matériau de Bevy (`StandardMaterial`), sur le maillage fusionné du jeu ou sur sa fusion douce.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Look {
-    Toon,
-    SoftToon,
-    /// `StandardMaterial` mat: un éclairage physique, sans reflet marqué.
-    Matte,
-    /// `StandardMaterial` brillant: métallique et peu rugueux, comme une armure polie.
+    /// Brillant (métal 0,6, rugosité 0,3): le rendu par défaut du jeu.
     Glossy,
-    /// `StandardMaterial` sans éclairage: les couleurs propres des pièces, sans lumière ni ombre.
+    SoftGlossy,
+    /// Mat: un éclairage physique, sans reflet marqué.
+    Matte,
+    /// Sans éclairage: les couleurs propres des pièces, sans lumière ni ombre.
     Flat,
 }
 
 impl Look {
     fn label(self) -> &'static str {
         match self {
-            Self::Toon => "toon du jeu (paliers, hachures, reflet, contour)",
-            Self::SoftToon => "toon du jeu, fusion douce",
-            Self::Matte => "Bevy StandardMaterial mat (rugosité 0,75)",
-            Self::Glossy => "Bevy StandardMaterial brillant (métal 0,6, rugosité 0,3)",
-            Self::Flat => "Bevy StandardMaterial sans éclairage (couleurs pures)",
+            Self::Glossy => "brillant (métal 0,6, rugosité 0,3): le défaut du jeu",
+            Self::SoftGlossy => "brillant, fusion douce",
+            Self::Matte => "mat (rugosité 0,75)",
+            Self::Flat => "sans éclairage (couleurs pures)",
         }
-    }
-
-    /// Le matériau est-il un matériau de Bevy (couleurs de sommets linéaires)?
-    fn is_standard(self) -> bool {
-        matches!(self, Self::Matte | Self::Glossy | Self::Flat)
     }
 }
 
@@ -159,7 +150,6 @@ const DEFAULT_DISTANCE: f32 = 6.0;
 #[derive(Resource, Default)]
 struct Poses {
     cache: PoseCache,
-    material: Option<Handle<ToonMaterial>>,
     /// La construction à l'avance, tant qu'elle n'est pas finie, et son temps (en secondes).
     baking: Option<Baking>,
     baking_secs: f32,
@@ -167,8 +157,6 @@ struct Poses {
     soft: std::collections::HashMap<PoseKey, (Handle<Mesh>, usize, f32)>,
     /// La fusion douce de la pose montrée: ses sommets et son temps de construction.
     soft_stats: Option<(usize, f32)>,
-    /// Les poses en couleurs linéaires, pour les matériaux de Bevy.
-    linear: std::collections::HashMap<PoseKey, Handle<Mesh>>,
     standard: Option<[Handle<StandardMaterial>; 3]>,
 }
 
@@ -186,19 +174,6 @@ struct WaitPercent;
 struct Shown {
     poses: [Option<PoseKey>; 4],
     fusion: Option<Fusion>,
-}
-
-#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
-struct ToonMaterial {
-    /// Multiplie la couleur (blanc: les couleurs du modèle).
-    #[uniform(0)]
-    tint: Vec4,
-}
-
-impl Material for ToonMaterial {
-    fn fragment_shader() -> ShaderRef {
-        "shaders/toon.wesl".into()
-    }
 }
 
 fn main() {
@@ -220,7 +195,6 @@ fn main() {
                     ..default()
                 })
                 .set(AssetPlugin { file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/assets").into(), ..default() }),
-            MaterialPlugin::<ToonMaterial>::default(),
             FrameTimeDiagnosticsPlugin::default(),
         ))
         .insert_resource(ClearColor(Color::srgb(0.16, 0.2, 0.17)))
@@ -359,8 +333,8 @@ fn input(mut viewer: ResMut<Viewer>, keys: Res<ButtonInput<KeyCode>>, time: Res<
     }
     if fusion {
         viewer.fusion = viewer.fusion.next();
-        // Quatre exemplaires côte à côte demandent plus de recul.
-        viewer.distance = viewer.distance.max(if viewer.fusion == Fusion::Shaders { 9.0 } else { 6.0 });
+        // Trois exemplaires côte à côte demandent plus de recul.
+        viewer.distance = viewer.distance.max(if viewer.fusion == Fusion::Shaders { 7.5 } else { 6.0 });
     }
     if reset {
         viewer.yaw = DEFAULT_YAW;
@@ -379,10 +353,10 @@ fn place_camera(viewer: Res<Viewer>, mut camera: Single<&mut Transform, With<Cam
 /// Ce que montre chaque emplacement, selon le mode: (décalage en x, rendu).
 fn slots(fusion: Fusion) -> Vec<(f32, Look)> {
     match fusion {
-        Fusion::Both => vec![(-0.9, Look::Toon), (0.9, Look::SoftToon)],
-        Fusion::Primitives => vec![(0.0, Look::Toon)],
-        Fusion::Soft => vec![(0.0, Look::SoftToon)],
-        Fusion::Shaders => vec![(-2.2, Look::Toon), (-0.73, Look::Matte), (0.73, Look::Glossy), (2.2, Look::Flat)],
+        Fusion::Both => vec![(-0.9, Look::Glossy), (0.9, Look::SoftGlossy)],
+        Fusion::Primitives => vec![(0.0, Look::Glossy)],
+        Fusion::Soft => vec![(0.0, Look::SoftGlossy)],
+        Fusion::Shaders => vec![(-1.6, Look::Matte), (0.0, Look::Glossy), (1.6, Look::Flat)],
     }
 }
 
@@ -395,7 +369,6 @@ fn update_model(
     viewer: Res<Viewer>,
     mut poses: ResMut<Poses>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut toon_materials: ResMut<Assets<ToonMaterial>>,
     mut standard: ResMut<Assets<StandardMaterial>>,
     mut shown: Single<(Entity, &mut Shown)>,
     mut bodies: Local<Vec<Entity>>,
@@ -404,7 +377,6 @@ fn update_model(
         return;
     }
     let poses = &mut *poses;
-    let toon = poses.material.get_or_insert_with(|| toon_materials.add(ToonMaterial { tint: Vec4::ONE })).clone();
     let [matte, glossy, flat] = poses
         .standard
         .get_or_insert_with(|| {
@@ -435,8 +407,8 @@ fn update_model(
             continue;
         }
         let handle = match look {
-            Look::Toon => poses.cache.get_or_build(&wanted, &mut meshes),
-            Look::SoftToon => {
+            Look::Glossy | Look::Matte | Look::Flat => poses.cache.get_or_build(&wanted, &mut meshes),
+            Look::SoftGlossy => {
                 let found = poses.soft.get(&wanted).map(|(handle, vertices, millis)| (handle.clone(), *vertices, *millis));
                 let (handle, vertices, millis) = found.unwrap_or_else(|| {
                     let started = std::time::Instant::now();
@@ -450,11 +422,6 @@ fn update_model(
                 poses.soft_stats = Some((vertices, millis));
                 handle
             }
-            Look::Matte | Look::Glossy | Look::Flat => poses
-                .linear
-                .entry(wanted.clone())
-                .or_insert_with(|| meshes.add(merged::merge_linear(&source.parts(source.anim(family, index)))))
-                .clone(),
         };
         let place = Transform::from_xyz(*offset, 0.0, 0.0);
         if let Some(entity) = bodies.get(slot).copied() {
@@ -462,9 +429,8 @@ fn update_model(
         } else {
             let mut body = commands.spawn((Mesh3d(handle), place, ChildOf(*root)));
             match look {
-                Look::Toon | Look::SoftToon => body.insert(MeshMaterial3d(toon.clone())),
+                Look::Glossy | Look::SoftGlossy => body.insert(MeshMaterial3d(glossy.clone())),
                 Look::Matte => body.insert(MeshMaterial3d(matte.clone())),
-                Look::Glossy => body.insert(MeshMaterial3d(glossy.clone())),
                 Look::Flat => body.insert(MeshMaterial3d(flat.clone())),
             };
             bodies.push(body.id());
@@ -483,8 +449,7 @@ fn update_hud(viewer: Res<Viewer>, poses: Res<Poses>, diagnostics: Res<Diagnosti
         Fusion::Primitives => "primitives fusionnées (le jeu)".to_string(),
         Fusion::Soft => "fusion douce".to_string(),
         Fusion::Shaders => format!(
-            "même modèle, de gauche à droite:\n  1 {}\n  2 {}\n  3 {}\n  4 {}",
-            Look::Toon.label(),
+            "même modèle, de gauche à droite:\n  1 {}\n  2 {}\n  3 {}",
             Look::Matte.label(),
             Look::Glossy.label(),
             Look::Flat.label()
