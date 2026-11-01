@@ -200,8 +200,8 @@ fn chunk_mesh(room: &Room, origin: IVec2, cols: u32, rows: u32, lift: f32) -> Me
         indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
     };
     let world = |x: i32, y: i32| room.tile_center(x.max(0) as u32, y.max(0) as u32) - Vec2::splat(TILE_SIZE / 2.0);
-    // L'image du bloc: le coin haut-gauche est (0, 0). Le nord (y croissant) est en haut.
-    let uv_at = |tx: f32, ty: f32| Vec2::new(tx / cols as f32, 1.0 - ty / rows as f32);
+    // L'image du bloc: le coin haut-gauche est (0, 0) et v croît vers le bas; le nord (y croissant) est en haut. `ty` compte depuis le haut.
+    let uv_at = |tx: f32, ty: f32| Vec2::new(tx / cols as f32, ty / rows as f32);
     let (min, max) = (world(origin.x, origin.y), world(origin.x + cols as i32, origin.y + rows as i32));
     // Le sol: sud-ouest, sud-est, nord-est, nord-ouest, vu de dessus (normale vers le haut).
     quad(
