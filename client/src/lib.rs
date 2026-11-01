@@ -3,7 +3,7 @@
 //! Bibliothèque lancée par `run`: le programme `castle_client` (ordinateur) et l'app iOS (`mobile/`) l'appellent tous deux.
 
 use std::net::{Ipv4Addr, UdpSocket};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use bevy::{color::palettes::css, math::StableInterpolate, prelude::*};
 use bevy_replicon::prelude::*;
@@ -104,12 +104,35 @@ fn log_objc_exceptions() {
     unsafe { objc_setExceptionPreprocessor(preprocess) };
 }
 
-/// Toutes les cinq secondes, écrit dans le journal la cadence d'affichage et le nombre d'entités (pour juger la fluidité sur
-/// les petits appareils).
+/// Durée de la mise à jour du monde (de `First` à `Last`) sur l'image en cours, cumulée sur la période du rapport.
+#[derive(Resource, Default)]
+struct UpdateTimer {
+    started: Option<std::time::Instant>,
+    total: Duration,
+    frames: u32,
+}
+
+fn update_begins(mut timer: ResMut<UpdateTimer>) {
+    timer.started = Some(std::time::Instant::now());
+}
+
+fn update_ends(mut timer: ResMut<UpdateTimer>) {
+    if let Some(started) = timer.started.take() {
+        timer.total += started.elapsed();
+        timer.frames += 1;
+    }
+}
+
+/// Toutes les cinq secondes, écrit dans le journal la cadence d'affichage, le temps de mise à jour du monde (CPU, fil principal),
+/// le nombre d'entités et d'objets visibles, et les temps des passes de rendu quand l'appareil les mesure (pour juger la fluidité
+/// sur les petits appareils).
 fn log_frame_rate(
     time: Res<Time>,
     diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
     entities: Query<Entity>,
+    visible: Query<&ViewVisibility>,
+    windows: Query<&Window>,
+    mut timer: ResMut<UpdateTimer>,
     mut next: Local<f32>,
 ) {
     use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
@@ -119,7 +142,24 @@ fn log_frame_rate(
     *next = time.elapsed_secs() + 5.0;
     let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|d| d.smoothed()).unwrap_or(0.0);
     let frame = diagnostics.get(&FrameTimeDiagnosticsPlugin::FRAME_TIME).and_then(|d| d.smoothed()).unwrap_or(0.0);
-    info!("cadence: {fps:.0} images/s ({frame:.1} ms), {} entités", entities.iter().count());
+    let update = if timer.frames > 0 { timer.total.as_secs_f64() * 1000.0 / timer.frames as f64 } else { 0.0 };
+    *timer = UpdateTimer::default();
+    let window = windows.iter().next().map(|w| format!("{}x{} (échelle {})", w.physical_width(), w.physical_height(), w.scale_factor())).unwrap_or_default();
+    info!(
+        "cadence: {fps:.0} images/s ({frame:.1} ms), mise à jour {update:.1} ms, fenêtre {window}, {} entités, {} visibles",
+        entities.iter().count(),
+        visible.iter().filter(|v| v.get()).count()
+    );
+    // Passes de rendu (CPU et GPU), si l'appareil sait les chronométrer.
+    let mut passes: Vec<String> = diagnostics
+        .iter()
+        .filter(|d| d.path().as_str().starts_with("render/"))
+        .filter_map(|d| d.smoothed().map(|v| format!("{} {v:.2}{}", d.path(), d.suffix)))
+        .collect();
+    passes.sort();
+    if !passes.is_empty() {
+        info!("rendu: {}", passes.join(" | "));
+    }
 }
 
 /// Journal du jeu. Sur iOS et tvOS, le journal système n'est pas lisible depuis le Mac sans outil tiers: on l'écrit aussi dans
@@ -244,6 +284,10 @@ pub fn run() {
         .insert_resource(bevy::winit::WinitSettings::game())
         .add_systems(Startup, connect_from_command_line)
         .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
+        .init_resource::<UpdateTimer>()
+        .add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin)
+        .add_systems(First, update_begins)
+        .add_systems(Last, update_ends)
         .add_systems(Update, log_frame_rate)
         .add_systems(Update, begin_connection.run_if(resource_exists::<host::ConnectAt>))
         .add_observer(mark_local_player)

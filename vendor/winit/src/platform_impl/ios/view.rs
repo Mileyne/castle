@@ -100,6 +100,8 @@ declare_class!(
         #[method(setContentScaleFactor:)]
         fn set_content_scale_factor(&self, untrusted_scale_factor: CGFloat) {
             let mtm = MainThreadMarker::new().unwrap();
+            // Castle: sur Apple TV, UIKit remet le facteur de l'écran (2) quand la vue rejoint la fenêtre; on impose le nôtre.
+            let untrusted_scale_factor = if untrusted_scale_factor > 0.0 { castle_tv_scale(mtm).unwrap_or(untrusted_scale_factor) } else { untrusted_scale_factor };
             let _: () =
                 unsafe { msg_send![super(self), setContentScaleFactor: untrusted_scale_factor] };
 
@@ -354,6 +356,15 @@ declare_class!(
     }
 );
 
+/// Castle: l'Apple TV 4K n'a pas le GPU pour dessiner en 3840x2160. Le facteur d'échelle imposé (1 par défaut, `CASTLE_SCALE` pour les
+/// essais) donne une image de 1920x1080, que la télévision met à l'échelle. `None` sur les autres appareils.
+fn castle_tv_scale(mtm: MainThreadMarker) -> Option<CGFloat> {
+    if objc2_ui_kit::UIDevice::currentDevice(mtm).userInterfaceIdiom() != objc2_ui_kit::UIUserInterfaceIdiom::TV {
+        return None;
+    }
+    Some(std::env::var("CASTLE_SCALE").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(1.0) as CGFloat)
+}
+
 impl WinitView {
     pub(crate) fn new(
         mtm: MainThreadMarker,
@@ -376,6 +387,8 @@ impl WinitView {
 
         if let Some(scale_factor) = window_attributes.platform_specific.scale_factor {
             this.setContentScaleFactor(scale_factor as _);
+        } else if let Some(scale_factor) = castle_tv_scale(mtm) {
+            this.setContentScaleFactor(scale_factor);
         } else if cfg!(target_os = "tvos") {
             // Castle: l'Apple TV 4K n'a pas le GPU pour dessiner en 3840x2160. On rend en 1920x1080, que la télévision met à l'échelle.
             this.setContentScaleFactor(1.0);

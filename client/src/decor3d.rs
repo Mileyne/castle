@@ -95,8 +95,35 @@ impl Plugin for Decor3dPlugin {
             )
             .add_systems(
                 Update,
+                diag_hide,
+            )
+            .add_systems(
+                Update,
                 mirror_sprites.after(crate::art::AnimateCharacters).after(crate::art::animate_props).after(follow_camera).after(update_materials),
             );
+    }
+}
+
+/// Diagnostic de performance: `CASTLE_HIDE=walls,ground,models,mist` masque ces éléments (pour savoir lesquels coûtent au GPU).
+pub(crate) fn hidden_by_diag(what: &str) -> bool {
+    static HIDE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HIDE.get_or_init(|| std::env::var("CASTLE_HIDE").unwrap_or_default()).split(',').any(|w| w == what)
+}
+
+fn diag_hide(
+    mut walls: Query<&mut Visibility, With<Decor3dWalls>>,
+    mut ground: Query<&mut Visibility, (With<Decor3d>, Without<Decor3dWalls>, Without<crate::live3d::Live3d>)>,
+    mut models: Query<&mut Visibility, (With<crate::live3d::Live3d>, Without<Decor3d>, Without<Decor3dWalls>)>,
+) {
+    for (what, visibilities) in [("walls", 0), ("ground", 1), ("models", 2)] {
+        if !hidden_by_diag(what) {
+            continue;
+        }
+        match visibilities {
+            0 => walls.iter_mut().for_each(|mut v| *v = Visibility::Hidden),
+            1 => ground.iter_mut().for_each(|mut v| *v = Visibility::Hidden),
+            _ => models.iter_mut().for_each(|mut v| *v = Visibility::Hidden),
+        }
     }
 }
 
@@ -174,7 +201,7 @@ impl Material for DecorMaterial {
 
 /// L'antialiasing des deux caméras. Coupé sur Apple TV: le rendu y est déjà à moitié de la définition de l'écran, et le MSAA ×4 y
 /// coûte trop de bande passante.
-pub(crate) const MSAA: Msaa = if cfg!(target_os = "tvos") { Msaa::Off } else { Msaa::Sample4 };
+pub(crate) const MSAA: Msaa = if cfg!(feature = "tvos") { Msaa::Off } else { Msaa::Sample4 };
 
 /// De combien chaque bloc est plus haut que le précédent, en unités du monde.
 const LAYER_LIFT: f32 = 0.01;

@@ -7,4 +7,4 @@ export SDKROOT="$(xcrun --sdk appletvos --show-sdk-path)" TVOS_DEPLOYMENT_TARGET
 export CC_aarch64_tvos_as_ios="$PWD/tvos/cc.sh" CXX_aarch64_tvos_as_ios="$PWD/tvos/cxx.sh"
 exec cargo +nightly build -Zbuild-std=std,panic_abort -Zjson-target-spec \
   --config "target.aarch64-tvos-as-ios.linker=\"$PWD/tvos/linker.sh\"" \
-  --target tvos/aarch64-tvos-as-ios.json -p castle_client --bin castle_client ${CASTLE_FEATURES:+--features $CASTLE_FEATURES} --release --target-dir target-tvos
+  --target tvos/aarch64-tvos-as-ios.json -p castle_client --bin castle_client --features "${CASTLE_FEATURES:-tvos}" --release --target-dir target-tvos

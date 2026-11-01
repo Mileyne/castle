@@ -259,7 +259,10 @@ fn update_sky(
 /// Pose les nappes de brume (voir `MIST_SHEETS`). La brume ne brille pas: sa clarté suit la lumière ambiante (dans une forêt sombre, elle
 /// est grise et terne).
 pub(crate) fn spawn_mist(commands: &mut Commands, meshes: &mut Assets<Mesh>, mist_materials: &mut Assets<MistMaterial>, ambient: f32, lite: bool) {
-    let layers = if lite || cfg!(target_os = "tvos") { MIST_LAYERS_LITE } else { MIST_LAYERS };
+    if crate::decor3d::hidden_by_diag("mist") {
+        return;
+    }
+    let layers = if lite || cfg!(feature = "tvos") { MIST_LAYERS_LITE } else { MIST_LAYERS };
     let brightness = (ambient * MIST_BRIGHTNESS).clamp(0.1, 1.0);
     let plane = meshes.add(Plane3d::default().mesh().size(MIST_PLANE, MIST_PLANE));
     for (height, share) in MIST_SHEETS {
