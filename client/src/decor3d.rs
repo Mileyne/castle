@@ -25,11 +25,11 @@ use bevy::{
 };
 use castle_shared::tileart::TILE_CELL;
 use bevy::window::PrimaryWindow;
-use castle_shared::{Expedition, Region, Room, TILE_SIZE, Tile};
+use castle_shared::{Expedition, Projectile, Region, Room, TILE_SIZE, Tile};
 
 use crate::LocalPlayer;
 use crate::live3d::Direct3d;
-use crate::art::{Stain, TileMark, WorldTile};
+use crate::art::{Prop, Stain, TileMark, WorldTile, object};
 
 /// Hauteur de la caméra au-dessus de l'horizon, en radians (le sol est vu d'en haut quand elle vaut π/2). Le stick droit de la manette principale la règle.
 fn elevation() -> f32 {
@@ -85,7 +85,10 @@ impl Plugin for Decor3dPlugin {
                 Update,
                 (keep_the_image, build_chunks.after(crate::art::rebuild_world), follow_camera, update_materials).chain(),
             )
-            .add_systems(Update, mirror_sprites.after(crate::art::AnimateCharacters).after(crate::art::y_sort).after(crate::art::animate_props));
+            .add_systems(
+                Update,
+                mirror_sprites.after(crate::art::AnimateCharacters).after(crate::art::y_sort).after(crate::art::animate_props).after(follow_camera),
+            );
     }
 }
 
@@ -535,12 +538,27 @@ fn natural_size(sprite: &Sprite, images: &Assets<Image>, layouts: &Assets<Textur
 /// - Debout (par défaut): un panneau vertical de la hauteur du sprite à l'écran (une verticale est raccourcie de `cos(élévation)`),
 ///   dont le bas touche le sol à la position du sprite.
 /// - À plat (taches et fissures du sol, marques de gore): un rectangle posé sur le sol.
+/// - Contre un mur (les panneaux des énigmes): collé sur la face sud du mur où ils sont posés.
+/// - En vol (flèches, orbes, carreaux): un rectangle face à la caméra, tourné pour que le projectile pointe, à l'écran, dans le sens
+///   où il avance.
+#[allow(clippy::too_many_arguments)]
 fn mirror_sprites(
     mut commands: Commands,
     mut sources: Query<
-        (Entity, &mut Sprite, &Transform, Option<&Anchor>, &InheritedVisibility, Option<&mut Mirror>, Has<WorldTile>, Has<Stain>, Has<Direct3d>),
+        (
+            Entity,
+            &mut Sprite,
+            &Transform,
+            Option<&Anchor>,
+            &InheritedVisibility,
+            Option<&mut Mirror>,
+            (Has<WorldTile>, Has<Stain>, Has<Direct3d>),
+            (Option<&Prop>, Option<&Projectile>, Option<&crate::Lift>),
+        ),
         (Without<TileMark>, Without<ChildOf>, Without<Billboard>),
     >,
+    camera: Single<&Transform, (With<DecorCamera>, Without<Billboard>, Without<Mirror>)>,
+    room: Option<Res<Room>>,
     billboards: Query<(Entity, &Billboard)>,
     mut placed: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<BillboardMaterial>), (With<Billboard>, Without<Mirror>)>,
     images: Res<Assets<Image>>,
@@ -556,7 +574,7 @@ fn mirror_sprites(
         }
     }
     let quad = quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0))).clone();
-    for (entity, mut sprite, transform, anchor, visible, mirror, decal, stain, direct) in &mut sources {
+    for (entity, mut sprite, transform, anchor, visible, mirror, (decal, stain, direct), (prop, projectile, lift)) in &mut sources {
         // Son modèle 3D est dans la scène: le sprite à plat ne doit plus être dessiné, et n'a pas de panneau.
         if direct {
             if sprite.custom_size != Some(Vec2::ZERO) {
@@ -587,6 +605,32 @@ fn mirror_sprites(
                 translation: Vec3::new(center.x, 0.3 + transform.translation.z * 0.05, -center.y),
                 rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Quat::from_rotation_z(transform.rotation.to_euler(EulerRot::ZYX).0),
                 scale: Vec3::new(size.x, size.y, 1.0),
+            }
+        } else if let Some(shot) = projectile {
+            // En vol: au-dessus du sol d'autant que le jeu le soulève à l'écran, et face à la caméra. Le sprite est dessiné vers la
+            // droite: on le tourne de l'angle que fait, à l'écran, la direction du tir (le sol est raccourci de sin(élévation)).
+            let raised = lift.map_or(0.0, |lift| lift.0);
+            let ground = transform.translation.truncate() - Vec2::new(0.0, raised);
+            let (right, up) = (Vec2::new(yaw().cos(), yaw().sin()), Vec2::new(-yaw().sin(), yaw().cos()));
+            let on_screen = Vec2::new(shot.dir.dot(right), shot.dir.dot(up) * elevation().sin());
+            Transform {
+                translation: Vec3::new(ground.x, raised / elevation().cos(), -ground.y),
+                rotation: camera.rotation * Quat::from_rotation_z(on_screen.to_angle()),
+                scale: Vec3::new(size.x, size.y, 1.0),
+            }
+        } else if let Some(mount) = prop
+            .filter(|prop| (object::WALL_RUNE..=object::WALL_TARGET_HIT).contains(&prop.0))
+            .and_then(|_| room.as_deref())
+            .and_then(|room| {
+                let tile = room.world_to_tile(transform.translation.truncate());
+                (room.tile(tile.x, tile.y) == Tile::Wall).then(|| tile_corner(room, tile.x, tile.y).y)
+            })
+        {
+            // Posé dans un mur: collé sur sa face sud, à mi-hauteur, comme une plaque. Il tourne avec le mur, pas avec la caméra.
+            Transform {
+                translation: Vec3::new(center.x, wall_height() / 2.0, -mount + 0.3),
+                scale: Vec3::new(size.x, size.y, 1.0),
+                ..default()
             }
         } else {
             // Debout sur le sol à la position du sprite dans le monde (celle des collisions): c'est elle qui se compare aux murs. Le panneau
