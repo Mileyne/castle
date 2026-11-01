@@ -1,6 +1,6 @@
 //! Caméra qui suit le héros du joueur, à une échelle entière pour garder des pixels nets.
 
-use bevy::{camera::ScalingMode, prelude::*, window::PrimaryWindow};
+use bevy::{camera::ScalingMode, math::StableInterpolate, prelude::*, window::PrimaryWindow};
 use castle_shared::{Layout, PartyId, Player, Room, ScreenShake};
 
 use crate::{LocalParty, LocalPlayer};
@@ -114,7 +114,7 @@ fn follow_hero(
     let in_corridor = matches!((&hero, &room, &layout), (Some(_), Some(_), Some(_))) && hero_room.is_none();
     let target = if in_corridor { CORRIDOR_ZOOM } else { 1.0 };
     let boost = corridor_zoom.get_or_insert(1.0);
-    *boost += (target - *boost) * (1.0 - (-ZOOM_SPEED * time.delta_secs()).exp());
+    boost.smooth_nudge(&target, ZOOM_SPEED, time.delta_secs());
     let corridor_boost = *boost;
 
     // Zoom d'équipe: quand les quatre héros sont groupés, on se rapproche pour les cadrer tous.
@@ -129,7 +129,7 @@ fn follow_hero(
     };
     let (team_target, team_center) = if team.len() >= 2 { team_framing(&team, base_view) } else { (1.0, Vec2::ZERO) };
     let team_boost = team_zoom.get_or_insert(1.0);
-    *team_boost += (team_target - *team_boost) * (1.0 - (-ZOOM_SPEED * time.delta_secs()).exp());
+    team_boost.smooth_nudge(&team_target, ZOOM_SPEED, time.delta_secs());
     let team_boost = *team_boost;
 
     // Cadrage de salle: un fondu unique (0 hors de la salle, 1 dedans) qui mène à la fois le zoom et le centrage, de façon
@@ -180,9 +180,8 @@ fn follow_hero(
     let target = focus.clamp(-limit, limit);
 
     // La position « propre » de la caméra est mémorisée à part: la secousse s'y ajoute sans la déformer.
-    let t = 1.0 - (-FOLLOW_SPEED * time.delta_secs()).exp();
-    let current = base.unwrap_or(transform.translation.truncate());
-    let next = current.lerp(target, t);
+    let mut next = base.unwrap_or(transform.translation.truncate());
+    next.smooth_nudge(&target, FOLLOW_SPEED, time.delta_secs());
     *base = Some(next);
 
     shake.trauma = (shake.trauma - SHAKE_DECAY * time.delta_secs()).max(0.0);

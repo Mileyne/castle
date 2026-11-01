@@ -5,7 +5,7 @@
 use std::net::{Ipv4Addr, UdpSocket};
 use std::time::SystemTime;
 
-use bevy::{color::palettes::css, prelude::*};
+use bevy::{color::palettes::css, math::StableInterpolate, prelude::*};
 use bevy_replicon::prelude::*;
 use bevy_replicon_renet::{
     RenetChannelsExt, RenetClient, RepliconRenetPlugins,
@@ -721,11 +721,10 @@ fn draw_effects(
 
 /// Lisse le déplacement entre deux mises à jour du serveur.
 pub fn smooth_positions(time: Res<Time>, mut players: Query<(&Position, &mut Transform, Option<&Lift>)>) {
-    let t = 1.0 - (-SMOOTHING * time.delta_secs()).exp();
     for (pos, mut transform, lift) in &mut players {
         let z = transform.translation.z;
         let target = (pos.0 + Vec2::new(0.0, lift.map_or(0.0, |l| l.0))).extend(z);
-        transform.translation = transform.translation.lerp(target, t);
+        transform.translation.smooth_nudge(&target, SMOOTHING, time.delta_secs());
     }
 }
 

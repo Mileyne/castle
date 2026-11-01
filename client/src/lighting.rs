@@ -3,7 +3,7 @@
 //! (Une couche sombre éclairée autour des héros et des sources lumineuses existait ici: dessinée derrière le décor, elle ne
 //! changeait rien à l'image et coûtait une passe de rendu et une mise à jour par image, elle a été retirée.)
 
-use bevy::prelude::*;
+use bevy::{math::StableInterpolate, prelude::*};
 use castle_shared::*;
 
 use crate::LocalPlayer;
@@ -49,9 +49,8 @@ fn update_grade(
     mut environment: ResMut<Grade>,
 ) {
     let target = active.map_or(Vec3::ONE, |class| tiles_grade_of(**class));
-    let k = 1.0 - (-GRADE_SPEED * time.delta_secs()).exp();
     let tiles = smooth.get_or_insert(target);
-    *tiles = tiles.lerp(target, k);
+    tiles.smooth_nudge(&target, GRADE_SPEED, time.delta_secs());
     let next = Vec3::ONE.lerp(*tiles, ENVIRONMENT_MIX);
     // Pas d'écriture (donc pas de détection de changement) tant que la teinte ne bouge plus.
     if environment.0.distance_squared(next) > 1e-8 {
