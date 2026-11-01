@@ -14,14 +14,14 @@ Jeu multijoueur en ligne inspiré de *Gauntlet*, ambiance RPG pixelisée à l'an
 
 | Sujet | Choix | Remarque |
 |---|---|---|
-| Moteur | **Bevy 0.19** (Rust, ECS) | 0.20 existe mais replicon/renet ne le supportent pas encore |
-| Réseau | `bevy_replicon` 0.44 + `bevy_replicon_renet` 0.20 | Serveur autoritaire, les clients envoient leurs entrées |
-| Structure | Workspace Cargo: `shared`, `server`, `client` | Serveur headless, client avec rendu |
+| Moteur | **Bevy 0.20** (Rust, ECS) | |
+| Réseau | aucun: jeu solo (le mode coopératif en réseau a été retiré) | Les anciens évènements réseau sont de simples évènements locaux |
+| Structure | Workspace Cargo: `shared`, `client` | La simulation (`client/src/sim/`) tourne dans le monde du client |
 | Rendu | 2D, tuiles de 16 px, échelle entière; héros rendus en 96 px | Caméra qui suit le héros; sprites provisoires générés par `tools/gen_sprites.py` (planches dans `client/assets/art/`), à remplacer par du pixel-art dessiné au même découpage |
 | Localisation | **Fluent** via `bevy_fluent` 0.15 | Fichiers `.ftl` par langue dans `client/assets/locales/<langue>/`; FR et EN au départ |
 | Dialogues | Format maison en **RON** (`client/assets/dialogue/castle.ron`) + interpréteur `client/src/dialogue_script.rs` | Scènes = répliques `Line(orateur, id)` et `Choice`; les textes sont les clés Fluent `dlg-<id>` (Yarn Spinner abandonné: sa dépendance bloquait la montée de version de Bevy) |
 | Niveaux | Génération procédurale par salles assemblées (à confirmer) | Alternative: niveaux écrits à la main (Tiled) |
-| iOS | Même client Rust, projet Xcode dans `ios/` | Serveur sur un fil du client (pas de second processus sur iOS), commandes tactiles qui simulent les touches (`client/src/touch.rs`); voir `ios/README.md` |
+| iOS | Même client Rust, projet Xcode dans `ios/` | Commandes tactiles qui simulent les touches (`client/src/touch.rs`); voir `ios/README.md` |
 
 ### Règles de localisation (à respecter dès le premier jour)
 
@@ -180,9 +180,7 @@ Chaque phase se termine par quelque chose de jouable et testable.
 ### Lancer le jeu
 
 ```sh
-cargo run -p castle_server              # serveur sur le port UDP 5000 (ou: cargo run -p castle_server -- 6000)
-cargo run -p castle_client              # client, se connecte à 127.0.0.1:5000
-cargo run -p castle_client -- IP:PORT   # client vers un autre serveur
+cargo run -p castle_client              # le jeu
 ```
 Dans le client: **ZQSD/WASD ou flèches** pour se déplacer, **Espace** pour attaquer, **E** pour le pouvoir spécial, **F** (maintenue) pour agir, **Entrée** pour avancer dans un dialogue (1-4 pour voter), **1 à 4** pour prendre la main sur un des quatre héros (Chevalier, Ensorceleur, Rôdeur, Forgebraise), **F1** pour changer de langue (FR/EN). Votre héros a un liseré blanc.
 
@@ -205,7 +203,7 @@ Objectif: 2 à 4 joueurs se déplacent dans une même salle.
 - [x] Troisième jeu d'art, le **mode médiéval** (visages des sprites paramétrés d'après les photos: cheveux, barbe, yeux, sourcils, nez, bouche, lunettes rectangulaires du Rôdeur), inspiré de quatre portraits fournis (dossier `photos/`): le Chevalier (tabard crème à bandes rouges et lion, mailles et plates, écu en amande, épée longue), l'Ensorceleur (chapeau violet à pointe retombante et broche solaire, robe brodée de lunes et d'étoiles, bâton torsadé à anneau et orbe), le Rôdeur (cape verte à capuche, broche en feuille, carquois à plumes, brassards gravés, grand arc recourbé) et le Forgebraise (casque de fer à nasal, tablier de cuir, ceinture à boucle d'enclume avec tenailles, énorme masse). Proportions plus réalistes; les ennemis, objets et décors reprennent le style manga
 - [x] Écran titre: l'illustration `photos/castle.jpg` (copiée en `client/assets/title.png`) couvre la fenêtre. Entrée/clic reprend la partie en cours sur le serveur, N demande une nouvelle partie (événement `NewGame`: nouveau château, héros au départ, or et clés à zéro; vaut pour tous les joueurs connectés). Le jeu et le dialogue d'intro attendent le choix. Le héros actif est dessiné au premier plan
 - [x] Annonce de niveau: écran noir « Niveau N » + nom de la région (fondu de 0,8 s après 2,2 s), au lancement de la partie (une fois l'écran titre fermé) et à chaque passage de portail. Le niveau est numéroté par le serveur (`Expedition.level`, 1 au départ ou en nouvelle partie, +1 par portail); les touches de jeu et le dialogue attendent la fin de l'annonce
-- [x] Lancement unique: `./play.sh` (ou `castle_client`) démarre aussi le serveur local, qui s'arrête avec le client; avec une adresse en argument ou `--no-server`, le client se connecte à un serveur distant. Le serveur reste un programme à part, prêt pour le futur serveur autonome multi-clients
+- [x] Lancement unique: `./play.sh` (ou `castle_client`) lance le jeu; la simulation tourne dans le même monde que l'affichage (plus de serveur ni de réseau: le mode coopératif réseau a été retiré).
 - [x] Un seul style: le mode médiéval. Les jeux manga et sanglant restent générés mais ne sont plus chargés; F2 et les options `--gore`/`--medieval` sont désactivés
 - [x] Vignettes des héros: recadrages directs des photos de référence, détourés (fond effacé, bord ovale adouci), affichés en colonne à gauche de l'écran (`photos/`, identiques dans tous les styles; coordonnées dans `sprite_forge/src/main.rs`), affichées dans le panneau d'équipe et à côté du nom de celui qui parle dans les dialogues
 - [x] L'Ensorceleuse devient **l'Ensorceleur**, dans les trois styles, les textes et les dialogues
@@ -275,12 +273,12 @@ Objectif: de vrais objectifs de mission.
 - [ ] Récompenses de fin de mission
 
 ### Phase 5b — Modes de jeu et sauvegardes *(première version, menu à valider en jeu)*
-- [x] Parties nommées, listées séparément en solo et en coopératif (`shared/src/save.rs`): fichier RON par partie dans le dossier de données de l'utilisateur (`~/Library/Application Support/Castle/saves` sous macOS, `CASTLE_SAVE_DIR` pour le changer), écriture atomique, copie `.bak`, version de format
+- [x] Parties nommées, (`shared/src/save.rs`): fichier RON par partie dans le dossier de données de l'utilisateur (`~/Library/Application Support/Castle/saves` sous macOS, `CASTLE_SAVE_DIR` pour le changer), écriture atomique, copie `.bak`, version de format
 - [x] Sauvegarde à chaque entrée de niveau, pas en cours de salle: elle garde le niveau, l'état du générateur aléatoire à l'entrée (qui régénère le même château), l'or et les clés de chaque équipe, et si l'intro a été vue
 - [x] Équipe entièrement à terre: retour au début du niveau (même château, monstres revenus, or et clés de l'entrée)
-- [x] Menu titre: solo, coopératif (héberger / rejoindre par adresse IP du réseau local), quitter; liste des parties avec « nouvelle partie », suppression avec confirmation. Le client lance le serveur de la partie (`--mode solo|coop --save NOM`); solo n'écoute que `127.0.0.1` pour un joueur, coopératif écoute le réseau local (4 joueurs) et l'hôte voit l'adresse à communiquer. Une adresse en argument rejoint directement un serveur
+- [x] Menu titre: jouer, réglages, quitter; liste des parties avec « nouvelle partie », suppression avec confirmation. Une partie est un fichier de sauvegarde nommé.
 - [ ] Les équipes retrouvent leur bourse dans l'ordre d'arrivée; une identité de joueur persistante (UUID) sera nécessaire dès qu'il y aura de l'XP par héros
-- [x] Menu de pause (Échap): reprendre, ou abandonner le niveau et revenir au menu principal (la progression depuis l'entrée du niveau est perdue). En solo le serveur est figé pendant la pause; en coopératif non, et l'hôte qui quitte déconnecte les autres
+- [x] Menu de pause (Échap): reprendre, ou abandonner le niveau et revenir au menu principal (la progression depuis l'entrée du niveau est perdue). La simulation est figée pendant la pause.
 - [ ] Sauvegarde en cours de niveau, reconnexion après coupure
 
 ### Éditeur d'art (`./edit.sh`, outil `tools/sprite_editor`, egui)

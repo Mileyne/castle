@@ -3,7 +3,6 @@
 //! s'estompe à son tour sur le jeu.
 
 use bevy::{color::palettes::css, prelude::*};
-use bevy_replicon::prelude::*;
 use castle_shared::{Captive, ContinueLevel, Expedition, Guide, LevelSummary};
 
 use crate::i18n::Tr;
@@ -310,7 +309,7 @@ fn confirm_summary(
         return;
     }
     summary.waiting = true;
-    commands.client_trigger(ContinueLevel);
+    commands.trigger(ContinueLevel);
     for mut prompt in &mut prompts {
         prompt.key = "summary-waiting";
     }

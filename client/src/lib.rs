@@ -2,16 +2,9 @@
 //!
 //! Bibliothèque lancée par `run`: le programme `castle_client` (ordinateur) et l'app iOS (`mobile/`) l'appellent tous deux.
 
-use std::net::{Ipv4Addr, UdpSocket};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use bevy::{color::palettes::css, math::StableInterpolate, prelude::*};
-use bevy_replicon::prelude::*;
-use bevy_replicon_renet::{
-    RenetChannelsExt, RenetClient, RepliconRenetPlugins,
-    netcode::{ClientAuthentication, NetcodeClientTransport},
-    renet::ConnectionConfig,
-};
 use castle_shared::*;
 
 use art::{Art, Prop, SPRITE_SIZE, WalkCycle, object, projectile};
@@ -25,7 +18,6 @@ mod dialogue;
 mod dialogue_script;
 #[cfg(target_os = "ios")]
 mod gamecontroller;
-mod host;
 #[cfg(target_os = "ios")]
 mod prefs;
 mod i18n;
@@ -37,6 +29,7 @@ mod prebake;
 mod pause;
 mod puzzle;
 mod settings;
+pub mod sim;
 mod sprite_meta;
 mod sprite_meta_lite;
 mod level_intro;
@@ -242,9 +235,7 @@ pub fn run() {
                     primary_window: Some(window()),
                     ..default()
                 }),
-            RepliconPlugins,
-            RepliconRenetPlugins,
-            CastleSharedPlugin,
+            sim::SimPlugin,
             i18n::I18nPlugin,
             ui::UiPlugin,
             title::TitlePlugin,
@@ -282,19 +273,17 @@ pub fn run() {
         .insert_resource(ClearColor(Color::BLACK))
         // Fenêtre au premier plan: rendu continu. En arrière-plan: le jeu se met presque au repos.
         .insert_resource(bevy::winit::WinitSettings::game())
-        .add_systems(Startup, connect_from_command_line)
         .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
         .init_resource::<UpdateTimer>()
         .add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin)
         .add_systems(First, update_begins)
         .add_systems(Last, update_ends)
         .add_systems(Update, log_frame_rate)
-        .add_systems(Update, begin_connection.run_if(resource_exists::<host::ConnectAt>))
         .add_observer(mark_local_player)
         .add_systems(
             Update,
             (
-                send_input.run_if(in_state(ClientState::Connected)).run_if(level_intro::player_can_act),
+                send_input.run_if(sim::in_game).run_if(level_intro::player_can_act),
                 layer_projectiles.after(smooth_positions),
                 update_exit,
                 (dress_new_entities, fade_downed).chain(),
@@ -351,52 +340,6 @@ fn mark_local_player(you: On<YouAre>, mut commands: Commands, previous: Query<En
     }
     commands.entity(you.hero).insert(LocalPlayer);
     commands.insert_resource(LocalParty(you.party));
-}
-
-/// Une adresse en argument (ou `--no-server`) rejoint directement un serveur, sans passer par le menu.
-fn connect_from_command_line(mut commands: Commands) {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let addr = match args.iter().find(|a| !a.starts_with("--")) {
-        Some(arg) => arg.parse().ok(),
-        None if args.iter().any(|a| a == "--no-server") => Some((Ipv4Addr::LOCALHOST, DEFAULT_PORT).into()),
-        None => None,
-    };
-    if let Some(addr) = addr {
-        commands.insert_resource(host::ConnectAt::now(addr));
-    }
-}
-
-/// Ouvre la connexion au serveur une fois l'heure venue (le serveur local a besoin d'un instant pour démarrer).
-fn begin_connection(mut commands: Commands, channels: Res<RepliconChannels>, request: Res<host::ConnectAt>) -> Result {
-    if std::time::Instant::now() < request.at {
-        return Ok(());
-    }
-    let addr = request.addr;
-    commands.remove_resource::<host::ConnectAt>();
-
-    let client = RenetClient::new(ConnectionConfig {
-        server_channels_config: channels.server_configs(),
-        client_channels_config: channels.client_configs(),
-        ..Default::default()
-    });
-
-    let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
-    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
-    let transport = NetcodeClientTransport::new(
-        current_time,
-        ClientAuthentication::Unsecure {
-            client_id: current_time.as_millis() as u64,
-            protocol_id: PROTOCOL_ID,
-            server_addr: addr,
-            user_data: None,
-        },
-        socket,
-    )?;
-
-    info!("connecting to {addr}");
-    commands.insert_resource(client);
-    commands.insert_resource(transport);
-    Ok(())
 }
 
 /// Le tir maintenu: depuis combien de temps, et si le pouvoir spécial a déjà été lancé pendant cette pression.
@@ -467,7 +410,7 @@ fn send_input(
     let interact = held(KeyCode::ShiftLeft) || held(KeyCode::ShiftRight);
     if (dir, attack, special, interact) != *last {
         *last = (dir, attack, special, interact);
-        commands.client_trigger(PlayerInput {
+        commands.trigger(PlayerInput {
             direction: dir,
             attack,
             special,
@@ -488,7 +431,7 @@ fn send_input(
                 .map(|step| order[(at + step) % order.len()])
                 .find(|class| heroes.iter().any(|(c, id, downed)| c == class && id.0 == party.0 && !downed));
             if let Some(class) = next {
-                commands.client_trigger(SwitchHero(class));
+                commands.trigger(SwitchHero(class));
             }
         }
     }
@@ -499,7 +442,7 @@ fn send_input(
         (KeyCode::Digit4, HeroClass::Forgebraise),
     ] {
         if keys.just_pressed(key) {
-            commands.client_trigger(SwitchHero(class));
+            commands.trigger(SwitchHero(class));
         }
     }
 }

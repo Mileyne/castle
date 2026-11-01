@@ -1,7 +1,7 @@
 # Castle
 
-RPG d'action multijoueur en Rust (Bevy). Un seul code (`client/`, `server/`, `shared/`) pour tous les clients; le serveur
-est une bibliothèque, lancée sur un fil du client: un seul exécutable partout (`castle_server` reste disponible pour un serveur dédié).
+RPG d'action solo en Rust (Bevy). Un seul code (`client/`, `shared/`) pour toutes les plateformes: la simulation (`client/src/sim/`)
+tourne dans le même monde que l'affichage, sans réseau ni second processus.
 
 ## Clients
 
@@ -16,12 +16,12 @@ est une bibliothèque, lancée sur un fil du client: un seul exécutable partout
 `scripts/build_all.sh` construit tout ce que la machine sait construire (sur un Mac: macOS, Windows, iOS simulateur, tvOS);
 on peut lui donner la liste des plateformes voulues: `scripts/build_all.sh macos windows`.
 
-Pour jouer directement depuis les sources: `./play.sh` (le client démarre le serveur local tout seul). `./dev.sh` fait la même chose en profil dev, bien plus rapide à recompiler pendant le développement (un peu moins fluide en jeu); `./play.sh` compile en release, avec LTO.
+Pour jouer directement depuis les sources: `./play.sh` (compile et lance le jeu en release). `./dev.sh` fait la même chose en profil dev, bien plus rapide à recompiler pendant le développement (un peu moins fluide en jeu); `./play.sh` compile en release, avec LTO.
 
 ## Outils
 
 - `./edit.sh`: éditeur d'art (tuiles et sprites).
-- Décor au sol: les niveaux listent des éléments de décor (`decor`, herbes, cailloux, flaques, ossements, tapis...), assemblés aux tuiles par le client; `castle_server --decorate shared/levels [--force]` en sème selon la région, et l'outil Décor de l'éditeur en pose à la main. Les grands motifs (chênes, sapins, rochers, colonnes, statues, fontaines: `Thing::Landmark`) bloquent le passage par leur pied et passent devant ou derrière les personnages selon leur position. Quand deux régions se touchent (champ `style`), leurs tuiles se fondent l'une dans l'autre.
+- Décor au sol: les niveaux listent des éléments de décor (`decor`, herbes, cailloux, flaques, ossements, tapis...), assemblés aux tuiles par le client; `castle_client --decorate shared/levels [--force]` en sème selon la région, et l'outil Décor de l'éditeur en pose à la main. Les grands motifs (chênes, sapins, rochers, colonnes, statues, fontaines: `Thing::Landmark`) bloquent le passage par leur pied et passent devant ou derrière les personnages selon leur position. Quand deux régions se touchent (champ `style`), leurs tuiles se fondent l'une dans l'autre.
 - Rendu 3D: le jeu est une scène 3D. Les héros, les monstres et les objets sont de vrais modèles 3D de sprite_forge, chacun un seul maillage fusionné par pose (`client/src/merged.rs`); les poses (repos, marche, coup) de tous les modèles d'un niveau sont construites à l'avance au lancement du niveau, derrière un écran « Veuillez patienter » avec son pourcentage. Plus de mode sprites. `CASTLE_SHOT=<fichier.png>` n'existe plus.
 - Décor en 3D: le sol est texturé par les blocs de décor, les murs sont des cubes complets (matière calculée par le shader selon la région), éclairés par un soleil, des ombres portées et une lanterne qui suit le héros dirigé. Hauteur des murs 2 tuiles, cadrage 100 %, inclinaison 55°, angle 10° par défaut. Manette principale pendant la partie: stick droit = tourner et incliner la vue, L / R (ou ZL / ZR) = zoom, Select = remise par défaut; les touches de direction suivent l'écran. `CASTLE_FOV=<degrés>` passe en perspective (essayez 30). F3 affiche ou cache l'indicateur d'images par seconde (en haut à droite).
 - `./lumiere.sh`: programme de réglage de la lumière, **niveau par niveau**. Il affiche un niveau de la campagne tel que le jeu le dessine (son vrai plan, les matériaux de chaque tuile de mur: pierre et arbres mêlés au niveau 3, torches du château) avec les vrais modèles du jeu (héros, ennemis, objets, prisonnier) posés près de son départ. `--niveau N` choisit le niveau de départ, `--sol terre|herbe|dense` le sol d'essai. Tab / Maj+Tab changent de niveau, ↑↓ choisissent un réglage, ←→ le changent (Maj: plus vite), ZQSD déplace les héros et leurs lanternes, Entrée enregistre tous les niveaux dans `client/assets/lighting.ron` (le jeu le lit au lancement et applique à chaque niveau ses réglages), Retour arrière rend au niveau les valeurs de sa région. Réglages d'un niveau: soleil, lumière ambiante, intensité et rayon des lanternes, et pour les héros, les ennemis et les objets la capacité à capter la lumière (gain sur leurs couleurs) et à rayonner (part de leurs propres couleurs émise quelle que soit la lumière reçue). Un niveau sans réglage propre prend ceux de sa région et les réglages communs du fichier.

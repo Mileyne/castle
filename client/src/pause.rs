@@ -5,11 +5,10 @@
 
 use bevy::{color::palettes::css, prelude::*};
 use bevy::{picking::hover::Hovered, ui::Pressed, ui_widgets::Button};
-use bevy_replicon::prelude::*;
 use castle_shared::SetPause;
 
 use crate::i18n::Tr;
-use crate::title::{HostAddress, ReturnToTitle, TitleActive};
+use crate::title::{ReturnToTitle, TitleActive};
 use crate::ui::ui_font;
 
 /// Entrées: reprendre, commandes tactiles (oui/non), volumes, abandonner.
@@ -56,17 +55,17 @@ struct PauseButton(usize);
 fn set_open(commands: &mut Commands, pause: &mut PauseMenu, open: bool) {
     pause.open = open;
     pause.cursor = 0;
-    commands.client_trigger(SetPause(open));
+    commands.trigger(SetPause(open));
 }
 
 fn toggle_pause(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
-    state: Res<State<ClientState>>,
+    game: Option<Res<crate::sim::Campaign>>,
     title: Res<TitleActive>,
     mut pause: ResMut<PauseMenu>,
 ) {
-    if title.0 || *state.get() != ClientState::Connected || !keys.just_pressed(KeyCode::Escape) {
+    if title.0 || game.is_none() || !keys.just_pressed(KeyCode::Escape) {
         return;
     }
     let open = !pause.open;
@@ -141,7 +140,6 @@ fn sync_overlay(
     mut commands: Commands,
     assets: Res<AssetServer>,
     mut pause: ResMut<PauseMenu>,
-    host: Option<Res<HostAddress>>,
     overlay: Query<Entity, With<PauseOverlay>>,
     mut rows: Query<(&PauseRow, &mut TextColor, &mut Text)>,
 ) {
@@ -203,11 +201,8 @@ fn sync_overlay(
                         }
                     });
                 }
-                // Abandonner coûte la progression du niveau; l'hôte coupe aussi les autres joueurs.
+                // Abandonner coûte la progression du niveau.
                 ui.spawn((Text::default(), Tr::new("pause-warning"), font(8.0), TextColor(css::TOMATO.into())));
-                if host.is_some() {
-                    ui.spawn((Text::default(), Tr::new("pause-host-warning"), font(8.0), TextColor(css::TOMATO.into())));
-                }
             });
         return;
     }

@@ -1,7 +1,4 @@
 # Interface
-status-connecting = Connexion au château...
-status-connected = Connecté
-status-disconnected = Déconnecté du château
 hint-controls = %move% : bouger  %attack% : frapper  %special% : pouvoir  %action% : agir  %switch% : héros  %language% : langue
 
 # Classes
@@ -173,7 +170,7 @@ quest-release = Libérez le pont-levis : le Rôdeur doit fixer le disque et tire
 quest-unseal = Brisez le sceau de la porte : l'Ensorceleur dissipe la rune
 quest-breach = Forcez la porte royale : le Chevalier doit la pousser
 quest-done = Objectif accompli : rejoignez la sortie !
-menu-solo = Jouer en solo
+menu-play = Jouer
 menu-host = Coopératif : héberger
 menu-join = Coopératif : rejoindre
 menu-quit = Quitter
@@ -197,7 +194,6 @@ pause-title = Pause
 pause-resume = Reprendre
 pause-quit = Abandonner et revenir au menu
 pause-warning = La progression du niveau en cours est perdue
-pause-host-warning = Les autres joueurs seront déconnectés
 puzzle-ingredients = Ingrédients
 puzzle-gear = Pièce
 puzzle-target = Cible

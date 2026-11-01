@@ -14,40 +14,13 @@ pub const SAVE_VERSION: u32 = 1;
 /// Longueur maximale du nom d'une partie, en caractères.
 pub const SAVE_NAME_MAX: usize = 24;
 
-/// Mode de jeu d'une partie: les parties solo et coopératives sont listées séparément.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GameMode {
-    /// Un joueur, serveur local fermé au réseau.
-    Solo,
-    /// Plusieurs joueurs sur le réseau local: l'hôte détient la sauvegarde.
-    Coop,
-}
-
-impl GameMode {
-    pub fn arg(self) -> &'static str {
-        match self {
-            GameMode::Solo => "solo",
-            GameMode::Coop => "coop",
-        }
-    }
-
-    pub fn from_arg(arg: &str) -> Option<Self> {
-        match arg {
-            "solo" => Some(GameMode::Solo),
-            "coop" => Some(GameMode::Coop),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SaveGame {
     pub version: u32,
     pub name: String,
-    pub mode: GameMode,
     /// Niveau dans lequel l'équipe est entrée pour la dernière fois.
     pub level: u32,
-    /// État du générateur aléatoire du serveur à l'entrée de ce niveau.
+    /// État du générateur aléatoire de la simulation à l'entrée de ce niveau.
     pub entry_rng: u64,
     /// Le dialogue d'introduction a été vu.
     pub intro_done: bool,
@@ -59,11 +32,10 @@ pub struct SaveGame {
 
 impl SaveGame {
     /// Une nouvelle campagne, au niveau 1.
-    pub fn new(name: &str, mode: GameMode, entry_rng: u64) -> Self {
+    pub fn new(name: &str, entry_rng: u64) -> Self {
         Self {
             version: SAVE_VERSION,
             name: clean_name(name),
-            mode,
             level: 1,
             entry_rng: entry_rng | 1,
             intro_done: false,
@@ -220,15 +192,14 @@ pub fn delete(name: &str) {
     let _ = std::fs::remove_file(path);
 }
 
-/// Les parties de ce mode, la plus récente d'abord.
-pub fn list(mode: GameMode) -> Vec<SaveGame> {
+/// Les parties, la plus récente d'abord.
+pub fn list() -> Vec<SaveGame> {
     let mut saves: Vec<SaveGame> = if let Some(backend) = BACKEND.get() {
         backend
             .keys()
             .iter()
             .filter(|k| k.starts_with("save.") && !k.ends_with(".bak"))
             .filter_map(|k| parse(&backend.get(k)?))
-            .filter(|s| s.mode == mode)
             .collect()
     } else {
         let Ok(entries) = std::fs::read_dir(save_dir()) else {
@@ -239,7 +210,6 @@ pub fn list(mode: GameMode) -> Vec<SaveGame> {
             .map(|e| e.path())
             .filter(|p| p.extension().is_some_and(|e| e == "ron"))
             .filter_map(|p| read(&p))
-            .filter(|s| s.mode == mode)
             .collect()
     };
     saves.sort_by_key(|save| std::cmp::Reverse(save.saved_at));
@@ -255,7 +225,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("castle_save_test_{}", std::process::id()));
         // Un seul test touche à l'environnement, pour ne pas se disputer le dossier avec un autre.
         unsafe { std::env::set_var("CASTLE_SAVE_DIR", &dir) };
-        let mut save = SaveGame::new("  Ma Partie / 1  ", GameMode::Coop, 42);
+        let mut save = SaveGame::new("  Ma Partie / 1  ", 42);
         save.level = 3;
         save.purses = vec![(12, 1), (0, 0)];
         write(&save).unwrap();
@@ -263,8 +233,7 @@ mod tests {
         let loaded = load("ma partie / 1").expect("la sauvegarde se relit, quelle que soit la casse");
         assert_eq!(loaded.level, 3);
         assert_eq!(loaded.purses, save.purses);
-        assert_eq!(list(GameMode::Coop).len(), 1);
-        assert!(list(GameMode::Solo).is_empty());
+        assert_eq!(list().len(), 1);
         delete("Ma Partie / 1");
         assert!(load("Ma Partie / 1").is_none());
         let _ = std::fs::remove_dir_all(dir);
@@ -289,7 +258,7 @@ mod tests {
         write(&save).unwrap();
         write(&save).unwrap();
         assert_eq!(load("MA PARTIE / 1").map(|s| s.level), Some(3));
-        assert_eq!(list(GameMode::Coop).len(), 1, "la copie .bak n'est pas une partie");
+        assert_eq!(list().len(), 1, "la copie .bak n'est pas une partie");
         write_settings("pad=xbox\n").unwrap();
         assert_eq!(read_settings().as_deref(), Some("pad=xbox\n"));
         delete("Ma Partie / 1");

@@ -1,9 +1,6 @@
-//! Écran titre et menu des parties: solo, coopératif (héberger ou rejoindre), parties nommées.
+//! Écran titre et menu des parties: parties nommées, réglages.
 //!
-//! L'illustration couvre la fenêtre jusqu'à la connexion au serveur. Le menu choisit la partie, lance le serveur
-//! local si besoin (`host.rs`) et ouvre la connexion; le jeu démarre quand le client est connecté.
-
-use std::net::{IpAddr, SocketAddr};
+//! L'illustration couvre la fenêtre jusqu'au début de la partie. Le menu choisit la partie; `StartGame` la lance (voir `sim::begin_game`).
 
 use bevy::{
     color::palettes::css,
@@ -11,12 +8,8 @@ use bevy::{
     prelude::*,
 };
 use bevy::{picking::hover::Hovered, ui::Pressed, ui_widgets::Button};
-use bevy_replicon::prelude::*;
-use bevy_replicon_renet::{RenetClient, netcode::NetcodeClientTransport};
-use castle_shared::DEFAULT_PORT;
-use castle_shared::save::{self, GameMode, SAVE_NAME_MAX, SaveGame};
+use castle_shared::save::{self, SAVE_NAME_MAX, SaveGame};
 
-use crate::host::{self, ConnectAt, LocalServer};
 use crate::i18n::Tr;
 use crate::ui::ui_font;
 
@@ -24,25 +17,20 @@ use crate::ui::ui_font;
 #[derive(Resource)]
 pub struct TitleActive(pub bool);
 
-/// Adresse à donner aux autres joueurs, quand on héberge une partie.
-#[derive(Resource)]
-pub struct HostAddress(pub String);
-
-/// Retour à l'écran titre: coupe la connexion, arrête le serveur local et efface la partie affichée. Le message,
-/// s'il y en a un, est la clé d'une erreur à montrer (connexion perdue...).
+/// Retour à l'écran titre: quitte la partie et efface ce qu'elle avait posé. Le message, s'il y en a un, est la clé d'une
+/// erreur à montrer.
 #[derive(Event)]
 pub struct ReturnToTitle(pub Option<&'static str>);
 
-/// Ce que l'écran titre attend, pour les commandes tactiles (`touch.rs`): un pavé pour l'adresse, un bouton Effacer
-/// pour la liste des parties.
+/// Ce que l'écran titre attend, pour les commandes tactiles (`touch.rs`): un bouton Effacer pour la liste des parties.
 #[derive(Resource, Default, PartialEq)]
 pub struct MenuMode {
-    pub address: bool,
     pub saves: bool,
 }
 
-/// Secondes accordées à une connexion avant d'y renoncer.
-const CONNECT_TIMEOUT: f32 = 8.0;
+/// Lance la partie de ce nom (la reprend, ou en commence une nouvelle) et ferme l'écran titre.
+#[derive(Event)]
+struct StartGame(String);
 
 pub struct TitlePlugin;
 
@@ -53,12 +41,11 @@ impl Plugin for TitlePlugin {
             .init_resource::<MenuMode>()
             .add_systems(Startup, spawn_title)
             .add_observer(return_to_title)
+            .add_observer(start_game)
             .add_systems(
                 Update,
                 (
                     (menu_pointer, menu_input, rebuild_menu, publish_mode).chain().run_if(|t: Res<TitleActive>| t.0),
-                    watch_connection,
-                    show_host_address,
                 ),
             );
     }
@@ -70,9 +57,6 @@ struct TitleScreen;
 /// Conteneur reconstruit à chaque changement du menu.
 #[derive(Component)]
 struct MenuRoot;
-
-#[derive(Component)]
-struct HostBadge;
 
 /// Texte d'une entrée de menu qui prend la couleur de sélection.
 #[derive(Component)]
@@ -111,16 +95,10 @@ struct KeyButton(usize, usize);
 #[derive(Component)]
 struct KeyLabel(usize, usize);
 
-/// Les rangées du clavier à l'écran de cet écran: lettres et chiffres pour un nom, chiffres pour une adresse.
+/// Les rangées du clavier à l'écran de cet écran: lettres et chiffres pour un nom.
 fn vkb_rows(screen: Screen) -> Vec<Vec<VKey>> {
     let chars = |text: &str| text.chars().map(VKey::Char).collect::<Vec<_>>();
     match screen {
-        Screen::JoinAddress => vec![
-            chars("12345"),
-            chars("67890"),
-            vec![VKey::Char('.'), VKey::Char(':'), VKey::Backspace],
-            vec![VKey::Validate, VKey::Back],
-        ],
         _ => vec![
             chars("ABCDEFGHIJ"),
             chars("KLMNOPQRST"),
@@ -131,12 +109,11 @@ fn vkb_rows(screen: Screen) -> Vec<Vec<VKey>> {
     }
 }
 
-/// Le clavier à l'écran remplace le clavier physique sur Apple TV (nom de partie et adresse) et sur les écrans tactiles (nom
+/// Le clavier à l'écran remplace le clavier physique sur Apple TV (nom de partie) et sur les écrans tactiles (nom
 /// de partie).
 fn vkb_enabled(screen: Screen) -> bool {
     match screen {
-        Screen::NewName(_) => crate::settings::is_tv() || crate::touch::enabled(),
-        Screen::JoinAddress => crate::settings::is_tv(),
+        Screen::NewName => crate::settings::is_tv() || crate::touch::enabled(),
         _ => false,
     }
 }
@@ -144,20 +121,18 @@ fn vkb_enabled(screen: Screen) -> bool {
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Screen {
     Main,
-    /// Liste des parties d'un mode, avec « nouvelle partie » en tête.
-    Saves(GameMode),
-    NewName(GameMode),
-    JoinAddress,
+    /// Liste des parties, avec « nouvelle partie » en tête.
+    Saves,
+    NewName,
     /// Réglages: commandes tactiles, langue.
     Settings,
-    Connecting,
 }
 
 #[derive(Resource)]
 struct Menu {
     screen: Screen,
     cursor: usize,
-    /// Texte en cours de saisie (nom de partie ou adresse).
+    /// Texte en cours de saisie (nom de partie).
     input: String,
     saves: Vec<SaveGame>,
     confirm_delete: bool,
@@ -169,8 +144,6 @@ struct Menu {
     cursor_dirty: bool,
     /// Seul le texte saisi a changé.
     input_dirty: bool,
-    /// Depuis combien de temps on attend la connexion.
-    waiting: f32,
     /// Une entrée vient d'être cliquée ou touchée (équivaut à la sélectionner puis valider).
     click: Option<usize>,
     /// Le bouton « effacer » d'une partie vient d'être touché.
@@ -194,7 +167,6 @@ impl Default for Menu {
             dirty: true,
             cursor_dirty: false,
             input_dirty: false,
-            waiting: 0.0,
             click: None,
             delete_click: None,
             kb: (0, 0),
@@ -211,26 +183,25 @@ impl Menu {
         self.kb = (0, 0);
         self.input.clear();
         // Avec le clavier à l'écran, un nom libre est proposé d'office: il suffit de valider, ou de l'effacer pour en taper un autre.
-        if vkb_enabled(screen) && matches!(screen, Screen::NewName(_)) {
+        if vkb_enabled(screen) && matches!(screen, Screen::NewName) {
             self.input = free_name();
         }
         self.confirm_delete = false;
         self.dirty = true;
-        if let Screen::Saves(mode) = screen {
-            self.saves = save::list(mode);
+        if screen == Screen::Saves {
+            self.saves = save::list();
         }
     }
 
     fn item_count(&self) -> usize {
         match self.screen {
-            Screen::Main => 5,
+            Screen::Main => 3,
             // Nouvelle partie, les parties, Retour.
-            Screen::Saves(_) => 2 + self.saves.len(),
+            Screen::Saves => 2 + self.saves.len(),
             // Valider, Retour.
-            Screen::NewName(_) | Screen::JoinAddress => 2,
+            Screen::NewName => 2,
             // Commandes tactiles, langue, disposition de la manette, taille de l'interface, Retour.
             Screen::Settings => 9,
-            Screen::Connecting => 0,
         }
     }
 }
@@ -330,7 +301,6 @@ fn rebuild_menu(
     mut commands: Commands,
     assets: Res<AssetServer>,
     mut menu: ResMut<Menu>,
-    host: Option<Res<HostAddress>>,
     roots: Query<Entity, With<MenuRoot>>,
     mut markers: Query<(&RowMarker, &mut Text), Without<InputLine>>,
     mut colors: Query<(&RowText, &mut TextColor)>,
@@ -381,16 +351,15 @@ fn rebuild_menu(
         };
         match menu.screen {
             Screen::Main => {
-                for (i, key) in ["menu-solo", "menu-host", "menu-join", "menu-settings", "menu-quit"].into_iter().enumerate() {
+                for (i, key) in ["menu-play", "menu-settings", "menu-quit"].into_iter().enumerate() {
                     spawn_row(ui, &assets, i, i == menu.cursor, |row, color, tag| {
                         row.spawn((menu_text(&assets, 16.0, color), Tr::new(key), tag));
                     });
                 }
                 line(ui, "menu-hint", 8.0, css::LIGHT_GRAY.into());
             }
-            Screen::Saves(mode) => {
-                let title = if mode == GameMode::Solo { "menu-solo" } else { "menu-host" };
-                line(ui, title, 16.0, css::LIGHT_SKY_BLUE.into());
+            Screen::Saves => {
+                line(ui, "menu-play", 16.0, css::LIGHT_SKY_BLUE.into());
                 spawn_row(ui, &assets, 0, menu.cursor == 0, |row, color, tag| {
                     row.spawn((menu_text(&assets, 14.0, color), Tr::new("menu-new-game"), tag));
                 });
@@ -427,9 +396,8 @@ fn rebuild_menu(
                 let hint = if menu.confirm_delete { "menu-confirm-delete" } else { "menu-saves-hint" };
                 line(ui, hint, 8.0, if menu.confirm_delete { css::TOMATO.into() } else { css::LIGHT_GRAY.into() });
             }
-            Screen::NewName(_) | Screen::JoinAddress => {
-                let prompt = if menu.screen == Screen::JoinAddress { "menu-enter-address" } else { "menu-enter-name" };
-                line(ui, prompt, 14.0, css::LIGHT_SKY_BLUE.into());
+            Screen::NewName => {
+                line(ui, "menu-enter-name", 14.0, css::LIGHT_SKY_BLUE.into());
                 ui.spawn((menu_style(&assets, 16.0, css::GOLD.into()), Text::new(format!("{}_", menu.input)), InputLine));
                 if vkb_enabled(menu.screen) {
                     // Clavier à l'écran: la croix ou le stick déplacent la sélection, A tape la touche (ou on la touche).
@@ -538,13 +506,6 @@ fn rebuild_menu(
                 });
                 line(ui, "settings-touch-hint", 8.0, css::LIGHT_GRAY.into());
             }
-            Screen::Connecting => {
-                line(ui, "menu-connecting", 16.0, css::WHITE.into());
-                if let Some(host) = &host {
-                    ui.spawn((menu_text(&assets, 10.0, css::LIGHT_GRAY.into()), Tr::with_prefix("menu-host-address", "")));
-                    ui.spawn((menu_style(&assets, 14.0, css::GOLD.into()), Text::new(host.0.clone())));
-                }
-            }
         }
         if let Some(error) = menu.error {
             line(ui, error, 10.0, css::TOMATO.into());
@@ -559,18 +520,9 @@ fn free_name() -> String {
 
 fn publish_mode(menu: Res<Menu>, mut mode: ResMut<MenuMode>) {
     let wanted = MenuMode {
-        address: menu.screen == Screen::JoinAddress,
-        saves: matches!(menu.screen, Screen::Saves(_)),
+        saves: menu.screen == Screen::Saves,
     };
     mode.set_if_neq(wanted);
-}
-
-/// Lit une adresse saisie: `192.168.1.20` ou `192.168.1.20:5000`.
-fn parse_address(text: &str) -> Option<SocketAddr> {
-    let text = text.trim();
-    text.parse::<SocketAddr>()
-        .ok()
-        .or_else(|| text.parse::<IpAddr>().ok().map(|ip| SocketAddr::new(ip, DEFAULT_PORT)))
 }
 
 /// Un clic ou un toucher sur une entrée la sélectionne et la valide; le survol (souris) déplace la sélection.
@@ -601,12 +553,12 @@ fn menu_input(
     mut locale: ResMut<bevy_fluent::prelude::Locale>,
     keys: Res<ButtonInput<KeyCode>>,
     mut typed: MessageReader<KeyboardInput>,
-    state: Res<State<ClientState>>,
+    game: Option<Res<crate::sim::Campaign>>,
     mut menu: ResMut<Menu>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    // Une connexion est en cours (ou déjà établie): le menu ne répond plus.
-    if menu.screen == Screen::Connecting || *state.get() != ClientState::Disconnected {
+    // Une partie est en cours: le menu ne répond plus.
+    if game.is_some() {
         typed.clear();
         return;
     }
@@ -665,11 +617,9 @@ fn menu_input(
         if pressed.is_some() {
             enter = false;
         }
-        let join = menu.screen == Screen::JoinAddress;
         match pressed {
             Some(VKey::Char(c)) => {
-                let limit = if join { 21 } else { SAVE_NAME_MAX };
-                if menu.input.chars().count() < limit {
+                if menu.input.chars().count() < SAVE_NAME_MAX {
                     menu.input.push(c);
                 }
                 // Seul le texte tapé change (sauf si un message d'erreur disparaît: la disposition change).
@@ -696,8 +646,7 @@ fn menu_input(
     }
 
     // Saisie de texte.
-    if matches!(menu.screen, Screen::NewName(_) | Screen::JoinAddress) {
-        let join = menu.screen == Screen::JoinAddress;
+    if menu.screen == Screen::NewName {
         for event in typed.read() {
             if !event.state.is_pressed() {
                 continue;
@@ -713,9 +662,7 @@ fn menu_input(
                 _ => continue,
             };
             for c in text.chars().filter(|c| !c.is_control()) {
-                let allowed = if join { c.is_ascii_digit() || c == '.' || c == ':' } else { true };
-                let limit = if join { 21 } else { SAVE_NAME_MAX };
-                if allowed && menu.input.chars().count() < limit {
+                if menu.input.chars().count() < SAVE_NAME_MAX {
                     menu.input.push(c);
                     // Effacer un message d'erreur change la disposition; sinon seule la saisie est mise à jour.
                     if menu.error.take().is_some() {
@@ -733,7 +680,7 @@ fn menu_input(
     if escape {
         match menu.screen {
             Screen::Main => {}
-            Screen::NewName(mode) => menu.go(Screen::Saves(mode)),
+            Screen::NewName => menu.go(Screen::Saves),
             _ => menu.go(Screen::Main),
         }
         menu.error = None;
@@ -759,10 +706,8 @@ fn menu_input(
     }
     match menu.screen {
         Screen::Main if enter => match menu.cursor {
-            0 => menu.go(Screen::Saves(GameMode::Solo)),
-            1 => menu.go(Screen::Saves(GameMode::Coop)),
-            2 => menu.go(Screen::JoinAddress),
-            3 => menu.go(Screen::Settings),
+            0 => menu.go(Screen::Saves),
+            1 => menu.go(Screen::Settings),
             _ => {
                 exit.write(AppExit::Success);
                 // Sur iPhone, iPad et Apple TV la boucle d'événements ne rend jamais la main: on quitte directement.
@@ -787,110 +732,59 @@ fn menu_input(
             }
             menu.dirty = true;
         }
-        Screen::Saves(mode) => {
+        Screen::Saves => {
             let saves = menu.saves.len();
             if delete && menu.cursor > 0 && menu.cursor <= saves {
                 if menu.confirm_delete {
                     let name = menu.saves[menu.cursor - 1].name.clone();
                     save::delete(&name);
-                    menu.go(Screen::Saves(mode));
+                    menu.go(Screen::Saves);
                 } else {
                     menu.confirm_delete = true;
                     menu.dirty = true;
                 }
             } else if enter {
                 if menu.cursor == 0 {
-                    menu.go(Screen::NewName(mode));
+                    menu.go(Screen::NewName);
                 } else if menu.cursor <= saves {
                     let name = menu.saves[menu.cursor - 1].name.clone();
-                    launch(&mut commands, &mut menu, mode, &name);
+                    commands.trigger(StartGame(name));
                 } else {
                     menu.go(Screen::Main);
                 }
             }
         }
         // « Retour » est la deuxième entrée de ces deux écrans.
-        Screen::NewName(mode) if enter && menu.cursor == 1 => menu.go(Screen::Saves(mode)),
-        Screen::JoinAddress if enter && menu.cursor == 1 => menu.go(Screen::Main),
-        Screen::NewName(mode) if enter => {
+        Screen::NewName if enter && menu.cursor == 1 => menu.go(Screen::Saves),
+        Screen::NewName if enter => {
             let mut name = save::clean_name(&menu.input);
             // Sans rien taper, la partie reçoit un nom libre (« Castle 1 »...).
             if name.is_empty() && vkb_enabled(menu.screen) {
                 name = free_name();
             }
-            match save::load(&name) {
-                _ if name.is_empty() => {}
-                // Même nom, même mode: c'est la partie existante qui est reprise.
-                Some(existing) if existing.mode != mode => {
-                    menu.error = Some("menu-name-taken");
-                    menu.dirty = true;
-                }
-                _ => launch(&mut commands, &mut menu, mode, &name),
+            // Un nom déjà pris: c'est la partie existante qui est reprise.
+            if !name.is_empty() {
+                commands.trigger(StartGame(name));
             }
         }
-        Screen::JoinAddress if enter => match parse_address(&menu.input) {
-            Some(addr) => {
-                commands.insert_resource(ConnectAt::now(addr));
-                menu.error = None;
-                menu.go(Screen::Connecting);
-            }
-            None => {
-                menu.error = Some("menu-bad-address");
-                menu.dirty = true;
-            }
-        },
         _ => {}
     }
 }
 
-/// Démarre le serveur de la partie, puis se connecte dessus.
-fn launch(commands: &mut Commands, menu: &mut Menu, mode: GameMode, name: &str) {
-    match host::start_local_server(mode, name) {
-        Ok(server) => {
-            commands.insert_resource(server);
-            let local = (std::net::Ipv4Addr::LOCALHOST, DEFAULT_PORT).into();
-            commands.insert_resource(ConnectAt::after_server_start(local));
-            if mode == GameMode::Coop {
-                if let Some(addr) = host::lan_address() {
-                    commands.insert_resource(HostAddress(addr.to_string()));
-                }
-            }
-            menu.error = None;
-            menu.go(Screen::Connecting);
-        }
-        Err(key) => {
-            menu.error = Some(key);
-            menu.dirty = true;
-        }
-    }
-}
-
-/// Ferme l'écran titre une fois connecté; ramène au menu si la connexion échoue ou se perd.
-fn watch_connection(
+/// Démarre la partie et ferme l'écran titre.
+fn start_game(
+    request: On<StartGame>,
     mut commands: Commands,
-    time: Res<Time>,
-    state: Res<State<ClientState>>,
-    pending: Option<Res<ConnectAt>>,
     mut menu: ResMut<Menu>,
     mut title: ResMut<TitleActive>,
     screens: Query<Entity, With<TitleScreen>>,
 ) {
-    let connected = *state.get() == ClientState::Connected;
-    if connected && title.0 {
-        title.0 = false;
-        for screen in &screens {
-            commands.entity(screen).despawn();
-        }
-        return;
-    }
-    if !title.0 && !connected {
-        // Le serveur a disparu en cours de partie (l'écran titre n'est fermé qu'une fois connecté).
-        commands.trigger(ReturnToTitle(Some("menu-connection-lost")));
-    } else if title.0 && menu.screen == Screen::Connecting && pending.is_none() {
-        menu.waiting += time.delta_secs();
-        if menu.waiting > CONNECT_TIMEOUT {
-            commands.trigger(ReturnToTitle(Some("menu-connect-failed")));
-        }
+    let name = request.0.clone();
+    commands.queue(move |world: &mut World| crate::sim::begin_game(world, &name));
+    menu.error = None;
+    title.0 = false;
+    for screen in &screens {
+        commands.entity(screen).despawn();
     }
 }
 
@@ -901,20 +795,9 @@ fn return_to_title(
     mut menu: ResMut<Menu>,
     mut title: ResMut<TitleActive>,
     screens: Query<(), With<TitleScreen>>,
-    remote: Query<Entity, With<Remote>>,
-    badges: Query<Entity, With<HostBadge>>,
 ) {
-    // On abandonne la connexion et le serveur local; le serveur d'un hôte s'arrête avec lui.
-    commands.remove_resource::<RenetClient>();
-    commands.remove_resource::<NetcodeClientTransport>();
-    commands.remove_resource::<LocalServer>();
-    commands.remove_resource::<HostAddress>();
-    commands.remove_resource::<ConnectAt>();
-    // Replicon laisse en place les entités reçues du serveur: on efface la partie affichée.
-    for entity in remote.iter().chain(badges.iter()) {
-        commands.entity(entity).despawn();
-    }
-    menu.waiting = 0.0;
+    // On quitte la partie: la simulation s'arrête et ce qu'elle avait posé disparaît.
+    commands.queue(|world: &mut World| crate::sim::end_game(world));
     menu.go(Screen::Main);
     menu.error = request.0;
     title.0 = true;
@@ -923,28 +806,3 @@ fn return_to_title(
     }
 }
 
-/// En coopératif, l'hôte garde sous les yeux l'adresse à communiquer aux autres joueurs.
-fn show_host_address(
-    mut commands: Commands,
-    assets: Res<AssetServer>,
-    title: Res<TitleActive>,
-    host: Option<Res<HostAddress>>,
-    badge: Query<(), With<HostBadge>>,
-) {
-    let Some(host) = host else {
-        return;
-    };
-    if title.0 || !badge.is_empty() {
-        return;
-    }
-    commands
-        .spawn((
-            HostBadge,
-            Node { position_type: PositionType::Absolute, right: Val::Px(10.0), bottom: Val::Px(8.0), column_gap: Val::Px(8.0), ..default() },
-            GlobalZIndex(50),
-        ))
-        .with_children(|badge| {
-            badge.spawn((menu_text(&assets, 8.0, css::LIGHT_GRAY.into()), Tr::new("menu-host-address")));
-            badge.spawn((menu_style(&assets, 8.0, css::GOLD.into()), Text::new(host.0.clone())));
-        });
-}

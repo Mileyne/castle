@@ -5,7 +5,7 @@
 use bevy::prelude::*;
 use castle_shared::*;
 
-use crate::Rng;
+use super::Rng;
 
 /// Le mécanisme propre à une classe qui ouvre la sortie: son panneau (dans un mur, près de la sortie), ce qu'il faut
 /// trouver pour l'actionner, et les scènes qui l'expliquent (à l'arrivée, puis devant le panneau).

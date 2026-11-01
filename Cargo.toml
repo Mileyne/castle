@@ -1,11 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["shared", "server", "client", "tools/sprite_forge", "tools/sprite_editor", "tools/live3d", "tools/model_viewer"]
+members = ["shared", "client", "tools/sprite_forge", "tools/sprite_editor", "tools/live3d", "tools/model_viewer"]
 
 [workspace.dependencies]
 bevy = { version = "0.20", default-features = false }
-bevy_replicon = "0.45"
-bevy_replicon_renet = "0.21"
 serde = { version = "1", features = ["derive"] }
 bevy_fluent = "0.16"
 

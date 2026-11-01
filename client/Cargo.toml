@@ -12,11 +12,8 @@ tvos = []
 
 [dependencies]
 castle_shared = { path = "../shared" }
-castle_server = { path = "../server" }
 # Le jeu est une scène 3D (voir `decor3d`); le regroupement de lumières 3D de Bevy est remplacé sur iOS et tvOS (voir `vendor/bevy_pbr`).
 bevy = { workspace = true, default-features = false, features = ["2d", "3d", "ui", "audio", "basis-universal"] }
-bevy_replicon.workspace = true
-bevy_replicon_renet.workspace = true
 bevy_fluent.workspace = true
 serde.workspace = true
 ron = "0.12"

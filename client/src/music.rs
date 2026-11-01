@@ -2,7 +2,6 @@
 //! « Dungeon Exploration » en alternance d'un niveau à l'autre, et la piste des boss dès que le combat avec un boss s'engage.
 
 use bevy::{audio::Volume, prelude::*};
-use bevy_replicon::prelude::ClientState;
 use castle_shared::{Expedition, Health, Monster, Player, Position};
 
 const TITLE_TRACK: &str = "audio/title.ogg";
@@ -33,7 +32,7 @@ const CROSSFADE: f32 = 2.5;
 
 /// Choisit la piste qui correspond à l'état du client; les autres s'éteignent peu à peu (fondu enchaîné).
 fn switch_track(
-    state: Res<State<ClientState>>,
+    game: Option<Res<crate::sim::Campaign>>,
     expeditions: Query<&Expedition>,
     bosses: Query<(&Monster, &Health, &Position)>,
     heroes: Query<&Position, With<Player>>,
@@ -48,7 +47,7 @@ fn switch_track(
         && (*engaged
             || boss.clone().any(|(_, health, at)| health.current < health.max || heroes.iter().any(|hero| hero.0.distance(at.0) <= BOSS_ENGAGE)));
     let level = expeditions.iter().last().map_or(1, |e| e.level);
-    let wanted = if *state.get() != ClientState::Connected {
+    let wanted = if game.is_none() {
         TITLE_TRACK
     } else if *engaged {
         BOSS_TRACK

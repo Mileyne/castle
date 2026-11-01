@@ -1,26 +1,14 @@
-//! Serveur de Castle: simulation autoritaire, sans fenêtre.
-//!
-//! Bibliothèque: le programme `castle_server` (ordinateur) la lance dans son propre processus; sur iOS, où une app ne
-//! peut pas lancer d'autre programme, le client la fait tourner sur un fil à part (`run_in_thread`).
+//! La simulation de Castle: héros, monstres, niveaux, dialogues, sauvegarde. Elle tourne dans le monde du client (voir `SimPlugin`),
+//! sans réseau: l'affichage lit directement ce qu'elle pose.
 
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::net::{Ipv4Addr, UdpSocket};
-use std::time::Duration;
 use std::time::SystemTime;
 
-use bevy::{app::ScheduleRunnerPlugin, prelude::*, state::app::StatesPlugin};
-use bevy_replicon::prelude::*;
-use bevy_replicon_renet::{
-    RenetChannelsExt, RenetServer, RepliconRenetPlugins,
-    netcode::{NetcodeServerTransport, ServerAuthentication, ServerConfig},
-    renet::ConnectionConfig,
-};
+use bevy::prelude::*;
 mod boss;
 mod outdoor;
 
-use castle_shared::save::{self, GameMode, SaveGame};
+use castle_shared::save::{self, SaveGame};
 use castle_shared::*;
 
 /// Compagnons: distance de détection des ennemis, portée de tir, retour auprès du chef.
@@ -203,7 +191,7 @@ struct TurretOwner(Entity);
 #[derive(Component)]
 struct Controlled;
 
-/// Sur l'entité de connexion d'un client: le héros qu'il dirige, et son équipe.
+/// Sur l'entité du joueur: le héros qu'il dirige, et son équipe.
 #[derive(Component)]
 struct ActiveHero(Entity);
 
@@ -306,180 +294,150 @@ impl Rng {
     }
 }
 
-/// Demande d'arrêt d'un serveur lancé sur un fil: il s'arrête à la frame suivante.
-#[derive(Resource, Clone, Default)]
-pub struct StopFlag(pub Arc<AtomicBool>);
+/// La simulation du jeu: les héros, les monstres, les niveaux, les dialogues. Elle tourne dans le même monde que l'affichage, et
+/// seulement quand une partie est en cours (voir `begin_game`).
+pub struct SimPlugin;
 
-impl StopFlag {
-    pub fn stop(&self) {
-        self.0.store(true, Ordering::Relaxed);
-    }
-}
-
-fn stop_when_asked(flag: Res<StopFlag>, mut exit: MessageWriter<AppExit>) {
-    if flag.0.load(Ordering::Relaxed) {
-        exit.write(AppExit::Success);
-    }
-}
-
-/// Serveur lancé dans le processus d'un client: le drapeau l'arrête, et le fil se termine avec lui.
-pub struct ThreadServer {
-    pub stop: StopFlag,
-    pub thread: std::thread::JoinHandle<()>,
-}
-
-/// Lance le serveur sur un fil du processus courant. Il partage les journaux du client (pas de second `LogPlugin`).
-pub fn run_in_thread(options: Options) -> std::io::Result<ThreadServer> {
-    let stop = StopFlag::default();
-    let flag = stop.clone();
-    let thread = std::thread::Builder::new()
-        .name("castle-server".into())
-        .spawn(move || run(options, Some(flag)))?;
-    Ok(ThreadServer { stop, thread })
-}
-
-/// Fait tourner le serveur jusqu'à son arrêt. Sans drapeau (programme autonome), il installe ses propres journaux.
-pub fn run(options: Options, stop: Option<StopFlag>) {
-    let embedded = stop.is_some();
-    let campaign = options.open_campaign();
-    info!("campaign '{}' ({:?}), level {}", campaign.0.name, campaign.0.mode, campaign.0.level);
-    let mut app = App::new();
-    app.add_plugins((
-        // Sans cadence, la boucle d'un serveur sans fenêtre tourne à vide et occupe un cœur entier.
-        MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_millis(8))),
-        StatesPlugin,
-    ));
-    if !embedded {
-        app.add_plugins(bevy::log::LogPlugin::default());
-    }
-    if let Some(flag) = stop {
-        app.insert_resource(flag).add_systems(First, stop_when_asked);
-    }
-    app
-        .add_plugins((
-            RepliconPlugins,
-            RepliconRenetPlugins,
-            CastleSharedPlugin,
-        ))
-        .insert_resource(Rng(campaign.0.entry_rng))
-        .insert_resource(campaign)
-        .insert_resource(options)
-        .init_resource::<DialogueSession>()
-        .init_resource::<Paused>()
-        .init_resource::<NextParty>()
-        .insert_resource(LevelRegion(Region::Crypts))
-        .init_resource::<LevelStats>()
-        .init_resource::<Transition>()
-        .add_systems(Startup, (start_server, start_first_expedition))
-        .add_systems(
-            FixedUpdate,
-            (
-                // Actions des héros, puis effets, puis monde et dialogues.
+impl Plugin for SimPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<DialogueSession>()
+            .init_resource::<Paused>()
+            .init_resource::<NextParty>()
+            .insert_resource(LevelRegion(Region::Crypts))
+            .init_resource::<LevelStats>()
+            .init_resource::<Transition>()
+            .add_systems(
+                FixedUpdate,
                 (
-                    hold_heroes,
-                    dismiss_guide,
-                    move_players,
-                    player_attacks,
-                    resolve_attacks,
-                    auto_switch,
-                    hero_ai,
-                    leash_followers,
-                    regen_mana,
-                    player_specials,
-                    tick_shields,
-                    run_zones,
-                    run_turrets,
-                    move_projectiles,
+                    // Actions des héros, puis effets, puis monde et dialogues.
+                    (
+                        hold_heroes,
+                        dismiss_guide,
+                        move_players,
+                        player_attacks,
+                        resolve_attacks,
+                        auto_switch,
+                        hero_ai,
+                        leash_followers,
+                        regen_mana,
+                        player_specials,
+                        tick_shields,
+                        run_zones,
+                        run_turrets,
+                        move_projectiles,
+                    )
+                        .chain(),
+                    (
+                        run_generators.run_if(not_in_transition),
+                        run_dialogue_triggers,
+                        tick_dialogue,
+                        run_interactions,
+                        run_ward,
+                        run_traps,
+                        open_locked_doors,
+                        monster_ai.run_if(not_in_transition),
+                        reap_dead,
+                        collect_pickups,
+                        run_regen,
+                        collect_relics,
+                        rescue_captives,
+                        update_mechanism_quests,
+                        open_exit,
+                        down_players,
+                        revive_players,
+                        check_wipe,
+                        track_stats,
+                        run_exit,
+                    )
+                        .chain(),
                 )
-                    .chain(),
-                (
-                    run_generators.run_if(not_in_transition),
-                    run_dialogue_triggers,
-                    tick_dialogue,
-                    run_interactions,
-                    run_ward,
-                    run_traps,
-                    open_locked_doors,
-                    monster_ai.run_if(not_in_transition),
-                    reap_dead,
-                    collect_pickups,
-                    run_regen,
-                    collect_relics,
-                    rescue_captives,
-                    update_mechanism_quests,
-                    open_exit,
-                    down_players,
-                    revive_players,
-                    check_wipe,
-                    track_stats,
-                    run_exit,
-                )
-                    .chain(),
+                    .chain()
+                    .run_if(in_game)
+                    .run_if(not_paused),
             )
-                .chain()
-                .run_if(not_paused),
-        )
-        .add_systems(
-            Update,
-            boss::boss_ai
-                .run_if(not_in_transition)
-                .run_if(not_paused)
-                .after(monster_ai),
-        )
-        .add_observer(spawn_party)
-        .add_observer(despawn_party)
-        .add_observer(switch_hero)
-        .add_observer(set_pause)
-        .add_observer(apply_input)
-        .add_observer(continue_level)
-        .add_observer(dialogue_advance)
-        .add_observer(dialogue_skip)
-        .add_observer(dialogue_vote)
-        .add_observer(dialogue_finished)
-        .run();
+            .add_systems(
+                Update,
+                boss::boss_ai
+                    .run_if(in_game)
+                    .run_if(not_in_transition)
+                    .run_if(not_paused)
+                    .after(monster_ai),
+            )
+            .add_observer(spawn_party)
+            .add_observer(switch_hero)
+            .add_observer(set_pause)
+            .add_observer(apply_input)
+            .add_observer(continue_level)
+            .add_observer(dialogue_advance)
+            .add_observer(dialogue_skip)
+            .add_observer(dialogue_vote)
+            .add_observer(dialogue_finished);
+    }
 }
 
-/// Réglages de la partie (en ligne de commande: `--port N`, `--mode solo|coop`, `--save NOM`).
-#[derive(Resource, Clone)]
-pub struct Options {
-    pub port: u16,
-    pub mode: GameMode,
-    pub save: String,
+/// Une partie est en cours (le client n'est plus sur l'écran titre).
+pub fn in_game(campaign: Option<Res<Campaign>>) -> bool {
+    campaign.is_some()
 }
 
-impl Options {
-    pub fn from_args() -> Self {
-        let args: Vec<String> = std::env::args().skip(1).collect();
-        let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1));
-        Self {
-            port: value("--port").and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT),
-            mode: value("--mode").and_then(|m| GameMode::from_arg(m)).unwrap_or(GameMode::Coop),
-            save: value("--save").cloned().unwrap_or_else(|| "Castle".into()),
+/// Commence (ou reprend) la partie de ce nom: charge la sauvegarde, génère le niveau et donne une équipe au joueur.
+pub fn begin_game(world: &mut World, save_name: &str) {
+    let campaign = open_campaign(save_name);
+    info!("campaign '{}', level {}", campaign.0.name, campaign.0.level);
+    world.insert_resource(Rng(campaign.0.entry_rng));
+    world.insert_resource(campaign);
+    world.insert_resource(DialogueSession::default());
+    world.insert_resource(Paused::default());
+    world.insert_resource(NextParty::default());
+    world.insert_resource(LevelStats::default());
+    world.insert_resource(Transition::default());
+    let _ = world.run_system_cached(start_first_expedition);
+    world.flush();
+    world.trigger(Join);
+}
+
+/// Quitte la partie: la simulation s'arrête, et tout ce qu'elle avait posé dans le monde disparaît.
+pub fn end_game(world: &mut World) {
+    world.remove_resource::<Campaign>();
+    world.remove_resource::<Level>();
+    world.remove_resource::<Room>();
+    world.remove_resource::<Layout>();
+    let doomed: Vec<Entity> = world
+        .query_filtered::<Entity, Or<(With<WorldEntity>, With<ActiveHero>, With<ExitArea>)>>()
+        .iter(world)
+        .collect();
+    for entity in doomed {
+        if let Ok(entity) = world.get_entity_mut(entity) {
+            entity.despawn();
         }
     }
+}
 
-    /// Reprend la partie de ce nom, ou en commence une nouvelle.
-    fn open_campaign(&self) -> Campaign {
-        let mut save = match save::load(&self.save) {
-            Some(save) => save,
-            None => {
-                let seed = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .map(|d| d.as_nanos() as u64)
-                    .unwrap_or(1);
-                let fresh = SaveGame::new(&self.save, self.mode, seed);
-                if let Err(err) = save::write(&fresh) {
-                    warn!("cannot write save: {err}");
-                }
-                fresh
+/// Le joueur arrive dans la partie (voir `spawn_party`).
+#[derive(Event)]
+pub struct Join;
+
+/// Reprend la partie de ce nom, ou en commence une nouvelle.
+fn open_campaign(name: &str) -> Campaign {
+    let mut save = match save::load(name) {
+        Some(save) => save,
+        None => {
+            let seed = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(1);
+            let fresh = SaveGame::new(name, seed);
+            if let Err(err) = save::write(&fresh) {
+                warn!("cannot write save: {err}");
             }
-        };
-        // L'éditeur de niveaux lance le jeu sur un niveau précis pour l'essayer.
-        if let Some(level) = std::env::var("CASTLE_START_LEVEL").ok().and_then(|v| v.parse::<u32>().ok()) {
-            save.level = level.clamp(1, LEVEL_COUNT);
+            fresh
         }
-        Campaign(save)
+    };
+    // L'éditeur de niveaux lance le jeu sur un niveau précis pour l'essayer.
+    if let Some(level) = std::env::var("CASTLE_START_LEVEL").ok().and_then(|v| v.parse::<u32>().ok()) {
+        save.level = level.clamp(1, LEVEL_COUNT);
     }
+    Campaign(save)
 }
 
 /// La simulation est en pause (menu de pause d'une partie solo).
@@ -521,11 +479,11 @@ const SUMMARY_TIMEOUT: f32 = 120.0;
 #[derive(Component)]
 struct Ready;
 
-fn continue_level(input: On<FromClient<ContinueLevel>>, transition: Res<Transition>, mut commands: Commands) {
+fn continue_level(_input: On<ContinueLevel>, transition: Res<Transition>, clients: Query<Entity, With<ActiveHero>>, mut commands: Commands) {
     if transition.0.is_none() {
         return;
     }
-    if let Some(client) = input.client_id.entity() {
+    for client in &clients {
         commands.entity(client).try_insert(Ready);
     }
 }
@@ -582,14 +540,14 @@ fn track_stats(
     }
 }
 
-/// Le menu de pause fige la partie, mais seulement en solo: en coopératif les autres joueurs continuent.
-fn set_pause(request: On<FromClient<SetPause>>, options: Res<Options>, mut paused: ResMut<Paused>) {
-    paused.0 = options.mode == GameMode::Solo && request.0;
+/// Le menu de pause fige la partie.
+fn set_pause(request: On<SetPause>, mut paused: ResMut<Paused>) {
+    paused.0 = request.0;
 }
 
 /// La partie en cours: le niveau où l'équipe est entrée, de quoi le régénérer et ce qu'elle portait.
 #[derive(Resource)]
-struct Campaign(SaveGame);
+pub struct Campaign(SaveGame);
 
 impl Campaign {
     fn write(&self) {
@@ -599,42 +557,9 @@ impl Campaign {
     }
 }
 
-fn start_server(mut commands: Commands, channels: Res<RepliconChannels>, options: Res<Options>) -> Result {
-    let port = options.port;
-    // Solo: le serveur n'écoute que cette machine et n'accepte qu'un joueur.
-    let (bind, max_clients) = match options.mode {
-        GameMode::Solo => (Ipv4Addr::LOCALHOST, 1),
-        GameMode::Coop => (Ipv4Addr::UNSPECIFIED, MAX_PLAYERS),
-    };
-
-    let server = RenetServer::new(ConnectionConfig {
-        server_channels_config: channels.server_configs(),
-        client_channels_config: channels.client_configs(),
-        ..Default::default()
-    });
-
-    let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
-    let socket = UdpSocket::bind((bind, port))?;
-    let transport = NetcodeServerTransport::new(
-        ServerConfig {
-            current_time,
-            max_clients,
-            protocol_id: PROTOCOL_ID,
-            authentication: ServerAuthentication::Unsecure,
-            public_addresses: Default::default(),
-        },
-        socket,
-    )?;
-
-    commands.insert_resource(server);
-    commands.insert_resource(transport);
-    info!("Castle server listening on {bind}:{port}");
-    Ok(())
-}
-
-/// Un client authentifié reçoit une équipe de quatre héros; le Chevalier est dirigé au départ.
+/// Le joueur reçoit une équipe de quatre héros; le Chevalier est dirigé au départ.
 fn spawn_party(
-    add: On<Add<AuthorizedClient>>,
+    _join: On<Join>,
     mut commands: Commands,
     layout: Res<Layout>,
     room: Res<Room>,
@@ -644,7 +569,7 @@ fn spawn_party(
 ) {
     let party = next_party.0;
     next_party.0 += 1;
-    info!("player joined ({:?}), party {party}", add.entity);
+    info!("player joined, party {party}");
     let first_slot = heroes.iter().count();
     // Les équipes arrivent dans le même ordre qu'à la sauvegarde: la n-ième retrouve sa bourse.
     let (gold, keys) = campaign.0.purses.get(party as usize).copied().unwrap_or_default();
@@ -653,7 +578,7 @@ fn spawn_party(
         let stats = class.stats();
         let hero = commands
             .spawn((
-                Replicated,
+                WorldEntity,
                 Player,
                 PartyId(party),
                 class,
@@ -682,42 +607,20 @@ fn spawn_party(
         }
     }
     let hero = active.expect("une équipe a au moins un héros");
-    commands.entity(add.entity).insert((ActiveHero(hero), ClientParty(party)));
-    commands.server_trigger(ToClients {
-        targets: SendTargets::Single(ClientId::Client(add.entity)),
-        message: YouAre { hero, party },
-    });
-}
-
-/// Quand un client part, son équipe disparaît avec lui.
-fn despawn_party(
-    remove: On<Remove<ConnectedClient>>,
-    mut commands: Commands,
-    clients: Query<&ClientParty>,
-    heroes: Query<(Entity, &PartyId), With<Player>>,
-) {
-    let Ok(party) = clients.get(remove.entity) else {
-        return;
-    };
-    for (entity, id) in &heroes {
-        if id.0 == party.0 {
-            commands.entity(entity).despawn();
-        }
-    }
+    // Le joueur de cette partie: l'entité qui sait quel héros il dirige.
+    commands.spawn((ActiveHero(hero), ClientParty(party)));
+    commands.trigger(YouAre { hero, party });
 }
 
 fn apply_input(
-    input: On<FromClient<PlayerInput>>,
+    input: On<PlayerInput>,
     clients: Query<&ActiveHero>,
     mut heroes: Query<
         (&mut MoveDir, &mut Facing, &mut Attacking, &mut SpecialInput, &mut Interacting),
         (With<Controlled>, Without<Downed>),
     >,
 ) {
-    let Some(client) = input.client_id.entity() else {
-        return;
-    };
-    let Ok(active) = clients.get(client) else {
+    let Ok(active) = clients.single() else {
         return;
     };
     let Ok((mut dir, mut facing, mut attacking, mut special, mut interacting)) =
@@ -744,15 +647,12 @@ fn apply_input(
 
 /// Le joueur prend la main sur un autre héros de son équipe; l'ancien redevient un compagnon.
 fn switch_hero(
-    choice: On<FromClient<SwitchHero>>,
+    choice: On<SwitchHero>,
     mut commands: Commands,
-    mut clients: Query<(&mut ActiveHero, &ClientParty)>,
+    mut clients: Query<(Entity, &mut ActiveHero, &ClientParty)>,
     heroes: Query<(Entity, &PartyId, &HeroClass, Has<Downed>), With<Player>>,
 ) {
-    let Some(client) = choice.client_id.entity() else {
-        return;
-    };
-    let Ok((mut active, party)) = clients.get_mut(client) else {
+    let Ok((_, mut active, party)) = clients.single_mut() else {
         return;
     };
     let target = heroes
@@ -764,10 +664,7 @@ fn switch_hero(
     };
     hand_over(&mut commands, active.0, target);
     active.0 = target;
-    commands.server_trigger(ToClients {
-        targets: SendTargets::Single(ClientId::Client(client)),
-        message: YouAre { hero: target, party: party.0 },
-    });
+    commands.trigger(YouAre { hero: target, party: party.0 });
 }
 
 /// Retire le contrôle à `from` (qui s'arrête) et le donne à `to`.
@@ -787,7 +684,7 @@ fn auto_switch(
     mut clients: Query<(Entity, &mut ActiveHero, &ClientParty)>,
     heroes: Query<(Entity, &PartyId, Has<Downed>), With<Player>>,
 ) {
-    for (client, mut active, party) in &mut clients {
+    for (_, mut active, party) in &mut clients {
         let down = heroes.get(active.0).map(|(_, _, downed)| downed).unwrap_or(true);
         if !down {
             continue;
@@ -800,10 +697,7 @@ fn auto_switch(
         };
         hand_over(&mut commands, active.0, next);
         active.0 = next;
-        commands.server_trigger(ToClients {
-            targets: SendTargets::Single(ClientId::Client(client)),
-            message: YouAre { hero: next, party: party.0 },
-        });
+        commands.trigger(YouAre { hero: next, party: party.0 });
     }
 }
 
@@ -879,14 +773,11 @@ fn resolve_attacks(
                         health.current -= damage * power;
                     }
                 }
-                commands.server_trigger(ToClients {
-                    targets: SendTargets::All,
-                    message: AttackFx { pos: pos.0, dir: facing.0, class: *class },
-                });
+                commands.trigger(AttackFx { pos: pos.0, dir: facing.0, class: *class });
             }
             Attack::Shot { speed, damage, lifetime, .. } => {
                 commands.spawn((
-                    Replicated,
+                    WorldEntity,
                     Projectile { class: *class, dir: facing.0 },
                     Position(pos.0 + facing.0 * 8.0),
                     Velocity(facing.0 * speed),
@@ -929,7 +820,7 @@ fn move_projectiles(
                 for herse in &portcullises {
                     commands.entity(herse).despawn();
                 }
-                commands.server_trigger(ToClients { targets: SendTargets::All, message: ScreenShake(0.7) });
+                commands.trigger(ScreenShake(0.7));
                 info!("target hit, portcullis raised");
                 continue;
             }
@@ -1071,7 +962,7 @@ fn monster_ai(
 
 fn spawn_pickup(commands: &mut Commands, kind: PickupKind, pos: Vec2, rng: &mut Rng) {
     let jitter = Vec2::new(rng.next_f32() - 0.5, rng.next_f32() - 0.5) * 12.0;
-    commands.spawn((Replicated, Pickup(kind), Position(pos + jitter)));
+    commands.spawn((WorldEntity, Pickup(kind), Position(pos + jitter)));
 }
 
 /// Retire ce qui est mort (monstres, générateurs) et laisse tomber du butin.
@@ -1108,10 +999,7 @@ fn reap_dead(
                     quest.progress += 1;
                 }
             }
-            commands.server_trigger(ToClients {
-                targets: SendTargets::All,
-                message: ScreenShake(1.0),
-            });
+            commands.trigger(ScreenShake(1.0));
             for _ in 0..8 {
                 spawn_pickup(&mut commands, PickupKind::Coin, pos.0, &mut rng);
             }
@@ -1131,7 +1019,7 @@ fn reap_dead(
             }
         }
         if is_generator {
-            commands.server_trigger(ToClients { targets: SendTargets::All, message: ScreenShake(0.6) });
+            commands.trigger(ScreenShake(0.6));
             for _ in 0..3 {
                 spawn_pickup(&mut commands, PickupKind::Coin, pos.0, &mut rng);
             }
@@ -1258,7 +1146,7 @@ fn open_exit(
     for mut exit in &mut exits {
         if done && !exit.open {
             exit.open = true;
-            commands.server_trigger(ToClients { targets: SendTargets::All, message: ScreenShake(0.5) });
+            commands.trigger(ScreenShake(0.5));
         }
     }
 }
@@ -1401,7 +1289,7 @@ fn check_wipe(
         (Entity, &mut Position, &mut Health, &mut Gold, &mut Keys, &PartyId, Has<Downed>),
         With<Player>,
     >,
-    world: Query<Entity, (Or<(With<Replicated>, With<LevelExit>)>, Without<Player>)>,
+    world: Query<Entity, (Or<(With<WorldEntity>, With<LevelExit>)>, Without<Player>)>,
     triggers: Query<Entity, With<DialogueTrigger>>,
 ) {
     if players.is_empty() || !players.iter().all(|(.., downed)| downed) {
@@ -1467,7 +1355,7 @@ fn random_point(room: &Room, info: &RoomInfo, margin: u32, rng: &mut Rng) -> Vec
 /// du niveau suivant, bloquée, puisque le serveur ne la connaît plus.
 fn reset_dialogues(commands: &mut Commands, session: &mut DialogueSession) {
     *session = DialogueSession::default();
-    commands.server_trigger(ToClients { targets: SendTargets::All, message: DialogueAbort });
+    commands.trigger(DialogueAbort);
 }
 
 /// Charge le niveau de la campagne: c'est toujours le même (un fichier de `shared/levels/`), à chaque chargement et à
@@ -1687,9 +1575,9 @@ fn plan_level(dungeon: &Dungeon, name: &str, region: Region, level: u32, rng: &m
 /// Pose un niveau dans le monde: ses éléments, ses portes et son objectif.
 fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool, seed: u64) {
     info!("new expedition: level {level} ({}), region {:?}", def.name, def.region);
-    commands.spawn((Replicated, Expedition { seed, region: def.region, level }));
+    commands.spawn((WorldEntity, Expedition { seed, region: def.region, level }));
     commands.insert_resource(LevelRegion(def.region));
-    commands.spawn((Replicated, PuzzleKit::default()));
+    commands.spawn((WorldEntity, PuzzleKit::default()));
 
     for thing in &def.things {
         let pos = def.world(thing.at());
@@ -1697,7 +1585,7 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
             Thing::Monster { kind, .. } => spawn_monster(commands, *kind, pos),
             Thing::Generator { .. } => {
                 commands.spawn((
-                    Replicated,
+                    WorldEntity,
                     Generator,
                     Health::full(GENERATOR_HEALTH),
                     Position(pos),
@@ -1706,11 +1594,11 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
                 ));
             }
             Thing::Pickup { kind, .. } => {
-                commands.spawn((Replicated, Pickup(*kind), Position(pos)));
+                commands.spawn((WorldEntity, Pickup(*kind), Position(pos)));
             }
             Thing::Trap { .. } => {
                 commands.spawn((
-                    Replicated,
+                    WorldEntity,
                     Trap { armed: false },
                     Position(pos),
                     Hold::default(),
@@ -1719,10 +1607,10 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
                 ));
             }
             Thing::Relic { .. } => {
-                commands.spawn((Replicated, Relic, Position(pos)));
+                commands.spawn((WorldEntity, Relic, Position(pos)));
             }
             Thing::Captive { .. } => {
-                commands.spawn((Replicated, Captive, Position(pos), RescueHold(0.0)));
+                commands.spawn((WorldEntity, Captive, Position(pos), RescueHold(0.0)));
             }
             Thing::Guide { caged, .. } => {
                 // Samélia n'attend à l'entrée que pour la première arrivée: elle disparaît après l'introduction.
@@ -1730,24 +1618,24 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
                     continue;
                 }
                 if *caged {
-                    commands.spawn((Replicated, Guide, Captive, Position(pos), RescueHold(0.0)));
+                    commands.spawn((WorldEntity, Guide, Captive, Position(pos), RescueHold(0.0)));
                 } else {
-                    commands.spawn((Replicated, Guide, Position(pos), Solid(Vec2::new(6.0, 4.0))));
+                    commands.spawn((WorldEntity, Guide, Position(pos), Solid(Vec2::new(6.0, 4.0))));
                 }
             }
             Thing::Landmark { kind, .. } => {
                 // Le client dessine le motif; le serveur n'en garde que le pied, qui bloque les héros et les monstres.
-                commands.spawn((Replicated, Landmark(*kind), Position(pos), Solid(kind.half_size())));
+                commands.spawn((WorldEntity, Landmark(*kind), Position(pos), Solid(kind.half_size())));
             }
             Thing::Ward { .. } => {
-                commands.spawn((Replicated, Ward { radius: WARD_RADIUS }, Position(pos)));
+                commands.spawn((WorldEntity, Ward { radius: WARD_RADIUS }, Position(pos)));
             }
             Thing::Portcullis { vertical, .. } => {
                 let half = if *vertical { Vec2::new(TILE_SIZE / 2.0, TILE_SIZE) } else { Vec2::new(TILE_SIZE, TILE_SIZE / 2.0) };
-                commands.spawn((Replicated, Portcullis { vertical: *vertical }, Position(pos), Solid(half)));
+                commands.spawn((WorldEntity, Portcullis { vertical: *vertical }, Position(pos), Solid(half)));
             }
             Thing::Panel { kind, node, .. } => {
-                commands.spawn((Replicated, Interactable::new(*kind), Position(pos), Hold::default()));
+                commands.spawn((WorldEntity, Interactable::new(*kind), Position(pos), Hold::default()));
                 if let Some(node) = dialogue_node(node) {
                     commands.spawn((Position(pos), DialogueTrigger { node, radius: 64.0, delay: 0.4, fired: false }));
                 }
@@ -1758,7 +1646,7 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
                 commands.spawn((LevelExit { kind: ExitKind::Hidden, open: false }, ExitArea { min: pos - reach, max: pos + reach }, Position(pos)));
             }
             Thing::Exit { kind, .. } => {
-                commands.spawn((Replicated, LevelExit { kind: *kind, open: false }, Position(pos)));
+                commands.spawn((WorldEntity, LevelExit { kind: *kind, open: false }, Position(pos)));
             }
             Thing::Trigger { node, radius, delay, .. } => {
                 if let Some(node) = dialogue_node(node) {
@@ -1788,7 +1676,7 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
         };
         let door = commands
             .spawn((
-                Replicated,
+                WorldEntity,
                 Door { kind, vertical: conn.door_vertical },
                 Position(center),
                 Solid(half),
@@ -1819,7 +1707,7 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
             let (lo, hi) = (def.world(room.min.as_vec2()), def.world(room.max.as_vec2() + Vec2::ONE));
             commands.spawn((LevelExit { kind: ExitKind::Stairs, open: false }, ExitArea { min: lo, max: hi }, Position((lo + hi) / 2.0)));
         } else {
-            commands.spawn((Replicated, LevelExit { kind: ExitKind::Stairs, open: false }, Position(center_of(exit))));
+            commands.spawn((WorldEntity, LevelExit { kind: ExitKind::Stairs, open: false }, Position(center_of(exit))));
         }
     }
 
@@ -1832,7 +1720,7 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
         .count() as u32;
     if bosses > 0 {
         commands.spawn((
-            Replicated,
+            WorldEntity,
             Quest {
                 kind: QuestKind::Boss,
                 goal: bosses,
@@ -1841,7 +1729,7 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
         ));
     }
     if let Some((kind, goal)) = def.quest {
-        commands.spawn((Replicated, Quest { kind, goal, progress: 0 }));
+        commands.spawn((WorldEntity, Quest { kind, goal, progress: 0 }));
     }
 
     if first {
@@ -2093,7 +1981,7 @@ fn run_exit(
         (Entity, &mut Position, &mut Health, &PartyId, &Gold, &Keys, Has<Downed>, Has<Controlled>),
         With<Player>,
     >,
-    world: Query<Entity, (Or<(With<Replicated>, With<LevelExit>)>, Without<Player>)>,
+    world: Query<Entity, (Or<(With<WorldEntity>, With<LevelExit>)>, Without<Player>)>,
     triggers: Query<Entity, With<DialogueTrigger>>,
 ) {
     let Ok((exit_pos, exit, area)) = exits.single() else {
@@ -2130,9 +2018,7 @@ fn run_exit(
             return;
         }
         *countdown = 0.0;
-        commands.server_trigger(ToClients {
-            targets: SendTargets::All,
-            message: LevelSummary {
+        commands.trigger(LevelSummary {
                 level: level.0,
                 seconds: stats.seconds,
                 kills: stats.kills,
@@ -2144,8 +2030,7 @@ fn run_exit(
                 food: stats.food,
                 potions: stats.potions,
                 pieces: stats.pieces,
-            },
-        });
+            });
         transition.0 = Some(0.0);
         return;
     }
@@ -2207,7 +2092,7 @@ fn player_specials(
             }
             HeroClass::Sorcerer => {
                 commands.spawn((
-                    Replicated,
+                    WorldEntity,
                     Zone { radius: ARCANE_RADIUS, class: *class },
                     Position(pos.0 + facing.0 * ARCANE_OFFSET),
                     ZoneLife(0.4),
@@ -2217,7 +2102,7 @@ fn player_specials(
             }
             HeroClass::Ranger => {
                 commands.spawn((
-                    Replicated,
+                    WorldEntity,
                     Zone { radius: RAIN_RADIUS, class: *class },
                     Position(pos.0 + facing.0 * RAIN_OFFSET),
                     ZoneLife(RAIN_DURATION),
@@ -2232,7 +2117,7 @@ fn player_specials(
                     }
                 }
                 commands.spawn((
-                    Replicated,
+                    WorldEntity,
                     Turret,
                     TurretOwner(entity),
                     Position(pos.0 + facing.0 * 14.0),
@@ -2308,7 +2193,7 @@ fn run_turrets(
             let dir = (target - pos.0).normalize_or_zero();
             cooldown.0 = TURRET_COOLDOWN;
             commands.spawn((
-                Replicated,
+                WorldEntity,
                 Projectile { class: HeroClass::Forgebraise, dir },
                 Position(pos.0 + dir * 8.0),
                 Velocity(dir * TURRET_SHOT_SPEED),
@@ -2374,7 +2259,7 @@ fn run_interactions(
         info!("{kind:?} done");
         // La porte royale qui cède secoue plus fort qu'une étape intermédiaire.
         let strength = if kind == InteractKind::Push { 0.85 } else { 0.5 };
-        commands.server_trigger(ToClients { targets: SendTargets::All, message: ScreenShake(strength) });
+        commands.trigger(ScreenShake(strength));
         match kind {
             InteractKind::Target => {
                 // Le disque est fixé: la cible attend maintenant la flèche.
@@ -2523,7 +2408,7 @@ fn open_locked_doors(
         {
             keys.0 -= 1;
             commands.entity(entity).despawn();
-            commands.server_trigger(ToClients { targets: SendTargets::All, message: ScreenShake(0.3) });
+            commands.trigger(ScreenShake(0.3));
         }
     }
 }
@@ -2561,10 +2446,7 @@ fn run_dialogue_triggers(
             ..default()
         };
         info!("dialogue: {}", trigger.node);
-        commands.server_trigger(ToClients {
-            targets: SendTargets::All,
-            message: DialogueBegin(trigger.node.to_string()),
-        });
+        commands.trigger(DialogueBegin(trigger.node.to_string()));
         return;
     }
 }
@@ -2608,14 +2490,11 @@ fn resolve_votes(commands: &mut Commands, session: &mut DialogueSession) {
         .unwrap_or(0);
     session.votes.clear();
     session.vote_timer = 0.0;
-    commands.server_trigger(ToClients {
-        targets: SendTargets::All,
-        message: DialogueSelect(winner),
-    });
+    commands.trigger(DialogueSelect(winner));
 }
 
 fn dialogue_advance(
-    _request: On<FromClient<DialogueRequestAdvance>>,
+    _request: On<DialogueRequestAdvance>,
     mut commands: Commands,
     mut session: ResMut<DialogueSession>,
 ) {
@@ -2624,10 +2503,7 @@ fn dialogue_advance(
     }
     session.advance_cooldown = DIALOGUE_ADVANCE_COOLDOWN;
     session.idle = 0.0;
-    commands.server_trigger(ToClients {
-        targets: SendTargets::All,
-        message: DialogueAdvance,
-    });
+    commands.trigger(DialogueAdvance);
 }
 
 /// Purge les dialogues: la scène en cours est abandonnée, et celles qui allaient démarrer (un héros est dans leur zone) ne
@@ -2656,7 +2532,7 @@ fn purge_dialogues(
 
 /// Entrée maintenu: on purge la scène en cours et celles qui allaient démarrer. Une introduction purgée n'est plus rejouée.
 fn dialogue_skip(
-    _request: On<FromClient<DialogueSkip>>,
+    _request: On<DialogueSkip>,
     mut commands: Commands,
     mut session: ResMut<DialogueSession>,
     mut campaign: ResMut<Campaign>,
@@ -2670,12 +2546,12 @@ fn dialogue_skip(
         campaign.write();
     }
     if was_active {
-        commands.server_trigger(ToClients { targets: SendTargets::All, message: DialogueAbort });
+        commands.trigger(DialogueAbort);
     }
 }
 
-fn dialogue_vote(vote: On<FromClient<DialogueVote>>, mut session: ResMut<DialogueSession>) {
-    let Some(client) = vote.client_id.entity() else {
+fn dialogue_vote(vote: On<DialogueVote>, clients: Query<Entity, With<ActiveHero>>, mut session: ResMut<DialogueSession>) {
+    let Ok(client) = clients.single() else {
         return;
     };
     if session.active.is_some() {
@@ -2694,7 +2570,7 @@ fn dismiss_guide(campaign: Res<Campaign>, guides: Query<Entity, (With<Guide>, Wi
 }
 
 fn dialogue_finished(
-    _done: On<FromClient<DialogueFinished>>,
+    _done: On<DialogueFinished>,
     mut session: ResMut<DialogueSession>,
     mut campaign: ResMut<Campaign>,
 ) {
@@ -2708,7 +2584,7 @@ fn dialogue_finished(
 fn spawn_monster(commands: &mut Commands, kind: MonsterKind, pos: Vec2) {
     let stats = kind.stats();
     let mut monster = commands.spawn((
-        Replicated,
+        WorldEntity,
         Monster(kind),
         Health::full(stats.max_hp),
         Position(pos),
@@ -2922,6 +2798,7 @@ fn leash_followers(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     fn hero(world: &mut World, party: u32, at: Vec2, controlled: bool, hp: f32) -> Entity {
         let mut entity = world.spawn((
@@ -3134,7 +3011,7 @@ mod tests {
             (11, HeroClass::Knight),
         ] {
             let mut app = networked_app();
-            let mut save = SaveGame::new("test", GameMode::Solo, 77);
+            let mut save = SaveGame::new("test", 77);
             save.level = level;
             save.intro_done = true;
             app.insert_resource(Rng(5));
@@ -3218,7 +3095,7 @@ mod tests {
     fn the_exit_of_a_boss_level_opens_only_when_the_boss_is_dead() {
         for level in [4, 8, 12, 16, 20] {
             let mut app = networked_app();
-            let mut save = SaveGame::new("test", GameMode::Solo, 77);
+            let mut save = SaveGame::new("test", 77);
             save.level = level;
             save.intro_done = true;
             app.insert_resource(Rng(5));
@@ -3309,7 +3186,7 @@ mod tests {
     fn every_boss_hurts_a_hero_who_stays_in_the_arena() {
         for level in [4, 8, 12, 16, 20] {
             let mut app = networked_app();
-            let mut save = SaveGame::new("test", GameMode::Solo, 77);
+            let mut save = SaveGame::new("test", 77);
             save.level = level;
             save.intro_done = true;
             app.insert_resource(Rng(5));
@@ -3516,7 +3393,7 @@ mod tests {
     /// Chaque scène que le serveur peut lancer existe dans le script de dialogue.
     #[test]
     fn every_dialogue_node_the_server_triggers_exists_in_the_script() {
-        const SCRIPT: &str = include_str!("../../client/assets/dialogue/castle.ron");
+        const SCRIPT: &str = include_str!("../../assets/dialogue/castle.ron");
         let mut used = std::collections::BTreeSet::new();
         for seed in 1u64..40 {
             let (mut world, _) = populated(seed, 1 + (seed % 3) as u32);
@@ -3537,7 +3414,7 @@ mod tests {
     fn a_new_level_purges_the_dialogue_session_and_the_old_triggers() {
         let mut app = networked_app();
         app.insert_resource(Rng(5));
-        app.insert_resource(Campaign(SaveGame::new("test", GameMode::Solo, 77)));
+        app.insert_resource(Campaign(SaveGame::new("test", 77)));
         let mut session = DialogueSession { active: Some("royal_door".into()), idle: 40.0, vote_timer: 3.0, ..default() };
         session.votes.insert(Entity::PLACEHOLDER, 1);
         app.insert_resource(session);
@@ -3563,7 +3440,7 @@ mod tests {
     fn every_campaign_level_can_be_left_through_its_exit() {
         for level in 1..=LEVEL_COUNT {
             let mut app = networked_app();
-            let mut save = SaveGame::new("test", GameMode::Solo, 77);
+            let mut save = SaveGame::new("test", 77);
             save.level = level;
             save.intro_done = true;
             app.insert_resource(Rng(5));
@@ -3686,11 +3563,9 @@ mod tests {
         assert_eq!(full.things.iter().filter(|t| matches!(t, Thing::Panel { .. })).count(), 3);
     }
 
-    /// Une application de test qui sait envoyer des événements réseau (secousse d'écran...), sans connexion.
+    /// Une application de test (les événements d'effet sont de simples événements locaux).
     fn networked_app() -> App {
-        let mut app = app_with_time();
-        app.add_plugins((StatesPlugin, RepliconPlugins, CastleSharedPlugin));
-        app
+        app_with_time()
     }
 
     fn puzzle_app() -> (App, Entity) {

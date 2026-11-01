@@ -169,20 +169,14 @@ pub fn boss_ai(
                 match mv {
                     BossMove::Slam => {
                         damage(&mut players, pos.0, SLAM_RADIUS, SLAM_DAMAGE, &[]);
-                        commands.server_trigger(ToClients {
-                            targets: SendTargets::All,
-                            message: ScreenShake(0.8),
-                        });
+                        commands.trigger(ScreenShake(0.8));
                         strikes.0 = strikes.0.wrapping_add(1);
                         brain.timer = RECOVER_TIME;
                         brain.act = Act::Recover;
                     }
                     BossMove::Nova => {
                         damage(&mut players, pos.0, NOVA_RADIUS, NOVA_DAMAGE, &[]);
-                        commands.server_trigger(ToClients {
-                            targets: SendTargets::All,
-                            message: ScreenShake(0.6),
-                        });
+                        commands.trigger(ScreenShake(0.6));
                         strikes.0 = strikes.0.wrapping_add(1);
                         brain.timer = RECOVER_TIME;
                         brain.act = Act::Recover;
@@ -204,10 +198,7 @@ pub fn boss_ai(
                             };
                             spawn_monster(&mut commands, minion, at);
                         }
-                        commands.server_trigger(ToClients {
-                            targets: SendTargets::All,
-                            message: ScreenShake(0.5),
-                        });
+                        commands.trigger(ScreenShake(0.5));
                         brain.timer = RECOVER_TIME;
                         brain.act = Act::Recover;
                     }
@@ -225,15 +216,12 @@ pub fn boss_ai(
                     brain.waves += 1;
                     brain.act = Act::Windup(BossMove::Howl);
                     brain.timer = HOWL_TIME;
-                    commands.server_trigger(ToClients {
-                        targets: SendTargets::All,
-                        message: BossAlert {
+                    commands.trigger(BossAlert {
                             kind: BossMove::Howl,
                             at: pos.0,
                             radius: 0.0,
                             delay: HOWL_TIME,
-                        },
-                    });
+                        });
                     continue;
                 }
                 if brain.special_in <= 0.0 && dist > stats.half_size + HERO_HALF_SIZE + 4.0
@@ -249,15 +237,12 @@ pub fn boss_ai(
                     brain.act = Act::Windup(mv);
                     brain.timer = windup;
                     brain.special_in = special_interval(kind, enraged);
-                    commands.server_trigger(ToClients {
-                        targets: SendTargets::All,
-                        message: BossAlert {
+                    commands.trigger(BossAlert {
                             kind: mv,
                             at,
                             radius,
                             delay: windup,
-                        },
-                    });
+                        });
                     continue;
                 }
                 let reach = stats.half_size + HERO_HALF_SIZE + MONSTER_REACH_SLACK;

@@ -1,6 +1,6 @@
 //! Types partagés entre client et serveur de Castle.
 
-use bevy::{ecs::entity::MapEntities, prelude::*};
+use bevy::prelude::*;
 
 mod dungeon;
 pub mod campaign;
@@ -12,13 +12,9 @@ pub use dungeon::*;
 pub use campaign::{ACT_COUNT, BOSS_EVERY, LEVEL_COUNT, act_of, is_boss_level, level_def, level_file};
 pub use decor::{DECOR_VARIANTS, Decor, DecorKind, Landmark, LandmarkKind};
 pub use level::{LEVEL_FORMAT, LevelDef, Thing};
-use bevy_replicon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_ID: u64 = 1;
-pub const DEFAULT_PORT: u16 = 5000;
 pub const TILE_SIZE: f32 = 16.0;
-pub const MAX_PLAYERS: usize = 4;
 /// Taille de la salle de test, en tuiles.
 /// Demi-taille de la boîte de collision d'un héros, en pixels.
 pub const HERO_HALF_SIZE: f32 = 6.0;
@@ -857,70 +853,15 @@ pub struct SwitchHero(pub HeroClass);
 pub struct PartyId(pub u32);
 
 /// Envoyé par le serveur à un client pour lui dire quel héros il dirige en ce moment, et son équipe.
-#[derive(Event, Clone, Copy, Debug, Serialize, Deserialize, MapEntities)]
+#[derive(Event, Clone, Copy, Debug)]
 pub struct YouAre {
-    #[entities]
     pub hero: Entity,
     pub party: u32,
 }
 
-/// Enregistre ce qui est répliqué et les événements réseau.
-/// Doit être ajouté à l'identique côté client et côté serveur.
-pub struct CastleSharedPlugin;
-
-impl Plugin for CastleSharedPlugin {
-    fn build(&self, app: &mut App) {
-        app.replicate::<Expedition>()
-            .replicate::<Regenerating>()
-            .replicate::<Player>()
-            .replicate::<PartyId>()
-            .replicate::<HeroClass>()
-            .replicate::<Position>()
-            .replicate::<Health>()
-            .replicate::<Interactable>()
-            .replicate::<Door>()
-            .replicate::<LevelExit>()
-            .replicate::<PuzzleKit>()
-            .replicate::<Ward>()
-            .replicate::<Portcullis>()
-            .replicate::<Trap>()
-            .replicate::<Mana>()
-            .replicate::<Shielded>()
-            .replicate::<Zone>()
-            .replicate::<Turret>()
-            .replicate::<Monster>()
-            .replicate::<Landmark>()
-            .replicate::<Generator>()
-            .replicate::<Pickup>()
-            .replicate::<Quest>()
-            .replicate::<Relic>()
-            .replicate::<Captive>()
-            .replicate::<Guide>()
-            .replicate::<Gold>()
-            .replicate::<Keys>()
-            .replicate::<Projectile>()
-            .replicate::<Facing>()
-            .replicate::<Strikes>()
-            .replicate::<Downed>()
-            .add_server_event::<AttackFx>(Channel::Unordered)
-            .add_server_event::<ScreenShake>(Channel::Unordered)
-            .add_server_event::<BossAlert>(Channel::Unordered)
-            .add_server_event::<LevelSummary>(Channel::Ordered)
-            .add_mapped_server_event::<YouAre>(Channel::Ordered)
-            .add_server_event::<DialogueBegin>(Channel::Ordered)
-            .add_server_event::<DialogueAdvance>(Channel::Ordered)
-            .add_server_event::<DialogueSelect>(Channel::Ordered)
-            .add_server_event::<DialogueAbort>(Channel::Ordered)
-            .add_client_event::<DialogueSkip>(Channel::Ordered)
-            .add_client_event::<DialogueRequestAdvance>(Channel::Ordered)
-            .add_client_event::<DialogueVote>(Channel::Ordered)
-            .add_client_event::<DialogueFinished>(Channel::Ordered)
-            .add_client_event::<PlayerInput>(Channel::Unordered)
-            .add_client_event::<SwitchHero>(Channel::Ordered)
-            .add_client_event::<ContinueLevel>(Channel::Ordered)
-            .add_client_event::<SetPause>(Channel::Ordered);
-    }
-}
+/// Marque tout ce que la simulation pose dans le monde d'une partie (héros, monstres, objets, niveau): il disparaît avec elle.
+#[derive(Component)]
+pub struct WorldEntity;
 
 #[cfg(test)]
 mod tests {

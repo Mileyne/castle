@@ -1,7 +1,4 @@
 # Interface
-status-connecting = Connecting to the castle...
-status-connected = Connected
-status-disconnected = Disconnected from the castle
 hint-controls = %move%: move  %attack%: strike  %special%: power  %action%: act  %switch%: hero  %language%: language
 
 # Classes
@@ -173,7 +170,7 @@ quest-release = Free the drawbridge: the Ranger must fix the disc and shoot
 quest-unseal = Break the gate's seal: the Sorcerer dispels the rune
 quest-breach = Force the royal door: the Knight must push it
 quest-done = Objective complete: reach the exit!
-menu-solo = Play solo
+menu-play = Play
 menu-host = Co-op: host a game
 menu-join = Co-op: join a game
 menu-quit = Quit
@@ -197,7 +194,6 @@ pause-title = Paused
 pause-resume = Resume
 pause-quit = Give up and return to menu
 pause-warning = Progress in the current level is lost
-pause-host-warning = Other players will be disconnected
 puzzle-ingredients = Ingredients
 puzzle-gear = Part
 puzzle-target = Target

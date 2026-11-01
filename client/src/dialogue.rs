@@ -5,7 +5,6 @@
 
 use bevy::{color::palettes::css, prelude::*};
 use bevy_fluent::prelude::Localization;
-use bevy_replicon::prelude::*;
 use castle_shared::*;
 use fluent_content::Content;
 
@@ -47,7 +46,7 @@ impl Plugin for DialoguePlugin {
                 Update,
                 (
                     (dialogue_input, dialogue_skip_hold)
-                        .run_if(in_state(ClientState::Connected))
+                        .run_if(crate::sim::in_game)
                         .run_if(crate::level_intro::player_can_act)
                         .run_if(crate::pause::not_paused),
                     update_panel,
@@ -292,7 +291,7 @@ fn show(shown: Shown, runner: &mut Runner, state: &mut DialogueState, commands: 
             // Une scène qui se termine d'elle-même a encore sa dernière réplique à l'écran. Une scène abandonnée (purge,
             // nouveau niveau) a déjà été effacée et le serveur l'a oubliée: l'annoncer pourrait fermer la scène suivante.
             if take_finished_scene(state) {
-                commands.client_trigger(DialogueFinished);
+                commands.trigger(DialogueFinished);
             }
         }
     }
@@ -365,7 +364,7 @@ fn dialogue_skip_hold(
         hold.held += time.delta_secs();
         if hold.held >= SKIP_HOLD_TIME && !hold.sent {
             hold.sent = true;
-            commands.client_trigger(DialogueSkip);
+            commands.trigger(DialogueSkip);
         }
     } else if hold.held > 0.0 || hold.sent {
         *hold = SkipHold::default();
@@ -420,7 +419,7 @@ fn dialogue_input(
         {
             if keys.just_pressed(key) && i < state.options.len() {
                 state.voted = true;
-                commands.client_trigger(DialogueVote(i as u32));
+                commands.trigger(DialogueVote(i as u32));
             }
         }
         return;
@@ -434,7 +433,7 @@ fn dialogue_input(
         if state.revealed < length {
             state.revealed = length;
         } else {
-            commands.client_trigger(DialogueRequestAdvance);
+            commands.trigger(DialogueRequestAdvance);
         }
     }
 }

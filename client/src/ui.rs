@@ -1,7 +1,6 @@
 //! Interface: statut de connexion, choix de classe, aide aux touches.
 
 use bevy::{color::palettes::css, prelude::*};
-use bevy_replicon::prelude::*;
 use castle_shared::{Downed, Gold, HeroClass, Health, Keys, Mana, PartyId, Player};
 
 use crate::{LocalParty, LocalPlayer};
@@ -15,7 +14,6 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (
-                    update_status,
                     update_party_panel,
                     update_portraits,
                     update_loot_counters,
@@ -26,9 +24,6 @@ impl Plugin for UiPlugin {
             );
     }
 }
-
-#[derive(Component)]
-struct StatusText;
 
 /// Images par seconde, en haut à droite (F3 l'affiche ou le cache).
 #[derive(Component)]
@@ -69,19 +64,6 @@ pub fn ui_font(assets: &AssetServer, size: f32) -> TextFont {
 }
 
 fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
-    commands.spawn((
-        Text::default(),
-        Tr::new("status-connecting"),
-        StatusText,
-        ui_font(&assets, 16.0),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(8.0),
-            left: Val::Px(8.0),
-            ..default()
-        },
-    ));
-
     commands.spawn((
         Text::default(),
         Tr::new("region-crypts"),
@@ -235,14 +217,6 @@ fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
                 });
             }
         });
-}
-
-fn update_status(state: Res<State<ClientState>>, mut status: Single<&mut Tr, With<StatusText>>) {
-    status.key = match **state {
-        ClientState::Disconnected => "status-disconnected",
-        ClientState::Connecting => "status-connecting",
-        ClientState::Connected => "status-connected",
-    };
 }
 
 /// Met les vignettes du thème courant dans le panneau d'équipe.

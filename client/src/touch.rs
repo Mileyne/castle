@@ -15,14 +15,10 @@
 use std::collections::HashMap;
 
 use bevy::{
-    input::{
-        ButtonState, InputSystems,
-        keyboard::{Key, KeyboardInput, NativeKeyCode},
-    },
+    input::InputSystems,
     prelude::*,
     window::PrimaryWindow,
 };
-use bevy_replicon::prelude::ClientState;
 use castle_shared::HeroClass;
 
 use crate::dialogue::DialogueState;
@@ -72,7 +68,6 @@ enum Context {
     #[default]
     Nothing,
     Title {
-        address: bool,
         saves: bool,
     },
     Pause,
@@ -89,9 +84,6 @@ enum Context {
 enum Action {
     /// Touche maintenue tant que le doigt reste sur le bouton.
     Hold(KeyCode),
-    /// Caractère tapé une fois (pavé d'adresse).
-    Type(char),
-    Backspace,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -155,14 +147,14 @@ struct Controls {
 fn context(
     title: &TitleActive,
     mode: &MenuMode,
-    state: &ClientState,
+    in_game: bool,
     pause: &PauseMenu,
     dialogue: &DialogueState,
     summary: bool,
 ) -> Context {
     if title.0 {
-        Context::Title { address: mode.address, saves: mode.saves }
-    } else if *state != ClientState::Connected {
+        Context::Title { saves: mode.saves }
+    } else if !in_game {
         Context::Nothing
     } else if summary {
         Context::Summary
@@ -188,22 +180,7 @@ fn layout(context: Context, size: Vec2) -> Vec<Button> {
 
     match context {
         Context::Nothing | Context::Pause => {}
-        Context::Title { address, .. } => {
-            if address {
-                // Pavé pour l'adresse de l'hôte, à la place du clavier.
-                const KEYS: [&str; 13] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", ".", ":", "<-"];
-                let (key, gap) = (40.0, 6.0);
-                let origin = Vec2::new(side + key / 2.0, h - bottom - 3.0 * (key + gap) + key / 2.0);
-                for (i, text) in KEYS.into_iter().enumerate() {
-                    let center = origin + Vec2::new((i % 5) as f32, (i / 5) as f32) * (key + gap);
-                    let action = match text {
-                        "<-" => Action::Backspace,
-                        _ => Action::Type(text.chars().next().unwrap_or('0')),
-                    };
-                    out.push(Button::rect(action, Label::Text(text), center, Vec2::splat(key / 2.0), white));
-                }
-            }
-        }
+        Context::Title { .. } => {}
         Context::Summary => {
             out.push(Button::round(hold(KeyCode::Enter), Label::Key("touch-ok"), main, 42.0, Color::srgb(0.9, 0.75, 0.2)));
         }
@@ -265,24 +242,23 @@ fn stick_home(size: Vec2) -> Vec2 {
 fn read_controls(
     mut controls: ResMut<Controls>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
-    mut typed: MessageWriter<KeyboardInput>,
     mut stick: ResMut<Stick>,
     touches: Res<Touches>,
     gamepads: Query<(Entity, &Gamepad)>,
     time: Res<Time>,
-    windows: Query<(Entity, &Window), With<PrimaryWindow>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     title: Res<TitleActive>,
     mode: Res<MenuMode>,
-    state: Res<State<ClientState>>,
+    game: Option<Res<crate::sim::Campaign>>,
     pause: Res<PauseMenu>,
     dialogue: Res<DialogueState>,
     intro: Res<crate::level_intro::LevelIntro>,
 ) {
-    let Ok((window_entity, window)) = windows.single() else {
+    let Ok(window) = windows.single() else {
         return;
     };
     let size = Vec2::new(window.width(), window.height());
-    let context = context(&title, &mode, state.get(), &pause, &dialogue, intro.summary_active());
+    let context = context(&title, &mode, game.is_some(), &pause, &dialogue, intro.summary_active());
     let controls = &mut *controls;
 
     // Les commandes tactiles viennent d'être activées dans les réglages: on les construit même si rien d'autre n'a changé.
@@ -313,8 +289,6 @@ fn read_controls(
                     Action::Hold(_) => {
                         controls.held_buttons.insert(touch.id(), index);
                     }
-                    Action::Type(c) => type_key(&mut typed, window_entity, Key::Character(c.to_string().into())),
-                    Action::Backspace => type_key(&mut typed, window_entity, Key::Backspace),
                 },
                 None => {
                     let in_game = matches!(context, Context::Game { .. });
@@ -337,7 +311,6 @@ fn read_controls(
         .values()
         .filter_map(|&i| match controls.buttons.get(i)?.action {
             Action::Hold(key) => Some(key),
-            _ => None,
         })
         .collect();
     let mut pad_stick = Vec2::ZERO;
@@ -395,21 +368,6 @@ fn read_controls(
         if controls.stick.as_ref().is_some_and(|s| s.id == touch.id()) {
             controls.stick = None;
         }
-    }
-}
-
-/// Une frappe complète (appui puis relâche) d'une touche de texte, comme le clavier la donnerait.
-fn type_key(typed: &mut MessageWriter<KeyboardInput>, window: Entity, logical_key: Key) {
-    for state in [ButtonState::Pressed, ButtonState::Released] {
-        typed.write(KeyboardInput {
-            // Pas de code physique: seul le texte compte, et aucune touche du jeu ne réagit.
-            key_code: KeyCode::Unidentified(NativeKeyCode::Unidentified),
-            logical_key: logical_key.clone(),
-            state,
-            text: None,
-            repeat: false,
-            window,
-        });
     }
 }
 

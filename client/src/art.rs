@@ -708,7 +708,7 @@ fn bake_chunk(def: &LevelDef, room: &Room, sources: &BakeSources, chunk_x: u32, 
     pixels
 }
 
-/// Reconstruit la carte quand une expédition arrive du serveur: la graine suffit à la regénérer.
+/// Reconstruit le décor quand une nouvelle expédition commence (la carte, elle, est posée par la simulation).
 /// Un mur dont la tuile du dessous est du sol montre sa face de briques.
 pub(crate) fn rebuild_world(
     mut commands: Commands,
@@ -782,8 +782,6 @@ pub(crate) fn rebuild_world(
         }
     }
     spawn_decals(&mut commands, &art, &dungeon, region_row, expedition.seed);
-    commands.insert_resource(dungeon.room);
-    commands.insert_resource(dungeon.layout);
 }
 
 /// Animation des héros: le cycle de marche avance avec la distance parcourue, un coup lance le geste de l'arme, et la pose du modèle 3D
