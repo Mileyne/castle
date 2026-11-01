@@ -7,12 +7,6 @@ VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' client/Cargo.toml | head -1)"
 DIST="$ROOT/dist"
 mkdir -p "$DIST"
 
-# La chaîne d'outils rustup passe avant un éventuel Rust de Homebrew (qui n'a pas les cibles iOS ni Windows).
-if command -v rustup >/dev/null 2>&1; then
-  PATH="$(dirname "$(rustup which cargo)"):$PATH"
-  export PATH
-fi
-
 # package <dossier> <lisez-moi> <fichier>...: assemble un dossier jouable (exécutables, assets, lisez-moi) dans dist/ et
 # le zippe.
 package() {
