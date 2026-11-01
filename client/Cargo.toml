@@ -4,9 +4,12 @@ version = "0.6.0"
 edition = "2024"
 
 [features]
+# Les héros et les monstres sont dessinés en 3D par défaut (sauf sur Apple TV HD et les appareils à peu de mémoire, voir `live3d::enabled`).
+# Les builds d'Apple TV et de mobile passent `--no-default-features` tant que la 3D n'y est pas essayée sur appareil.
+default = ["live3d"]
 # Trace des systèmes du moteur (fichier JSON pour chrome://tracing ou Perfetto): `cargo run --release -p castle_client --features profile`
 profile = ["bevy/trace_chrome"]
-# Les héros et les monstres dessinés en 3D par la carte graphique (essai, ordinateur seulement): `CASTLE_LIVE3D=1` pour l'activer.
+# Les héros et les monstres dessinés en 3D par la carte graphique: `CASTLE_LIVE3D=0` pour revenir aux sprites.
 live3d = ["bevy/3d", "dep:sprite_forge"]
 
 [dependencies]

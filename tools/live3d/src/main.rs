@@ -42,7 +42,7 @@ struct ToonMaterial {
 
 impl Material for ToonMaterial {
     fn fragment_shader() -> ShaderRef {
-        "shaders/toon.wgsl".into()
+        "shaders/toon.wesl".into()
     }
 }
 

@@ -1,5 +1,6 @@
-//! Essai (option de compilation `live3d`, puis `CASTLE_LIVE3D=1`): les héros et les monstres sont dessinés en 3D par la carte
-//! graphique, à partir des modèles de `sprite_forge`, au lieu d'être lus dans des planches de sprites.
+//! Les héros et les monstres sont dessinés en 3D par la carte graphique, à partir des modèles de `sprite_forge`, au lieu d'être
+//! lus dans des planches de sprites. Actif par défaut sur ordinateur (option de compilation `live3d`, activée par défaut);
+//! `CASTLE_LIVE3D=0` revient aux sprites.
 //!
 //! Chaque personnage a une case dans une grande image (`ATLAS`): une caméra 3D à part y dessine, chaque image, tous les modèles
 //! posés sur une grille. Dans le monde 2D, le personnage reste un sprite qui montre sa case: il garde donc sa place dans le tri
@@ -29,9 +30,14 @@ const ELEVATION: f32 = 0.42;
 /// Où les pieds tombent dans la case, depuis le haut (comme dans les planches: 88 pixels sur 96).
 const FEET: f32 = 88.0 / 96.0;
 
-/// L'essai est-il demandé (`CASTLE_LIVE3D=1`)?
+/// Les personnages sont-ils dessinés en 3D? `CASTLE_LIVE3D=1` ou `0` force le choix; sinon oui, sauf sur Apple TV et sur les appareils
+/// à peu de mémoire, qui gardent les planches de sprites.
 pub fn enabled() -> bool {
-    std::env::var_os("CASTLE_LIVE3D").is_some()
+    match std::env::var("CASTLE_LIVE3D").as_deref() {
+        Ok("0") => false,
+        Ok(_) => true,
+        Err(_) => !crate::settings::is_tv() && !crate::settings::low_memory(),
+    }
 }
 
 pub struct Live3dPlugin;
@@ -66,7 +72,7 @@ struct ToonMaterial {
 
 impl Material for ToonMaterial {
     fn fragment_shader() -> ShaderRef {
-        "shaders/toon.wgsl".into()
+        "shaders/toon.wesl".into()
     }
 
     fn alpha_mode(&self) -> AlphaMode {

@@ -1,14 +1,16 @@
 // Ombrage « toon » comme celui de sprite_forge: lumière par paliers, hachures dans l'ombre moyenne, reflet net, contour sombre.
-// `data.color` = couleur sRGB de la pièce; `data.params` = (lumineuse, force du reflet, opacité).
-#import bevy_pbr::forward_io::VertexOutput
-#import bevy_pbr::mesh_view_bindings::view
+// `data.color` = couleur sRGB de la pièce; `data.params` = (lumineuse, force du reflet).
+import bevy_pbr::{
+    render::forward_io::VertexOutput,
+    render::mesh_view_bindings::view,
+};
 
 struct Toon {
     color: vec4<f32>,
     params: vec4<f32>,
 };
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> toon: Toon;
+@group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> toon: Toon;
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -37,5 +39,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
     // Les couleurs de sprite_forge sont déjà en sRGB; la cible attend du linéaire.
-    return vec4<f32>(pow(rgb, vec3<f32>(2.2)), toon.params.z);
+    return vec4<f32>(pow(rgb, vec3<f32>(2.2)), 1.0);
 }
