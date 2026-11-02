@@ -203,6 +203,7 @@ dialogue-skipping = Hold %continue% to skip everything...
 touch-attack = Attack
 touch-use = Act
 touch-ok = OK
+touch-skip = Skip
 touch-pause = Pause
 hint-controls-touch = Joystick: move  Strike (held: power)  Act  Hero
 dialogue-continue-touch = OK: continue (hold: skip all)

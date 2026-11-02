@@ -185,7 +185,31 @@ fn layout(context: Context, size: Vec2) -> Vec<Button> {
         Context::Summary => {
             out.push(Button::round(hold(KeyCode::Enter), Label::Key("touch-ok"), main, 42.0, Color::srgb(0.9, 0.75, 0.2)));
         }
-        Context::Game { dialogue, voting } => {
+        Context::Game { dialogue: true, voting } => {
+            // Dialogue (prologue compris): seulement OK (continuer) et Passer (Entrée maintenue: tout passer).
+            out.push(Button::round(hold(KeyCode::Enter), Label::Key("touch-ok"), main, 46.0, Color::srgb(0.9, 0.75, 0.2)));
+            out.push(Button::rect(
+                hold(KeyCode::Enter),
+                Label::Key("touch-skip"),
+                main + Vec2::new(-120.0, 22.0),
+                Vec2::new(44.0, 26.0),
+                Color::srgb(0.55, 0.55, 0.6),
+            ));
+            if voting {
+                // Pendant un vote, 1 à 4 votent (il n'y a pas d'autre moyen de choisir): en haut à droite.
+                let heroes = [
+                    (KeyCode::Digit1, "1", HeroClass::Knight),
+                    (KeyCode::Digit2, "2", HeroClass::Sorcerer),
+                    (KeyCode::Digit3, "3", HeroClass::Ranger),
+                    (KeyCode::Digit4, "4", HeroClass::Forgebraise),
+                ];
+                for (i, (key, text, class)) in heroes.into_iter().enumerate() {
+                    let center = Vec2::new(w - side - 21.0 - (3 - i) as f32 * 50.0, top + 21.0);
+                    out.push(Button::rect(hold(key), Label::Text(text), center, Vec2::splat(21.0), crate::class_color(class)));
+                }
+            }
+        }
+        Context::Game { dialogue: false, .. } => {
             // Frapper (maintenu: pouvoir), Agir et Héros: les mêmes commandes que la manette.
             out.push(Button::round(hold(KeyCode::Space), Label::Key("touch-attack"), main, 46.0, Color::srgb(0.85, 0.25, 0.2)));
             out.push(Button::round(
@@ -202,31 +226,8 @@ fn layout(context: Context, size: Vec2) -> Vec<Button> {
                 34.0,
                 Color::srgb(0.65, 0.35, 0.85),
             ));
-            if dialogue {
-                // Entrée: continuer (maintenir: tout passer).
-                out.push(Button::round(
-                    hold(KeyCode::Enter),
-                    Label::Key("touch-ok"),
-                    main + Vec2::new(-122.0, -96.0),
-                    30.0,
-                    Color::srgb(0.9, 0.75, 0.2),
-                ));
-            }
             let pause = Vec2::new(w - side - 34.0, top + 18.0);
             out.push(Button::rect(hold(KeyCode::Escape), Label::Key("touch-pause"), pause, Vec2::new(34.0, 18.0), white));
-            if voting {
-                // Pendant un vote, 1 à 4 votent: de gauche à droite sous le bouton pause.
-                let heroes = [
-                    (KeyCode::Digit1, "1", HeroClass::Knight),
-                    (KeyCode::Digit2, "2", HeroClass::Sorcerer),
-                    (KeyCode::Digit3, "3", HeroClass::Ranger),
-                    (KeyCode::Digit4, "4", HeroClass::Forgebraise),
-                ];
-                for (i, (key, text, class)) in heroes.into_iter().enumerate() {
-                    let center = Vec2::new(w - side - 21.0 - (3 - i) as f32 * 50.0, top + 69.0);
-                    out.push(Button::rect(hold(key), Label::Text(text), center, Vec2::splat(21.0), crate::class_color(class)));
-                }
-            }
         }
     }
     out
@@ -273,7 +274,7 @@ fn read_controls(
         controls.buttons = layout(context, size);
         // Les doigts déjà posés ne tiennent plus rien: les boutons ont changé sous eux.
         controls.held_buttons.clear();
-        if !matches!(context, Context::Game { .. }) {
+        if !matches!(context, Context::Game { dialogue: false, .. }) {
             controls.stick = None;
         }
         controls.rebuild = true;
@@ -292,7 +293,7 @@ fn read_controls(
                     }
                 },
                 None => {
-                    let in_game = matches!(context, Context::Game { .. });
+                    let in_game = matches!(context, Context::Game { dialogue: false, .. });
                     if in_game && controls.stick.is_none() && point.x < size.x * STICK_AREA {
                         controls.stick = Some(StickTouch { id: touch.id(), origin: point, offset: Vec2::ZERO });
                     }
@@ -564,7 +565,7 @@ fn draw_controls(
         for root in &roots {
             commands.entity(root).despawn();
         }
-        let in_game = matches!(controls.context, Context::Game { .. });
+        let in_game = matches!(controls.context, Context::Game { dialogue: false, .. });
         let home = stick_home(controls.size);
         commands
             .spawn((
@@ -575,19 +576,24 @@ fn draw_controls(
                     height: Val::Percent(100.0),
                     ..default()
                 },
-                // Au-dessus du jeu et du menu de pause.
-                GlobalZIndex(90),
+                // Au-dessus du jeu, du menu de pause, des dialogues et de l'écran du prologue (105). Ce calque ne capte pas
+                // les touchers du pointeur: les boutons sont lus à la main (`read_controls`), et les menus dessous restent
+                // touchables.
+                GlobalZIndex(110),
+                Pickable::IGNORE,
             ))
             .with_children(|ui| {
                 if in_game {
                     ui.spawn((
                         StickBase,
+                        Pickable::IGNORE,
                         circle(home, STICK_RADIUS),
                         BackgroundColor(Color::WHITE.with_alpha(0.08)),
                         BorderColor::all(Color::WHITE.with_alpha(0.35)),
                     ));
                     ui.spawn((
                         StickKnob,
+                        Pickable::IGNORE,
                         circle(home, KNOB_RADIUS),
                         BackgroundColor(Color::WHITE.with_alpha(0.3)),
                         BorderColor::all(Color::WHITE.with_alpha(0.6)),
@@ -610,6 +616,7 @@ fn draw_controls(
                     let font = ui_font(&assets, if button.half.x < 36.0 { 7.0 } else { 8.0 });
                     ui.spawn((
                         ButtonNode(index),
+                        Pickable::IGNORE,
                         node,
                         BackgroundColor(button_fill(button.color, false)),
                         BorderColor::all(Color::WHITE.with_alpha(0.55)),

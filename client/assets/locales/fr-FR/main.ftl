@@ -203,6 +203,7 @@ dialogue-skipping = Maintenez %continue% pour tout passer...
 touch-attack = Frapper
 touch-use = Agir
 touch-ok = OK
+touch-skip = Passer
 touch-pause = Pause
 hint-controls-touch = Joystick : bouger  Frapper (maintenu : pouvoir)  Agir  Héros
 dialogue-continue-touch = OK : continuer (maintenir : tout passer)
