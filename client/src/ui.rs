@@ -145,19 +145,13 @@ fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
                 ui_font(&assets, 16.0),
                 TextColor(css::DEEP_SKY_BLUE.into()),
             ));
-            parent.spawn((
-                Text::default(),
-                Tr::new("hint-controls"),
-                ui_font(&assets, 12.0),
-                TextColor(css::GRAY.into()),
-            ));
         });
 
     commands
         .spawn((Hud, Node {
             // L'équipe, en bas de l'écran, en une rangée (au-dessus des aides).
             position_type: PositionType::Absolute,
-            bottom: Val::Px(74.0),
+            bottom: Val::Px(44.0),
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::Center,
