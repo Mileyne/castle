@@ -18,7 +18,6 @@ impl Plugin for UiPlugin {
                     update_party_panel,
                     update_portraits,
                     update_loot_counters,
-                    update_special_label,
                     update_region_label,
                     update_fps,
                 ),
@@ -29,9 +28,6 @@ impl Plugin for UiPlugin {
 /// Images par seconde, en haut à droite (F3 l'affiche ou le cache).
 #[derive(Component)]
 struct FpsText;
-
-#[derive(Component)]
-struct SpecialLabel;
 
 #[derive(Component)]
 struct RegionLabel;
@@ -129,29 +125,9 @@ fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
 
     commands
         .spawn((Hud, Node {
+            // L'équipe, en bas de l'écran, en une rangée.
             position_type: PositionType::Absolute,
-            bottom: Val::Px(8.0),
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            row_gap: Val::Px(6.0),
-            ..default()
-        }))
-        .with_children(|parent| {
-            parent.spawn((
-                Text::default(),
-                Tr::with_prefix("special-knight", "%special%  "),
-                SpecialLabel,
-                ui_font(&assets, 16.0),
-                TextColor(css::DEEP_SKY_BLUE.into()),
-            ));
-        });
-
-    commands
-        .spawn((Hud, Node {
-            // L'équipe, en bas de l'écran, en une rangée (au-dessus des aides).
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(44.0),
+            bottom: Val::Px(14.0),
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::Center,
@@ -285,19 +261,6 @@ fn update_party_panel(
         let width = Val::Percent(ratio * 100.0);
         if node.width != width {
             node.width = width;
-        }
-    }
-}
-
-/// Affiche le nom du pouvoir spécial de la classe du joueur.
-fn update_special_label(
-    hero: Option<Single<&HeroClass, With<LocalPlayer>>>,
-    mut label: Single<&mut Tr, With<SpecialLabel>>,
-) {
-    if let Some(class) = hero {
-        let key = class.stats().special_key;
-        if label.key != key {
-            label.key = key;
         }
     }
 }
