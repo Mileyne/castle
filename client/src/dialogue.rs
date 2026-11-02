@@ -113,11 +113,11 @@ struct ProloguePhoto(usize);
 
 /// Les photos du prologue: (orateur, fichier, largeur / hauteur). Samélia d'abord, elle parle la première.
 const PROLOGUE_PHOTOS: [(&str, &str, f32); 5] = [
-    ("samelia", "art/samelia.png", 1195.0 / 896.0),
-    ("knight", "art/prologue_knight.png", 2.0 / 3.0),
-    ("sorcerer", "art/prologue_sorcerer.png", 2.0 / 3.0),
-    ("ranger", "art/prologue_ranger.png", 2.0 / 3.0),
-    ("forgebraise", "art/prologue_forgebraise.png", 2.0 / 3.0),
+    ("samelia", "art/samelia.png", 1376.0 / 768.0),
+    ("knight", "art/prologue_knight.png", 1264.0 / 842.0),
+    ("sorcerer", "art/prologue_sorcerer.png", 1376.0 / 768.0),
+    ("ranger", "art/prologue_ranger.png", 1376.0 / 768.0),
+    ("forgebraise", "art/prologue_forgebraise.png", 1376.0 / 768.0),
 ];
 /// Vitesse (part de l'opacité par seconde) du passage d'une photo à la suivante quand l'orateur change.
 const PHOTO_SWAP: f32 = 3.0;
@@ -137,6 +137,8 @@ pub struct Prologue {
     /// La photo de celui qui parle, et l'opacité de chaque photo.
     speaker: usize,
     weights: [f32; 5],
+    /// Depuis combien de secondes chaque photo est à l'écran: l'image s'agrandit peu à peu (voir `fit_prologue_photos`).
+    shown_for: [f32; 5],
 }
 
 #[derive(Default, PartialEq, Clone, Copy)]
@@ -201,6 +203,10 @@ fn drive_prologue(
     for (index, weight) in prologue.weights.iter_mut().enumerate() {
         let target = if index == speaker { 1.0 } else { 0.0 };
         *weight = if *weight < target { (*weight + PHOTO_SWAP * dt).min(target) } else { (*weight - PHOTO_SWAP * dt).max(target) };
+    }
+    let prologue = &mut *prologue;
+    for (index, shown) in prologue.shown_for.iter_mut().enumerate() {
+        *shown = if prologue.weights[index] > 0.01 { *shown + dt } else { 0.0 };
     }
     let alpha = match prologue.phase {
         ProloguePhase::Idle => {
@@ -501,15 +507,24 @@ fn speaker_color(speaker: &str) -> Color {
     .into()
 }
 
-/// La photo de Samélia (en paysage) remplit toute la fenêtre, en largeur comme en hauteur: elle est agrandie jusqu'à couvrir l'écran,
-/// centrée, et ce qui dépasse est rogné. Les photos des héros (en portrait) gardent toute leur hauteur, centrées.
-/// Tailles et places en pourcentages de la fenêtre: elles ne dépendent pas de l'échelle de l'interface.
-fn fit_prologue_photos(window: Single<&Window, With<bevy::window::PrimaryWindow>>, mut photos: Query<(&ProloguePhoto, &mut Node)>) {
+/// Agrandissement lent des photos: part de la taille gagnée chaque seconde, et plafond.
+const PHOTO_ZOOM_RATE: f32 = 0.004;
+const PHOTO_ZOOM_MAX: f32 = 0.12;
+
+/// Chaque photo remplit toute la fenêtre, en largeur comme en hauteur: elle est agrandie jusqu'à couvrir l'écran, centrée, et ce qui
+/// dépasse est rogné. Elle grandit ensuite très lentement vers son centre (un léger zoom avant). Tailles et places en pourcentages de la
+/// fenêtre: elles ne dépendent pas de l'échelle de l'interface.
+fn fit_prologue_photos(
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    prologue: Res<Prologue>,
+    mut photos: Query<(&ProloguePhoto, &mut Node)>,
+) {
     let (w, h) = (window.width(), window.height());
     for (photo, mut node) in &mut photos {
         let ratio = PROLOGUE_PHOTOS[photo.0].2;
-        let cover = ratio >= 1.0;
-        let (pw, ph) = if cover && w / h <= ratio { (h * ratio, h) } else if cover { (w, w / ratio) } else { (h * ratio, h) };
+        let (pw, ph) = if w / h <= ratio { (h * ratio, h) } else { (w, w / ratio) };
+        let zoom = 1.0 + (prologue.shown_for[photo.0] * PHOTO_ZOOM_RATE).min(PHOTO_ZOOM_MAX);
+        let (pw, ph) = (pw * zoom, ph * zoom);
         node.width = Val::Percent(pw / w * 100.0);
         node.height = Val::Percent(ph / h * 100.0);
         node.left = Val::Percent((w - pw) / 2.0 / w * 100.0);
