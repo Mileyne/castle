@@ -39,5 +39,5 @@ Cette version a été écrite sans pouvoir être compilée ni lancée sur iOS. P
 - la taille des textes de l'interface sur un petit écran ;
 - le passage en arrière-plan : iOS suspend l'app, la partie en cours est alors perdue.
 
-Pas encore d'icône : Xcode affiche l'icône par défaut. Pour en ajouter une, créer un catalogue d'assets avec un
-`AppIcon` de 1024 × 1024 dans le projet.
+L'icône (`Castle/Assets.xcassets/AppIcon.appiconset/icon.png`) est celle de macOS (`scripts/macos/icon.png`), sans
+transparence : iOS exige un carré opaque et applique lui-même les coins arrondis.
