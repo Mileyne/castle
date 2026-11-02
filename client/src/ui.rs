@@ -155,11 +155,14 @@ fn spawn_ui(mut commands: Commands, assets: Res<AssetServer>) {
 
     commands
         .spawn((Hud, Node {
+            // L'équipe, en bas de l'écran, en une rangée (au-dessus des aides).
             position_type: PositionType::Absolute,
-            left: Val::Px(8.0),
-            top: Val::Px(64.0),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(14.0),
+            bottom: Val::Px(74.0),
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::FlexEnd,
+            column_gap: Val::Px(36.0),
             ..default()
         }))
         .with_children(|row| {
