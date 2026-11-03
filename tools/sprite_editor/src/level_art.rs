@@ -10,15 +10,13 @@ use image::RgbaImage;
 /// Case d'une planche d'objets et de monstres (96 px), et d'une planche de sorties (192 px).
 const CELL: u32 = 288;
 const EXIT_CELL: u32 = 576;
-/// Colonnes des planches de personnages (une direction fait trois lignes de 17 images).
-const SHEET_COLUMNS: u32 = 17;
 
 // Taille des cases rognées de chaque planche, écrite par `tools/sprite_forge` pour le jeu.
 #[allow(dead_code)]
 #[path = "../../../client/src/sprite_meta.rs"]
 mod sprite_meta;
-const FRAMES: u32 = 51;
-const EXIT_FRAMES: u32 = 10;
+/// Nombre de sorties différentes dans l'image des sorties.
+const EXIT_ROWS: u32 = sprite_forge::EXIT_ROWS as u32;
 
 /// Un sprite à poser sur la carte: texture, partie utilisée, taille et décalage vers le haut, en tuiles.
 pub struct Sprite<'a> {
@@ -113,35 +111,46 @@ impl LevelArt {
         let dir = repo.join("client/assets/art/medieval");
         let tiles = load(&dir.join("tiles.png"))?;
         let decor = load(&dir.join("decor.png"))?;
-        let landmarks = castle_shared::LandmarkKind::ALL
-            .into_iter()
-            .map(|kind| {
-                let image = load_basis(&dir.join("landmarks").join(format!("{}.basis", kind.file())))?;
-                Some((kind, texture(ctx, "level_landmark", &image, TextureOptions::LINEAR)))
-            })
-            .collect::<Option<Vec<_>>>()?;
-        let exits = load_basis(&dir.join("exits.basis"))?;
+        // Le jeu dessine les monstres, les grands motifs et les sorties en 3D: l'éditeur les rend ici avec le même générateur que
+        // les anciennes planches (rien à garder dans les assets).
+        let theme = sprite_forge::Theme::Medieval;
+        let tuned = sprite_forge::tuning::load(theme);
         let monsters = [
-            (MonsterKind::Skeleton, "skeleton"),
-            (MonsterKind::Bat, "bat"),
-            (MonsterKind::Goblin, "goblin"),
-            (MonsterKind::Orc, "orc"),
-            (MonsterKind::Ghoul, "ghoul"),
-            (MonsterKind::Wolf, "wolf"),
-            (MonsterKind::Warg, "warg"),
-            (MonsterKind::Troll, "troll"),
-            (MonsterKind::Muldant, "muldant"),
-            (MonsterKind::Gardener, "gardener"),
-            (MonsterKind::Dragon, "dragon"),
+            MonsterKind::Skeleton,
+            MonsterKind::Bat,
+            MonsterKind::Goblin,
+            MonsterKind::Orc,
+            MonsterKind::Ghoul,
+            MonsterKind::Wolf,
+            MonsterKind::Warg,
+            MonsterKind::Troll,
+            MonsterKind::Muldant,
+            MonsterKind::Gardener,
+            MonsterKind::Dragon,
         ]
         .into_iter()
-        .map(|(kind, file)| {
-            let sheet = load_basis(&dir.join("monsters").join(format!("{file}.basis")))?;
-            // Direction 6 (sud), première image (le monstre au repos, de face).
-            let face = full_cell("monsters", file, &sheet, 6 * FRAMES, SHEET_COLUMNS)?;
-            Some((kind, texture(ctx, "level_monster", &face, TextureOptions::LINEAR)))
+        .filter_map(|kind| {
+            // Direction 6 (sud): le monstre au repos, de face.
+            let pixels = sprite_forge::render_model(&format!("monster:{kind:?}"), theme, sprite_forge::Anim::Idle(0.0), 6, &tuned, None);
+            let image = RgbaImage::from_raw(CELL, CELL, pixels)?;
+            Some((kind, texture(ctx, "level_monster", &image, TextureOptions::LINEAR)))
         })
-        .collect::<Option<Vec<_>>>()?;
+        .collect::<Vec<_>>();
+        let landmarks = castle_shared::LandmarkKind::ALL
+            .into_iter()
+            .filter_map(|kind| {
+                let pixels = sprite_forge::render_landmark(kind.file())?;
+                let image = RgbaImage::from_raw(EXIT_CELL, EXIT_CELL, pixels)?;
+                Some((kind, texture(ctx, "level_landmark", &image, TextureOptions::LINEAR)))
+            })
+            .collect::<Vec<_>>();
+        // Une seule image par sortie, l'une sous l'autre.
+        let mut exits = RgbaImage::new(EXIT_CELL, EXIT_CELL * EXIT_ROWS);
+        for row in 0..EXIT_ROWS {
+            if let Some(cell) = RgbaImage::from_raw(EXIT_CELL, EXIT_CELL, sprite_forge::render_exit(row as usize, 0.0, theme)) {
+                image::imageops::replace(&mut exits, &cell, 0, (row * EXIT_CELL) as i64);
+            }
+        }
         let objects = OBJECT_FILES
             .iter()
             .map(|file| {
@@ -228,7 +237,7 @@ impl LevelArt {
         };
         Sprite {
             texture: &self.exits,
-            uv: cell_uv(0, row, EXIT_CELL, EXIT_FRAMES, 7),
+            uv: cell_uv(0, row, EXIT_CELL, 1, EXIT_ROWS),
             size: 4.0,
             lift: 0.0,
             tint: Color32::WHITE,

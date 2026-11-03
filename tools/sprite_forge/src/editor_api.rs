@@ -253,6 +253,47 @@ pub fn render_model_detail(
     image
 }
 
+/// Côté d'une image de grand motif ou de sortie de niveau, en pixels.
+pub const EXIT_PX: usize = crate::EXIT_CELL;
+
+/// Les noms des grands motifs du décor, dans l'ordre de leur rendu.
+pub fn landmark_names() -> &'static [&'static str] {
+    &crate::landmarks::LANDMARKS
+}
+
+/// Rend un grand motif du décor (`EXIT_PX` de côté, RGBA), tel que les planches du jeu le montraient. `None` si le nom est inconnu.
+pub fn render_landmark(name: &str) -> Option<Vec<u8>> {
+    let index = crate::landmarks::LANDMARKS.iter().position(|n| *n == name)?;
+    let camera = crate::Camera {
+        yaw: 0.0,
+        elevation: crate::ELEVATION,
+        scale: crate::SCALE,
+        size: crate::EXIT_CELL,
+        feet_y: crate::FEET_Y * 2.0,
+        outline: true,
+        shadow: true,
+    };
+    Some(to_rgba8(&render(&crate::landmarks::build(index), &camera, SUPERSAMPLE)))
+}
+
+/// Nombre de sorties de niveau différentes (stairs, porte, pont...), et rendu de l'une d'elles (`EXIT_PX` de côté, RGBA) à l'instant
+/// `t` (0 à 1) du vacillement des torches.
+pub const EXIT_ROWS: usize = crate::props::EXITS.len();
+
+pub fn render_exit(row: usize, t: f32, theme: Theme) -> Vec<u8> {
+    let camera = crate::Camera {
+        yaw: 0.0,
+        elevation: crate::ELEVATION,
+        scale: crate::SCALE,
+        size: crate::EXIT_CELL,
+        feet_y: crate::FEET_Y * 2.0,
+        outline: true,
+        shadow: true,
+    };
+    let prop = crate::props::EXITS[row.min(crate::props::EXITS.len() - 1)];
+    to_rgba8(&render(&crate::props::build_exit(prop, t, theme), &camera, SUPERSAMPLE))
+}
+
 /// Un groupe de tuiles de la planche: un grand motif de 4x4 tuiles (sol, dessus de mur), une bande de 4 tuiles (face
 /// de mur) ou une tuile décorée.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
