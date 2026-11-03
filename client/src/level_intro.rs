@@ -259,8 +259,13 @@ fn show_summary(
         ))
         .with_children(|screen| {
             screen.spawn(Node { column_gap: Val::Px(14.0), ..default() }).with_children(|line| {
+                // « Acte 2 · Niveau 3 terminé »: l'acte et le rang dans l'acte, comme à l'annonce du niveau.
+                let (act, rank) = castle_shared::act_of(summary.level);
+                line.spawn((Text::default(), Tr::new("act-word"), ui_font(&assets, 30.0), white, SummaryText(fade_in)));
+                line.spawn((Text::new(act.to_string()), ui_font(&assets, 30.0), white, SummaryText(fade_in)));
+                line.spawn((Text::new("·"), ui_font(&assets, 30.0), white, SummaryText(fade_in)));
                 line.spawn((Text::default(), Tr::new("level-word"), ui_font(&assets, 30.0), white, SummaryText(fade_in)));
-                line.spawn((Text::new(summary.level.to_string()), ui_font(&assets, 30.0), white, SummaryText(fade_in)));
+                line.spawn((Text::new(rank.to_string()), ui_font(&assets, 30.0), white, SummaryText(fade_in)));
                 line.spawn((Text::default(), Tr::new("level-complete"), ui_font(&assets, 30.0), white, SummaryText(fade_in)));
             });
             screen
