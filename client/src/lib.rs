@@ -20,6 +20,7 @@ mod dialogue_script;
 mod gamecontroller;
 #[cfg(target_os = "ios")]
 mod prefs;
+mod firstperson;
 mod i18n;
 mod lighting;
 mod decor3d;
@@ -29,6 +30,7 @@ mod prebake;
 mod pause;
 mod puzzle;
 mod settings;
+mod sky;
 pub mod sim;
 mod sprite_meta;
 mod sprite_meta_lite;
@@ -244,6 +246,8 @@ pub fn run() {
             level_intro::LevelIntroPlugin,
             art::ArtPlugin,
             camera::CameraPlugin,
+            firstperson::FirstPersonPlugin,
+            sky::SkyPlugin,
             lighting::LightingPlugin,
             dialogue::DialoguePlugin,
         ))

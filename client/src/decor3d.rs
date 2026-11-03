@@ -46,7 +46,7 @@ fn zoom() -> f32 {
 }
 /// Hauteur d'un mur, en unités du monde.
 fn wall_height() -> f32 {
-    crate::settings::VIEW_WALL_TILES * TILE_SIZE
+    crate::settings::VIEW_WALL_TILES * TILE_SIZE * crate::firstperson::wall_factor()
 }
 
 /// Champ de vision de la caméra en perspective, en degrés (`CASTLE_FOV`), ou `None` pour la vue orthographique.
@@ -65,6 +65,7 @@ const LANTERN_COLOR: Vec3 = Vec3::new(1.0, 0.87, 0.68);
 
 mod flame;
 mod foliage;
+pub(crate) mod water;
 pub(crate) mod look;
 #[cfg(not(any(target_os = "ios", target_os = "tvos")))]
 pub mod preview;
@@ -82,17 +83,18 @@ pub struct Decor3dPlugin;
 
 impl Plugin for Decor3dPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((MaterialPlugin::<DecorMaterial>::default(), MaterialPlugin::<BillboardMaterial>::default(), MaterialPlugin::<FlameMaterial>::default()))
+        app.add_plugins((MaterialPlugin::<DecorMaterial>::default(), MaterialPlugin::<BillboardMaterial>::default(), MaterialPlugin::<FlameMaterial>::default(), MaterialPlugin::<water::WaterMaterial>::default()))
             .insert_resource(LightTuning::load())
             .init_resource::<ActiveLight>()
             .init_resource::<Torches>()
             .init_resource::<Lights>()
             .init_resource::<Mood>()
             .add_observer(forget_walls)
+            .add_observer(water::forget_water)
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
-                (keep_the_image, build_chunks.after(crate::art::rebuild_world), follow_camera, update_materials, face_flames, apply_mood, drive_lamps).chain(),
+                (keep_the_image, build_chunks.after(crate::art::rebuild_world), water::build_water, rebuild_walls_for_view, follow_camera, update_materials, face_flames, apply_mood, drive_lamps).chain(),
             )
             .add_systems(
                 Update,
@@ -129,7 +131,7 @@ fn diag_hide(
 }
 
 #[derive(Component)]
-struct DecorCamera;
+pub(crate) struct DecorCamera;
 
 /// Un bloc de décor en 3D, et le sprite à plat dont il reprend l'image.
 #[derive(Component)]
@@ -265,7 +267,7 @@ fn spawn_sun_and_lamps(commands: &mut Commands) {
 }
 
 /// Position 3D d'un point du monde 2D (x vers la droite, y vers le nord), à la hauteur `height`: le nord est -z.
-fn to_3d(point: Vec2, height: f32) -> Vec3 {
+pub(super) fn to_3d(point: Vec2, height: f32) -> Vec3 {
     Vec3::new(point.x, height, -point.y)
 }
 
@@ -491,13 +493,52 @@ fn walls_mesh(room: &Room) -> Mesh {
     quads.into_mesh()
 }
 
-/// La caméra 3D suit la caméra 2D: même position, même zoom (en perspective, elle recule jusqu'à voir la même hauteur à l'écran).
-fn follow_camera(
+/// Les murs changent de hauteur quand on passe à la première personne (ou qu'on en revient): le maillage est refait.
+fn rebuild_walls_for_view(
+    view: Res<crate::firstperson::FirstPerson>,
+    mut last: Local<bool>,
+    room: Option<Res<Room>>,
+    walls: Query<&Mesh3d, With<Decor3dWalls>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    if view.on == std::mem::replace(&mut *last, view.on) {
+        return;
+    }
+    if let Some(room) = room {
+        for mesh in &walls {
+            let _ = meshes.insert(&mesh.0, walls_mesh(&room));
+        }
+    }
+}
+
+/// La caméra 3D suit la caméra 2D: même position, même zoom (en perspective, elle recule jusqu'à voir la même hauteur à l'écran). À la
+/// première personne (F4), elle se place plutôt à hauteur des yeux du héros dirigé et regarde dans le sens de la vue.
+pub(crate) fn follow_camera(
     flat: Single<(&Transform, &Projection), (With<Camera2d>, Without<DecorCamera>)>,
     mut deep: Single<(&mut Transform, &mut Projection), With<DecorCamera>>,
     window: Single<&Window, With<PrimaryWindow>>,
+    first_person: Res<crate::firstperson::FirstPerson>,
+    hero: Option<Single<&Transform, (With<LocalPlayer>, Without<DecorCamera>, Without<Camera2d>)>>,
 ) {
     let (flat_transform, flat_projection) = *flat;
+    // À la première personne: aux yeux du héros, le regard dans le sens de la vue (l'angle de la vue tourne la direction des touches).
+    if let (true, Some(hero)) = (first_person.on, &hero) {
+        let yaw = yaw();
+        let pitch = first_person.pitch.to_radians();
+        let forward = Vec3::new(-yaw.sin() * pitch.cos(), pitch.sin(), -yaw.cos() * pitch.cos());
+        let eye = to_3d(hero.translation.truncate(), crate::firstperson::EYE_HEIGHT);
+        *deep.0 = Transform::from_translation(eye).looking_to(forward, Vec3::Y);
+        let wanted = PerspectiveProjection { fov: crate::firstperson::FIELD_OF_VIEW.to_radians(), near: 0.5, far: 6000.0, ..default() };
+        match &mut *deep.1 {
+            Projection::Perspective(perspective) => {
+                perspective.fov = wanted.fov;
+                perspective.near = wanted.near;
+                perspective.far = wanted.far;
+            }
+            projection => *projection = Projection::Perspective(wanted),
+        }
+        return;
+    }
     let target = to_3d(flat_transform.translation.truncate(), 0.0);
     let (elevation, yaw) = (elevation(), yaw());
     // La direction de la cible vers la caméra: au sud pour un angle nul, puis tournée autour de la verticale.
@@ -516,7 +557,18 @@ fn follow_camera(
         (Some(fov), projection @ Projection::Orthographic(_)) => {
             *projection = Projection::Perspective(PerspectiveProjection { fov: fov.to_radians(), near: 1.0, far: 6000.0, ..default() });
         }
-        (Some(fov), Projection::Perspective(perspective)) => perspective.fov = fov.to_radians(),
+        (Some(fov), Projection::Perspective(perspective)) => {
+            perspective.fov = fov.to_radians();
+            perspective.near = 1.0;
+        }
+        // De retour de la première personne: la vue orthographique reprend.
+        (None, projection @ Projection::Perspective(_)) => {
+            *projection = Projection::from(OrthographicProjection { near: -2000.0, far: 2000.0, ..OrthographicProjection::default_2d() });
+            if let Projection::Orthographic(to) = projection {
+                to.scale = scale;
+                to.scaling_mode = from.scaling_mode;
+            }
+        }
         (None, Projection::Orthographic(to)) => {
             to.scale = scale;
             to.scaling_mode = from.scaling_mode;
@@ -556,6 +608,9 @@ fn update_materials(
     torches: Res<Torches>,
     active: Res<ActiveLight>,
     mut scene: ResMut<Lights>,
+    mood: Res<Mood>,
+    mut waters: ResMut<Assets<water::WaterMaterial>>,
+    water_surfaces: Query<&MeshMaterial3d<water::WaterMaterial>, With<water::WaterSurface>>,
 ) {
     // La teinte du décor (celle du héros dirigé) est la même pour tous les blocs, murs compris.
     let tint = sprites.iter().next().map_or(Vec4::ONE, |sprite| {
@@ -583,6 +638,20 @@ fn update_materials(
     let lights = look::lights(&positions, &torches.0, focus, &active.0);
     let (light_pos, light_color, count) = (lights.pos, lights.color, lights.count);
     *scene = lights;
+    // L'eau reçoit la même lumière que le sol: teinte, ambiance, soleil et lampes.
+    for surface in &water_surfaces {
+        let wanted = water::WaterData {
+            tint,
+            params: Vec4::new(count, 0.0, mood.ambient, mood.sun),
+            light_pos,
+            light_color,
+        };
+        if waters.get(&surface.0).is_some_and(|current| current.data != wanted) {
+            if let Some(mut material) = waters.get_mut(&surface.0) {
+                material.data = wanted;
+            }
+        }
+    }
     for chunk in &chunks {
         // `get_mut` marque la matière modifiée, donc renvoyée au GPU à chaque image: on n'y touche que si quelque chose change.
         let Some(current) = materials.get(&chunk.material) else {

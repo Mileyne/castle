@@ -75,9 +75,10 @@ impl Thing {
             | Self::Ward { at }
             | Self::Portcullis { at, .. }
             | Self::Panel { at, .. }
-            | Self::Exit { at, .. }
             | Self::Landmark { at, .. }
             | Self::Trigger { at, .. } => *at = to,
+            // Un pont cassé couvre un pont de deux tuiles de large: il se pose sur un coin de tuiles.
+            Self::Exit { kind, at } => *at = if *kind == ExitKind::Bridge { to.round() } else { to },
         }
     }
 }
@@ -232,7 +233,12 @@ impl LevelDef {
         for (row, line) in self.rows.iter().enumerate() {
             let y = self.size.y as usize - 1 - row;
             for (x, c) in line.chars().enumerate() {
-                tiles[y * self.size.x as usize + x] = if c == '#' { Tile::Wall } else { Tile::Floor };
+                tiles[y * self.size.x as usize + x] = match c {
+                    '#' => Tile::Wall,
+                    '~' => Tile::Water,
+                    '=' => Tile::Bridge,
+                    _ => Tile::Floor,
+                };
             }
         }
         Ok(Dungeon { room: Room { size: self.size, tiles }, layout: self.layout.clone() })
@@ -251,7 +257,7 @@ impl LevelDef {
             if line.chars().count() != self.size.x as usize {
                 problems.push(format!("la ligne {} fait {} tuiles pour une largeur de {}", i + 1, line.chars().count(), self.size.x));
             }
-            if let Some(c) = line.chars().find(|c| !matches!(c, '#' | '.')) {
+            if let Some(c) = line.chars().find(|c| !matches!(c, '#' | '.' | '~' | '=')) {
                 problems.push(format!("la ligne {} contient le caractère inconnu '{c}'", i + 1));
             }
         }
@@ -298,7 +304,15 @@ impl LevelDef {
                 continue;
             }
             let at = thing.at();
-            if dungeon.room.tile(at.x.floor() as i32, at.y.floor() as i32) != Tile::Floor {
+            // Un pont cassé couvre un bloc de deux tuiles sur deux de pont (ou de sol): c'est tout ce bloc qui doit être praticable.
+            if let Thing::Exit { kind: ExitKind::Bridge, .. } = thing {
+                let corner = dungeon.room.bridge_block_corner(at);
+                if !dungeon.room.bridge_block(corner).iter().all(|(x, y)| dungeon.room.tile(*x, *y).walkable()) {
+                    problems.push(format!("{thing:?}: le pont cassé doit couvrir un pont de deux tuiles de large"));
+                }
+                continue;
+            }
+            if !dungeon.room.tile(at.x.floor() as i32, at.y.floor() as i32).walkable() {
                 problems.push(format!("{thing:?} n'est pas sur le sol"));
             }
         }
@@ -307,7 +321,7 @@ impl LevelDef {
         let mut seen = vec![false; (self.size.x * self.size.y) as usize];
         let mut stack = vec![start.as_ivec2()];
         while let Some(t) = stack.pop() {
-            if dungeon.room.tile(t.x, t.y) != Tile::Floor {
+            if !dungeon.room.tile(t.x, t.y).walkable() {
                 continue;
             }
             let i = (t.y as u32 * self.size.x + t.x as u32) as usize;
@@ -414,6 +428,67 @@ mod tests {
             }
         }
         assert!(def.validate().iter().any(|p| p.contains("atteignable")), "{:?}", def.validate());
+    }
+
+    /// De l'eau sans pont coupe le niveau: la validation le signale; transformée en pont, la salle redevient praticable.
+    #[test]
+    fn water_cuts_a_level_unless_it_is_a_bridge() {
+        let dungeon = Dungeon::generate(3);
+        let mut def = LevelDef::from_dungeon("essai", Region::Crypts, &dungeon, None, Vec::new());
+        assert!(def.validate().is_empty());
+        let exit = dungeon.layout.rooms[dungeon.layout.exit].clone();
+        let fill = |def: &mut LevelDef, c: char| {
+            for y in exit.min.y..=exit.max.y {
+                let row = (def.size.y - 1 - y) as usize;
+                let mut line: Vec<char> = def.rows[row].chars().collect();
+                for x in exit.min.x..=exit.max.x {
+                    line[x as usize] = c;
+                }
+                def.rows[row] = line.into_iter().collect();
+            }
+        };
+        fill(&mut def, '~');
+        assert!(def.to_dungeon().is_ok(), "l'eau est un caractère connu");
+        let center = exit.center();
+        assert_eq!(def.to_dungeon().unwrap().room.tile(center.x as i32, center.y as i32), Tile::Water);
+        assert!(def.validate().iter().any(|p| p.contains("atteignable")), "{:?}", def.validate());
+        // Des ponts à la place de l'eau: la salle se rejoint de nouveau.
+        fill(&mut def, '=');
+        assert_eq!(def.to_dungeon().unwrap().room.tile(center.x as i32, center.y as i32), Tile::Bridge);
+        assert!(def.validate().is_empty(), "{:?}", def.validate());
+    }
+
+    /// Un pont cassé visé à une tuile près n'est pas signalé s'il peut se caler sur un pont de deux tuiles de large; sur l'eau, il l'est.
+    #[test]
+    fn a_broken_bridge_is_valid_on_a_two_wide_bridge_only() {
+        let dungeon = Dungeon::generate(3);
+        let mut def = LevelDef::from_dungeon("essai", Region::Crypts, &dungeon, None, Vec::new());
+        // Une rivière de trois tuiles de large dans la salle de départ, avec un pont de deux tuiles de large.
+        let start = dungeon.layout.rooms[dungeon.layout.start].clone();
+        let (cx, cy) = (start.center().x as i32, start.center().y as i32);
+        let paint = |def: &mut LevelDef, x: i32, y: i32, c: char| {
+            let row = (def.size.y as i32 - 1 - y) as usize;
+            let mut chars: Vec<char> = def.rows[row].chars().collect();
+            chars[x as usize] = c;
+            def.rows[row] = chars.into_iter().collect();
+        };
+        for y in cy - 3..=cy + 3 {
+            for x in cx - 1..=cx + 1 {
+                paint(&mut def, x, y, '~');
+            }
+        }
+        for y in cy - 1..=cy {
+            for x in cx - 1..=cx + 1 {
+                paint(&mut def, x, y, '=');
+            }
+        }
+        // Le pont cassé est visé sur la rangée du dessus (pas pile sur le bon coin): il se cale quand même.
+        def.things.push(Thing::Exit { kind: ExitKind::Bridge, at: Vec2::new(cx as f32 + 0.5, cy as f32 + 1.5) });
+        assert!(def.validate().iter().all(|p| !p.contains("pont cassé")), "{:?}", def.validate());
+        // Sur de l'eau, il est signalé.
+        let last = def.things.len() - 1;
+        def.things[last] = Thing::Exit { kind: ExitKind::Bridge, at: Vec2::new(cx as f32, cy as f32 + 3.0) };
+        assert!(def.validate().iter().any(|p| p.contains("pont cassé")), "{:?}", def.validate());
     }
 
     #[test]

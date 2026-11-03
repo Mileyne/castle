@@ -20,6 +20,10 @@ use crate::level_art::LevelArt;
 enum Tool {
     Wall,
     Floor,
+    /// Eau: infranchissable, sauf sur un pont.
+    Water,
+    /// Pont: une tuile praticable sur l'eau.
+    Bridge,
     /// Donne aux tuiles le décor (sol et murs) d'une autre région.
     Style,
     /// Pose des éléments de décor au sol (herbes, cailloux, flaques...).
@@ -36,7 +40,75 @@ enum Tool {
 const MAX_ZOOM: f32 = 80.0;
 
 fn painting_tool(tool: Tool) -> bool {
-    matches!(tool, Tool::Wall | Tool::Floor | Tool::Style)
+    matches!(tool, Tool::Wall | Tool::Floor | Tool::Water | Tool::Bridge | Tool::Style)
+}
+
+/// Une tuile d'eau (bleue, avec des ondes) ou de pont (planches et cordes) sur la carte. `crosswise`: les planches sont horizontales;
+/// `water`: les côtés qui longent l'eau (nord, sud, ouest, est), où un pont a ses cordes.
+fn liquid_tile(painter: &egui::Painter, r: Rect, bridge: bool, at: (i32, i32), crosswise: bool, water: [bool; 4]) {
+    if !bridge {
+        painter.rect_filled(r, 0.0, Color32::from_rgb(36, 88, 150));
+        // Trois ondes claires, décalées d'une tuile à l'autre.
+        for i in 0..3 {
+            let t = (i as f32 + 0.5) / 3.0;
+            let shift = ((at.0 * 7 + at.1 * 3 + i * 5) % 6) as f32 / 6.0 * 0.5;
+            let y = r.min.y + r.height() * t;
+            painter.line_segment(
+                [egui::pos2(r.min.x + r.width() * shift, y), egui::pos2(r.min.x + r.width() * (shift + 0.45), y)],
+                egui::Stroke::new((r.height() * 0.06).max(1.0), Color32::from_rgba_unmultiplied(170, 210, 240, 90)),
+            );
+        }
+    } else {
+        painter.rect_filled(r, 0.0, Color32::from_rgb(130, 90, 52));
+        let stroke = egui::Stroke::new(1.0, Color32::from_rgb(52, 34, 18));
+        for i in 1..4 {
+            let t = i as f32 / 4.0;
+            if crosswise {
+                let y = r.min.y + r.height() * t;
+                painter.line_segment([egui::pos2(r.min.x, y), egui::pos2(r.max.x, y)], stroke);
+            } else {
+                let x = r.min.x + r.width() * t;
+                painter.line_segment([egui::pos2(x, r.min.y), egui::pos2(x, r.max.y)], stroke);
+            }
+        }
+        // Les cordes (et leurs poteaux aux angles) du côté de l'eau, comme le pont à corde du jeu.
+        let rope = egui::Stroke::new((r.width() * 0.09).max(1.5), Color32::from_rgb(184, 152, 96));
+        let post = Color32::from_rgb(74, 50, 32);
+        let edges = [
+            (water[0], r.left_top(), r.right_top()),
+            (water[1], r.left_bottom(), r.right_bottom()),
+            (water[2], r.left_top(), r.left_bottom()),
+            (water[3], r.right_top(), r.right_bottom()),
+        ];
+        for (is_water, from, to) in edges {
+            if is_water {
+                painter.line_segment([from, to], rope);
+                painter.circle_filled(from, (r.width() * 0.1).max(1.5), post);
+                painter.circle_filled(to, (r.width() * 0.1).max(1.5), post);
+            }
+        }
+    }
+}
+
+/// Cale un pont cassé sur le bloc de deux tuiles sur deux qui contient le plus de pont (voir `Room::bridge_block_corner`), plutôt que sur
+/// le coin le plus proche du curseur: sinon il peut ne couvrir qu'une tuile de la largeur du pont. `target`: là où l'on a visé.
+fn snap_bridge_exit(def: &mut LevelDef, index: usize, target: V2) {
+    let Thing::Exit { kind: ExitKind::Bridge, .. } = def.things[index] else {
+        return;
+    };
+    if let Ok(dungeon) = def.to_dungeon() {
+        def.things[index] = Thing::Exit { kind: ExitKind::Bridge, at: dungeon.room.bridge_block_corner(target) };
+    }
+}
+
+/// Le caractère de la carte que peint un outil de terrain.
+fn paint_char_of(tool: Tool) -> char {
+    match tool {
+        Tool::Wall => '#',
+        Tool::Water => '~',
+        Tool::Bridge => '=',
+        _ => '.',
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -131,7 +203,7 @@ impl Item {
             Item::Landmark(kind) => kind.label(),
             Item::Exit(ExitKind::Stairs) => "Sortie: escalier",
             Item::Exit(ExitKind::Gate) => "Sortie: barrière",
-            Item::Exit(ExitKind::Bridge) => "Sortie: pont",
+            Item::Exit(ExitKind::Bridge) => "Sortie: pont cassé (briques)",
             Item::Exit(ExitKind::Drawbridge) => "Sortie: pont-levis",
             Item::Exit(ExitKind::Hidden) => "Sortie invisible (fin de chemin)",
         }
@@ -145,7 +217,8 @@ impl Item {
             Item::Pickup(kind) => Thing::Pickup { kind, at },
             Item::Relic => Thing::Relic { at },
             Item::Captive => Thing::Captive { at },
-            Item::Exit(kind) => Thing::Exit { kind, at },
+            // Un pont cassé couvre un pont de deux tuiles de large: il se cale sur un coin de tuiles.
+            Item::Exit(kind) => Thing::Exit { kind, at: if kind == ExitKind::Bridge { at.round() } else { at } },
             Item::Landmark(kind) => Thing::Landmark { kind, at },
         }
     }
@@ -447,6 +520,8 @@ impl LevelsTab {
             for (tool, label) in [
                 (Tool::Wall, "▮ Mur"),
                 (Tool::Floor, "▯ Sol"),
+                (Tool::Water, "≈ Eau"),
+                (Tool::Bridge, "▤ Pont"),
                 (Tool::Style, "Matière"),
                 (Tool::Decor, "Décor"),
                 (Tool::Place, "Poser"),
@@ -550,8 +625,11 @@ impl LevelsTab {
                 });
                 ui.label("Un niveau peut changer d'aspect au fil de sa progression: peins les salles d'un autre décor. Rectangle et Remplir marchent aussi.");
             }
-            Tool::Wall | Tool::Floor => {
+            Tool::Wall | Tool::Floor | Tool::Water | Tool::Bridge => {
                 ui.label("Clic ou glisser pour peindre. Clic droit: effacer un élément. Ctrl + molette: zoom. Bouton du milieu: faire défiler.");
+                if matches!(self.tool, Tool::Water | Tool::Bridge) {
+                    ui.label("L'eau ne se franchit pas à pied: on ne la traverse que sur un pont. Pose les ponts après l'eau; la vérification signale une sortie coupée.");
+                }
             }
             Tool::Erase => {
                 ui.label("Clic sur un élément pour le retirer.");
@@ -707,6 +785,14 @@ impl LevelsTab {
                         Pos2::new(rect.min.x + snap(x), rect.min.y + snap(row)),
                         Pos2::new(rect.min.x + snap(x + 1), rect.min.y + snap(row + 1)),
                     );
+                    let here = cell(def, x, y);
+                    if here == '~' || here == '=' {
+                        // Eau et pont: dessinés par le code (pas dans la planche des tuiles), comme dans le jeu.
+                        // Les côtés de la tuile qui longent l'eau (nord, sud, ouest, est): un pont y a ses cordes.
+                        let water = [cell(def, x, y + 1) == '~', cell(def, x, y - 1) == '~', cell(def, x - 1, y) == '~', cell(def, x + 1, y) == '~'];
+                        liquid_tile(&painter, r, here == '=', (x, y), (water[2] || water[3]) && here == '=', water);
+                        continue;
+                    }
                     match &art {
                         Some(art) => {
                             let column = castle_shared::tileart::tile_column(
@@ -865,7 +951,7 @@ impl LevelsTab {
                         );
                     };
                     match (self.tool, self.shape) {
-                        (Tool::Wall | Tool::Floor | Tool::Style, Shape::Brush) => {
+                        (Tool::Wall | Tool::Floor | Tool::Water | Tool::Bridge | Tool::Style, Shape::Brush) => {
                             let (lo, hi) = (self.brush / 2, self.brush - 1 - self.brush / 2);
                             outline((tx - lo, ty - lo), (tx + hi, ty + hi), Color32::WHITE);
                         }
@@ -908,6 +994,10 @@ impl LevelsTab {
                         Color32::from_rgb(230, 170, 60)
                     } else if self.tool == Tool::Wall {
                         Color32::from_rgb(120, 120, 150)
+                    } else if self.tool == Tool::Water {
+                        Color32::from_rgb(60, 130, 230)
+                    } else if self.tool == Tool::Bridge {
+                        Color32::from_rgb(200, 140, 70)
                     } else {
                         Color32::from_rgb(130, 200, 130)
                     };
@@ -947,7 +1037,7 @@ impl LevelsTab {
                     .min_by(|a, b| a.1.total_cmp(&b.1))
                     .map(|(i, _)| i)
             };
-            let paint_char = if self.tool == Tool::Wall { '#' } else { '.' };
+            let paint_char = paint_char_of(self.tool);
             let style_tool = self.tool == Tool::Style;
             let style_region = self.style_region;
             let set = |def: &mut LevelDef, x: i32, y: i32| -> bool {
@@ -974,7 +1064,7 @@ impl LevelsTab {
             if response.drag_started_by(egui::PointerButton::Primary) {
                 self.drag = cursor;
                 match self.tool {
-                    Tool::Wall | Tool::Floor | Tool::Style if self.shape == Shape::Brush => self.checkpoint(def),
+                    Tool::Wall | Tool::Floor | Tool::Water | Tool::Bridge | Tool::Style if self.shape == Shape::Brush => self.checkpoint(def),
                     Tool::Zone => {
                         // Saisir le bord ou le coin d'une zone existante la redimensionne, sinon on en trace une.
                         self.resizing = precise.and_then(|(px, py)| {
@@ -1050,6 +1140,7 @@ impl LevelsTab {
                     );
                     if def.things[i].at() != to {
                         def.things[i].set_at(to);
+                        snap_bridge_exit(def, i, to);
                         changed = true;
                     }
                 }
@@ -1092,7 +1183,7 @@ impl LevelsTab {
                                 });
                                 changed = true;
                             }
-                            Tool::Wall | Tool::Floor | Tool::Style if self.shape == Shape::Rect => {
+                            Tool::Wall | Tool::Floor | Tool::Water | Tool::Bridge | Tool::Style if self.shape == Shape::Rect => {
                                 self.checkpoint(def);
                                 for y in ay..=by {
                                     for x in ax..=bx {
@@ -1154,6 +1245,7 @@ impl LevelsTab {
                             def.things.retain(|t| !matches!(t, Thing::Exit { .. }));
                         }
                         def.things.push(self.item.thing(at));
+                        snap_bridge_exit(def, def.things.len() - 1, at);
                         changed = true;
                     } else if painting_tool(self.tool)
                         && self.shape == Shape::Rect

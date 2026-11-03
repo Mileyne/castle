@@ -126,6 +126,17 @@ impl HeroClass {
 pub enum Tile {
     Floor,
     Wall,
+    /// Eau: infranchissable à pied. On ne la traverse que sur un pont.
+    Water,
+    /// Pont: une tuile praticable posée sur l'eau.
+    Bridge,
+}
+
+impl Tile {
+    /// Les héros et les monstres peuvent-ils marcher dessus ?
+    pub fn walkable(self) -> bool {
+        matches!(self, Tile::Floor | Tile::Bridge)
+    }
 }
 
 /// Carte d'une salle en tuiles. Le serveur et les clients construisent la même, sans la répliquer.
@@ -137,17 +148,21 @@ pub struct Room {
 }
 
 impl Room {
-    /// Une salle dessinée en texte, pour les essais et les aperçus: `#` est un mur, tout autre caractère du sol. La première ligne est
-    /// le nord; toutes les lignes ont la même longueur.
+    /// Une salle dessinée en texte, pour les essais et les aperçus: `#` est un mur, `~` de l'eau, `=` un pont, tout autre caractère du
+    /// sol. La première ligne est le nord; toutes les lignes ont la même longueur.
     pub fn from_rows(rows: &[&str]) -> Room {
         let size = UVec2::new(rows[0].chars().count() as u32, rows.len() as u32);
         let mut room = Room { size, tiles: vec![Tile::Floor; (size.x * size.y) as usize] };
         for (row, text) in rows.iter().enumerate() {
             assert_eq!(text.chars().count() as u32, size.x, "ligne {row} de longueur différente");
             for (x, c) in text.chars().enumerate() {
-                if c == '#' {
-                    room.set(x as u32, size.y - 1 - row as u32, Tile::Wall);
-                }
+                let tile = match c {
+                    '#' => Tile::Wall,
+                    '~' => Tile::Water,
+                    '=' => Tile::Bridge,
+                    _ => continue,
+                };
+                room.set(x as u32, size.y - 1 - row as u32, tile);
             }
         }
         room
@@ -175,13 +190,47 @@ impl Room {
         (Vec2::new(x as f32, y as f32) + Vec2::splat(0.5) - self.size.as_vec2() / 2.0) * TILE_SIZE
     }
 
-    /// Une boîte centrée en `center`, de demi-côté `half`, touche-t-elle un mur ?
+    /// Le coin de tuiles où poser un pont cassé (deux tuiles sur deux, en coordonnées de tuiles) quand on vise `at`: parmi les coins à deux
+    /// tuiles ou moins du plus proche, celui dont les quatre tuiles contiennent le plus de pont, à égalité le plus proche de `at`. Le bloc couvre ainsi
+    /// toute la largeur du pont même si on l'a visé à une tuile près.
+    pub fn bridge_block_corner(&self, at: Vec2) -> Vec2 {
+        let base = at.round();
+        let mut best = (base, f32::NEG_INFINITY);
+        for dy in -2..=2 {
+            for dx in -2..=2 {
+                let corner = base + Vec2::new(dx as f32, dy as f32);
+                let bridges = self.bridge_block(corner).iter().filter(|(x, y)| self.tile(*x, *y) == Tile::Bridge).count() as f32;
+                let score = bridges * 10.0 - corner.distance(at);
+                if score > best.1 {
+                    best = (corner, score);
+                }
+            }
+        }
+        best.0
+    }
+
+    /// Les quatre tuiles d'un bloc de deux sur deux dont le coin central est `corner`.
+    pub fn bridge_block(&self, corner: Vec2) -> [(i32, i32); 4] {
+        let (x, y) = (corner.x as i32, corner.y as i32);
+        [(x - 1, y - 1), (x, y - 1), (x - 1, y), (x, y)]
+    }
+
+    /// Une boîte centrée en `center`, de demi-côté `half`, touche-t-elle un mur ou de l'eau (ce qu'on ne traverse pas à pied) ?
     pub fn overlaps_wall(&self, center: Vec2, half: f32) -> bool {
+        self.overlaps_tile(center, half, |tile| !tile.walkable())
+    }
+
+    /// Comme `overlaps_wall`, mais seuls les murs comptent: les tirs et le regard passent au-dessus de l'eau.
+    pub fn overlaps_opaque(&self, center: Vec2, half: f32) -> bool {
+        self.overlaps_tile(center, half, |tile| tile == Tile::Wall)
+    }
+
+    fn overlaps_tile(&self, center: Vec2, half: f32, blocks: impl Fn(Tile) -> bool) -> bool {
         let to_grid = |v: Vec2| ((v / TILE_SIZE) + self.size.as_vec2() / 2.0).floor().as_ivec2();
         // On retire un epsilon: coller exactement un mur n'est pas le traverser.
         let min = to_grid(center - Vec2::splat(half));
         let max = to_grid(center + Vec2::splat(half - 0.001));
-        (min.y..=max.y).any(|y| (min.x..=max.x).any(|x| self.tile(x, y) == Tile::Wall))
+        (min.y..=max.y).any(|y| (min.x..=max.x).any(|x| blocks(self.tile(x, y))))
     }
 
     /// Déplace une boîte en glissant le long des murs (axes testés séparément).
@@ -195,7 +244,7 @@ impl Room {
     }
 
     fn is_floor(&self, t: IVec2) -> bool {
-        self.tile(t.x, t.y) == Tile::Floor
+        self.tile(t.x, t.y).walkable()
     }
 
     /// Une boîte de demi-côté `half` peut-elle aller en ligne droite de `from` à `to` sans toucher un mur ?
@@ -203,6 +252,13 @@ impl Room {
         let d = to - from;
         let steps = (d.length() / 3.0).ceil().max(1.0) as u32;
         (0..=steps).all(|i| !self.overlaps_wall(from + d * (i as f32 / steps as f32), half))
+    }
+
+    /// Le regard passe-t-il en ligne droite de `from` à `to` ? Les murs l'arrêtent, pas l'eau (on voit et on tire par-dessus).
+    pub fn segment_clear_sight(&self, from: Vec2, to: Vec2, half: f32) -> bool {
+        let d = to - from;
+        let steps = (d.length() / 3.0).ceil().max(1.0) as u32;
+        (0..=steps).all(|i| !self.overlaps_opaque(from + d * (i as f32 / steps as f32), half))
     }
 
     /// Comme `segment_clear`, en tenant compte aussi des obstacles rectangulaires (centre, demi-dimensions): un obstacle que la boîte
@@ -1028,6 +1084,61 @@ mod monster_tests {
         assert_eq!(MonsterKind::pick(3, 1.0), MonsterKind::Orc);
         // Une valeur hors bornes reste dans la table.
         assert_eq!(MonsterKind::pick(1, 5.0), MonsterKind::Goblin);
+    }
+
+    /// L'eau ne se traverse pas à pied, sauf sur un pont; les tirs et le regard passent au-dessus de l'eau mais pas des murs.
+    #[test]
+    fn water_blocks_walking_except_on_a_bridge_and_does_not_block_sight() {
+        let no_bridge = Room::from_rows(&["........", "...~~...", "...~~...", "........"]);
+        let bridge = Room::from_rows(&["........", "...~~...", "...==...", "........"]);
+        let (west, east) = (no_bridge.tile_center(1, 1), no_bridge.tile_center(6, 1));
+        assert_eq!(no_bridge.tile(3, 2), Tile::Water);
+        assert_eq!(bridge.tile(3, 1), Tile::Bridge);
+        // L'eau arrête la marche, pas le regard.
+        assert!(!no_bridge.segment_clear(west, east, HERO_HALF_SIZE) || no_bridge.tile(3, 1) != Tile::Water);
+        let (a, b) = (no_bridge.tile_center(1, 2), no_bridge.tile_center(6, 2));
+        assert!(!no_bridge.segment_clear(a, b, HERO_HALF_SIZE), "on ne marche pas sur l'eau");
+        assert!(no_bridge.segment_clear_sight(a, b, 1.0), "on voit et on tire par-dessus l'eau");
+        assert!(no_bridge.overlaps_wall(no_bridge.tile_center(3, 2), 2.0) && !no_bridge.overlaps_opaque(no_bridge.tile_center(3, 2), 2.0));
+        // Sur le pont, on passe.
+        let (c, d) = (bridge.tile_center(1, 1), bridge.tile_center(6, 1));
+        assert!(bridge.segment_clear(c, d, HERO_HALF_SIZE), "le pont est praticable");
+        // Un mur arrête aussi le regard.
+        let wall = Room::from_rows(&["........", "...#....", "........"]);
+        assert!(!wall.segment_clear_sight(wall.tile_center(1, 1), wall.tile_center(6, 1), 1.0));
+    }
+
+    /// Un pont cassé se cale sur le bloc de deux sur deux qui contient le plus de pont, même visé à une tuile près.
+    #[test]
+    fn a_broken_bridge_snaps_onto_the_two_wide_bridge() {
+        // Un pont de deux tuiles de large (colonnes 3 et 4, lignes 2 et 3 depuis le bas) sur une rivière ouest-est.
+        let river = Room::from_rows(&["~~~~~~~~~~", "~~~~~~~~~~", "..========", "..========", "~~~~~~~~~~", "~~~~~~~~~~"]);
+        // Les lignes du bas du texte sont le sud: le pont est aux lignes y = 2 et 3 (la première ligne du texte est y = 5).
+        assert_eq!(river.tile(4, 2), Tile::Bridge);
+        assert_eq!(river.tile(4, 3), Tile::Bridge);
+        assert_eq!(river.tile(4, 1), Tile::Water);
+        // Visé au centre d'une tuile (le cas de l'éditeur), du côté nord, sud, ou sur le pont: dans tous les cas le coin est (x, 4).
+        for cursor_y in [2.5f32, 3.5, 4.2, 1.9] {
+            let corner = river.bridge_block_corner(Vec2::new(5.5, cursor_y));
+            let covered = river.bridge_block(corner).iter().filter(|(x, y)| river.tile(*x, *y) == Tile::Bridge).count();
+            assert_eq!(covered, 4, "le bloc couvre toute la largeur du pont: coin {corner:?} visé en y = {cursor_y}");
+        }
+        // Sans pont du tout, le coin de tuiles le plus proche est gardé.
+        let dry = Room::from_rows(&["....", "....", "...."]);
+        assert_eq!(dry.bridge_block_corner(Vec2::new(2.2, 1.9)), Vec2::new(2.0, 2.0));
+    }
+
+    /// Le chemin d'un héros contourne l'eau en passant par le pont; sans pont, aucun chemin ne traverse.
+    #[test]
+    fn a_path_crosses_the_water_only_by_the_bridge() {
+        let river = ["..~~..", "..~~..", "..==..", "..~~..", "..~~.."];
+        let room = Room::from_rows(&river);
+        let (from, to) = (room.tile_center(0, 0), room.tile_center(5, 0));
+        let path = room.find_path(from, to, &[]).expect("le pont permet de traverser");
+        assert!(path.iter().all(|p| !room.overlaps_wall(*p, HERO_HALF_SIZE)));
+        assert!(path.iter().any(|p| (p.y - room.tile_center(2, 2).y).abs() < TILE_SIZE), "le chemin passe par le pont");
+        let dry = Room::from_rows(&["..~~..", "..~~..", "..~~..", "..~~..", "..~~.."]);
+        assert!(dry.find_path(dry.tile_center(0, 0), dry.tile_center(5, 0), &[]).is_none() || !dry.segment_clear(dry.tile_center(0, 0), dry.tile_center(5, 0), HERO_HALF_SIZE));
     }
 
     #[test]

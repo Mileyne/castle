@@ -505,6 +505,85 @@ fn rank(region: Region) -> usize {
     Region::ALL.iter().position(|r| *r == region).unwrap_or(0)
 }
 
+/// Hachage entier pour des variations stables (un même pixel garde toujours la même teinte).
+fn liquid_hash(a: u32, b: u32, c: u32) -> u32 {
+    let mut h = a.wrapping_mul(0x9E37_79B1) ^ b.wrapping_mul(0x85EB_CA6B) ^ c.wrapping_mul(0xC2B2_AE35);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^ (h >> 12)
+}
+
+fn mix_color(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+}
+
+/// Peint la tuile d'eau (ondes, étincelles, rive sombre et écume) ou de pont (planches et rambardes) de la tuile (`x`, `y`).
+fn paint_liquid(room: &Room, x: u32, y: u32, pixels: &mut [u8], origin: usize, width: usize, tile_px: usize) {
+    let (xi, yi) = (x as i32, y as i32);
+    let water = |dx: i32, dy: i32| room.tile(xi + dx, yi + dy) == Tile::Water;
+    let bridge = room.tile(xi, yi) == Tile::Bridge;
+    // Une rive: un voisin qui n'est ni de l'eau ni un pont. Pour un pont, c'est l'eau de côté qui compte.
+    let shore = |dx: i32, dy: i32| {
+        let tile = room.tile(xi + dx, yi + dy);
+        !matches!(tile, Tile::Water | Tile::Bridge)
+    };
+    // Un pont va du nord au sud si l'eau est à l'est ou à l'ouest: ses planches sont alors en travers (horizontales).
+    let crosswise = water(-1, 0) || water(1, 0);
+    let unit = (tile_px / 16).max(1);
+    let plank = (tile_px / 4).max(1);
+    let (base_y, base_x) = ((room.size().y - 1 - y) as usize * tile_px, x as usize * tile_px);
+    for py in 0..tile_px {
+        for px in 0..tile_px {
+            let (wx, wy) = ((base_x + px) as f32, (base_y + py) as f32);
+            // Distance au bord de la tuile, du côté de chaque voisin.
+            let edges = [(-1, 0, px), (1, 0, tile_px - 1 - px), (0, 1, py), (0, -1, tile_px - 1 - py)];
+            let color = if bridge {
+                let along = if crosswise { py } else { px };
+                let index = (along / plank) as u32;
+                let within = along % plank;
+                let tone = 0.82 + 0.28 * (liquid_hash(x, y, index) % 100) as f32 / 100.0;
+                let grain = 0.94 + 0.1 * (liquid_hash(x * 64 + px as u32, y * 64 + py as u32, 7) % 100) as f32 / 100.0;
+                let mut c = [128.0 * tone * grain, 88.0 * tone * grain, 50.0 * tone * grain];
+                if within == 0 {
+                    c = [40.0, 26.0, 14.0];
+                } else if within == plank - 1 {
+                    c = mix_color(c, [190.0, 140.0, 85.0], 0.25);
+                }
+                // Rambardes du côté de l'eau.
+                if edges.iter().any(|&(dx, dy, d)| water(dx, dy) && d < 3 * unit / 2 + 1) {
+                    c = [70.0, 46.0, 26.0];
+                } else if edges.iter().any(|&(dx, dy, d)| water(dx, dy) && d < 3 * unit) {
+                    c = mix_color(c, [20.0, 12.0, 6.0], 0.35);
+                }
+                c
+            } else {
+                let wave = ((wx * 0.21 + (wy * 0.13).sin() * 2.2).sin() + (wy * 0.17 - wx * 0.07).sin()) * 0.5;
+                let light = (wave * 0.5 + 0.5).powi(2);
+                let mut c = [26.0 + 52.0 * light, 72.0 + 78.0 * light, 128.0 + 62.0 * light];
+                if liquid_hash(base_x as u32 / 2 + px as u32 / 2, base_y as u32 / 2 + py as u32 / 2, 3) % 211 == 0 {
+                    c = mix_color(c, [235.0, 245.0, 255.0], 0.8);
+                }
+                // La rive s'assombrit près d'un sol ou d'un mur, avec un liseré d'écume.
+                for &(dx, dy, d) in &edges {
+                    if shore(dx, dy) {
+                        if d < 2 * unit {
+                            c = mix_color(c, [215.0, 235.0, 240.0], 0.4);
+                        } else if d < 5 * unit {
+                            c = mix_color(c, [8.0, 36.0, 66.0], 0.45 * (1.0 - (d - 2 * unit) as f32 / (3 * unit) as f32));
+                        }
+                    }
+                }
+                c
+            };
+            let at = origin + (py * width + px) * 4;
+            pixels[at] = color[0].clamp(0.0, 255.0) as u8;
+            pixels[at + 1] = color[1].clamp(0.0, 255.0) as u8;
+            pixels[at + 2] = color[2].clamp(0.0, 255.0) as u8;
+            pixels[at + 3] = 255;
+        }
+    }
+}
+
 /// Assemble en une image (RVBA, `TILE_CELL` pixels par tuile, première ligne en haut) le bloc de tuiles dont le coin bas-gauche est
 /// (`chunk_x`, `chunk_y`): les tuiles de chaque région, les fondus entre régions, les ombres le long des murs, puis le décor.
 fn bake_chunk(def: &LevelDef, room: &Room, sources: &BakeSources, chunk_x: u32, chunk_y: u32) -> Vec<u8> {
@@ -646,6 +725,10 @@ fn bake_chunk(def: &LevelDef, room: &Room, sources: &BakeSources, chunk_x: u32, 
                     }
                 }
             }
+            // L'eau et les ponts sont dessinés par le code, d'après la position dans le monde (les ondes se raccordent d'une tuile à l'autre).
+            if matches!(room.tile(xi, yi), Tile::Water | Tile::Bridge) {
+                paint_liquid(room, x, y, &mut pixels, origin, width, tile_px);
+            }
             // Ombre portée sur le sol le long d'un mur: au-dessus (face du mur) et sur les côtés.
             if room.tile(xi, yi) == Tile::Floor {
                 if room.tile(xi, yi + 1) == Tile::Wall {
@@ -677,7 +760,9 @@ fn bake_chunk(def: &LevelDef, room: &Room, sources: &BakeSources, chunk_x: u32, 
     let chunk_origin = Vec2::new(chunk_x as f32, (chunk_y + rows) as f32);
     for decor in def.decor.iter().filter(|d| {
         d.at.x >= chunk_x as f32 - 1.0 && d.at.x < (chunk_x + cols) as f32 + 1.0 && d.at.y >= chunk_y as f32 - 1.0 && d.at.y < (chunk_y + rows) as f32 + 1.0
-    }) {
+    })
+    .filter(|d| !matches!(room.tile(d.at.x.floor() as i32, d.at.y.floor() as i32), Tile::Water | Tile::Bridge))
+    {
         // Coin haut-gauche de la case de 96 px (deux tuiles), en pixels de l'image du bloc (y vers le bas).
         let left = ((decor.at.x - chunk_origin.x) * tile_px as f32).round() as i32 - DECOR_CELL as i32 / 2;
         let top = ((chunk_origin.y - decor.at.y) * tile_px as f32).round() as i32 - DECOR_CELL as i32 / 2;
@@ -1016,6 +1101,24 @@ mod tests {
             }
         }
         (whole, width, height)
+    }
+
+    /// L'eau est peinte en bleu, un pont en brun, tuile par tuile et sans transparence.
+    #[test]
+    fn water_is_painted_blue_and_a_bridge_brown() {
+        let room = Room::from_rows(&["....", ".~~.", ".==.", "...."]);
+        let tile_px = TILE_CELL as usize;
+        let paint = |x: u32, y: u32| {
+            let mut pixels = vec![0u8; tile_px * tile_px * 4];
+            paint_liquid(&room, x, y, &mut pixels, 0, tile_px, tile_px);
+            assert!(pixels.chunks(4).all(|p| p[3] == 255), "opaque");
+            let center = (tile_px / 2 * tile_px + tile_px / 2) * 4;
+            (pixels[center] as i32, pixels[center + 1] as i32, pixels[center + 2] as i32)
+        };
+        let (r, g, b) = paint(1, 2);
+        assert!(b > r && b > g, "l'eau est bleue: {r} {g} {b}");
+        let (r, g, b) = paint(1, 1);
+        assert!(r > b && r >= g, "le pont est brun: {r} {g} {b}");
     }
 
     #[test]

@@ -649,6 +649,11 @@ fn auto_switch(
     }
 }
 
+/// La zone qui arrête les héros autour d'un corps de demi-taille `half`, plus une marge (voir `firstperson::BODY_MARGIN`).
+fn body_solid(half: f32, margin: f32) -> Vec2 {
+    Vec2::splat(half + margin)
+}
+
 fn move_players(
     time: Res<Time>,
     room: Res<Room>,
@@ -657,11 +662,8 @@ fn move_players(
     mut players: Query<(&mut Position, &MoveDir, &HeroClass), (With<Player>, Without<Downed>)>,
 ) {
     // Portes, monstres et générateurs arrêtent les héros; les héros se traversent entre eux.
-    let solids: Vec<_> = doors
-        .iter()
-        .map(|(p, s)| (p.0, s.0))
-        .chain(bodies.iter().map(|(p, h)| (p.0, Vec2::splat(h.0))))
-        .collect();
+    let margin = crate::firstperson::body_margin();
+    let solids: Vec<_> = doors.iter().map(|(p, s)| (p.0, s.0)).chain(bodies.iter().map(|(p, h)| (p.0, body_solid(h.0, margin)))).collect();
     for (mut pos, dir, class) in &mut players {
         if dir.0 == Vec2::ZERO {
             continue;
@@ -773,7 +775,7 @@ fn move_projectiles(
                 continue;
             }
         }
-        if lifetime.0 <= 0.0 || room.overlaps_wall(next, PROJECTILE_RADIUS) {
+        if lifetime.0 <= 0.0 || room.overlaps_opaque(next, PROJECTILE_RADIUS) {
             commands.entity(entity).despawn();
             continue;
         }
@@ -1069,7 +1071,7 @@ fn update_mechanism_quests(interactables: Query<&Interactable>, mut quests: Quer
 fn open_exit(
     mut commands: Commands,
     mut quests: Query<&mut Quest>,
-    mut exits: Query<&mut LevelExit>,
+    mut exits: Query<(Entity, &mut LevelExit)>,
     interactables: Query<&Interactable>,
     remaining: Query<(), Or<(With<Monster>, With<Generator>)>>,
     bosses: Query<(), With<boss::BossBrain>>,
@@ -1087,9 +1089,11 @@ fn open_exit(
     // Dans un combat de boss, la sortie reste fermée tant que le boss est debout.
     let fight_done = bosses.is_empty();
     let done = quests_done && mechanisms_done && fight_done;
-    for mut exit in &mut exits {
+    for (entity, mut exit) in &mut exits {
         if done && !exit.open {
             exit.open = true;
+            // Un pont réparé (ou toute sortie qui barrait le passage) laisse passer.
+            commands.entity(entity).remove::<Solid>();
             commands.trigger(ScreenShake(0.5));
         }
     }
@@ -1570,6 +1574,19 @@ fn plan_level(dungeon: &Dungeon, name: &str, region: Region, level: u32, rng: &m
 }
 
 /// Pose un niveau dans le monde: ses éléments, ses portes et son objectif.
+/// Le sens d'un pont cassé posé au coin de tuiles `corner`: vrai s'il va du nord au sud, c'est-à-dire si de l'eau le borde à l'ouest ou à l'est
+/// (sinon il va de l'ouest à l'est, comme son modèle).
+fn bridge_runs_north_south(room: &Room, corner: Vec2) -> bool {
+    let (x, y) = (corner.x as i32, corner.y as i32);
+    [(x - 2, y - 1), (x - 2, y), (x + 1, y - 1), (x + 1, y)].iter().any(|(tx, ty)| room.tile(*tx, *ty) == Tile::Water)
+}
+
+/// Le sens d'un pont cassé: son modèle va de l'ouest à l'est; `vertical`, il est tourné pour aller du nord au sud.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct ExitAxis {
+    pub vertical: bool,
+}
+
 fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool, prologue: bool, seed: u64) {
     info!("new expedition: level {level} ({}), region {:?}", def.name, def.region);
     commands.spawn((WorldEntity, Expedition { seed, region: def.region, level }));
@@ -1641,6 +1658,19 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
                 // Invisible: pas répliquée; une zone plus large que le rayon d'un escalier, pour un chemin.
                 let reach = Vec2::splat(HIDDEN_EXIT_REACH);
                 commands.spawn((LevelExit { kind: ExitKind::Hidden, open: false }, ExitArea { min: pos - reach, max: pos + reach }, Position(pos)));
+            }
+            Thing::Exit { kind: ExitKind::Bridge, at } => {
+                // Le pont cassé couvre un pont de deux tuiles de large: il se cale sur le bloc de deux sur deux qui contient le plus de pont, et
+                // le barre tant qu'il n'est pas réparé.
+                let room = def.to_dungeon().ok().map(|dungeon| dungeon.room);
+                let corner = room.as_ref().map_or(at.round(), |room| room.bridge_block_corner(*at));
+                commands.spawn((
+                    WorldEntity,
+                    LevelExit { kind: ExitKind::Bridge, open: false },
+                    Position(def.world(corner)),
+                    Solid(Vec2::splat(TILE_SIZE)),
+                    ExitAxis { vertical: room.as_ref().is_some_and(|room| bridge_runs_north_south(room, corner)) },
+                ));
             }
             Thing::Exit { kind, .. } => {
                 commands.spawn((WorldEntity, LevelExit { kind: *kind, open: false }, Position(pos)));
@@ -2707,7 +2737,7 @@ fn hero_ai(
             .filter(|(d, e)| {
                 *d <= class.tuning().companion_aggro
                     && leader.is_none_or(|l| l.distance(*e) <= class.tuning().companion_group_radius)
-                    && room.segment_clear(pos.0, *e, 1.0)
+                    && room.segment_clear_sight(pos.0, *e, 1.0)
             })
             .min_by(|a, b| a.0.total_cmp(&b.0));
 
@@ -3009,6 +3039,68 @@ mod tests {
         let end = app.world().get::<Position>(companion).unwrap().0;
         assert!(end.distance(slot) < 20.0, "mais il a bien rejoint sa place: {end:?} pour {slot:?}");
         assert_eq!(app.world().get::<Health>(companion).unwrap().current, 100.0);
+    }
+
+    /// Un pont cassé barre le passage (un obstacle de deux tuiles sur deux) tant qu'il n'est pas réparé; réparé, il laisse passer.
+    #[test]
+    fn a_broken_bridge_blocks_until_it_is_repaired() {
+        let mut app = app_with_time();
+        app.add_systems(Update, open_exit);
+        let bridge = app.world_mut().spawn((LevelExit { kind: ExitKind::Bridge, open: false }, Solid(Vec2::splat(TILE_SIZE)), Position(Vec2::ZERO))).id();
+        // Il reste un monstre: la sortie, donc le pont, reste fermée et bloque.
+        let monster = app.world_mut().spawn((Monster(MonsterKind::Goblin), Position(Vec2::ZERO))).id();
+        app.update();
+        assert!(!app.world().get::<LevelExit>(bridge).unwrap().open);
+        assert!(app.world().get::<Solid>(bridge).is_some(), "le pont cassé barre le passage");
+        app.world_mut().despawn(monster);
+        app.update();
+        assert!(app.world().get::<LevelExit>(bridge).unwrap().open);
+        assert!(app.world().get::<Solid>(bridge).is_none(), "le pont réparé laisse passer");
+    }
+
+    /// Le sens d'un pont cassé se lit sur l'eau qui le borde: de chaque côté du tablier de deux tuiles.
+    #[test]
+    fn a_broken_bridge_follows_the_water_beside_it() {
+        let paint = |def: &mut LevelDef, x: i32, y: i32, c: char| {
+            let row = (def.size.y as i32 - 1 - y) as usize;
+            let mut chars: Vec<char> = def.rows[row].chars().collect();
+            chars[x as usize] = c;
+            def.rows[row] = chars.into_iter().collect();
+        };
+        let mut base = castle_shared::level_def(1).clone();
+        let (cx, cy) = (30, 30);
+        for y in cy - 4..=cy + 4 {
+            for x in cx - 4..=cx + 4 {
+                paint(&mut base, x, y, '.');
+            }
+        }
+        // Rivière nord-sud, de part et d'autre d'un pont de deux tuiles.
+        let mut vertical = base.clone();
+        for y in cy - 4..=cy + 4 {
+            paint(&mut vertical, cx - 2, y, '~');
+            paint(&mut vertical, cx + 1, y, '~');
+        }
+        assert!(bridge_runs_north_south(&vertical.to_dungeon().unwrap().room, Vec2::new(cx as f32, cy as f32)));
+        // Rivière ouest-est.
+        let mut horizontal = base;
+        for x in cx - 4..=cx + 4 {
+            paint(&mut horizontal, x, cy - 2, '~');
+            paint(&mut horizontal, x, cy + 1, '~');
+        }
+        assert!(!bridge_runs_north_south(&horizontal.to_dungeon().unwrap().room, Vec2::new(cx as f32, cy as f32)));
+    }
+
+    /// À la première personne, la zone qui arrête un héros autour d'un corps est plus grande, mais toujours à portée de frappe du monstre.
+    #[test]
+    fn first_person_keeps_heroes_a_little_farther_from_bodies() {
+        let half = MonsterKind::Orc.stats().half_size;
+        assert_eq!(body_solid(half, 0.0), Vec2::splat(half));
+        let farther = body_solid(half, crate::firstperson::BODY_MARGIN);
+        assert!(farther.x > half);
+        // Le héros s'arrête à (zone + sa demi-taille) du centre du monstre; celui-ci frappe jusqu'à (demi-taille + celle du héros + marge).
+        let stop = farther.x + HERO_HALF_SIZE;
+        let reach = half + HERO_HALF_SIZE + balance().rules.monster_reach_slack;
+        assert!(stop <= reach, "le monstre doit encore toucher le héros: {stop} contre {reach}");
     }
 
     /// Un compagnon qui peut manger (il lui manque une ration de PV) va chercher la nourriture proche, pas celle qui est loin; un compagnon en

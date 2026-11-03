@@ -272,7 +272,7 @@ fn release(removed: On<Remove<Live3d>>, models: Query<&Live3d>, mut commands: Co
 fn animate(
     mut commands: Commands,
     time: Res<Time>,
-    mut models: Query<(Entity, &mut Live3d, Option<&WalkCycle>, Option<&crate::Facing>, Option<&Prop>, Option<&LevelExit>, Option<&ModelTint>, &InheritedVisibility)>,
+    mut models: Query<(Entity, &mut Live3d, Option<&WalkCycle>, Option<&crate::Facing>, Option<&Prop>, Option<&LevelExit>, Option<&ModelTint>, &InheritedVisibility, Option<&crate::sim::ExitAxis>)>,
     mut transforms: Query<&mut Transform>,
     mut shown: Query<&mut Visibility>,
     mut caches: ResMut<Caches>,
@@ -285,7 +285,7 @@ fn animate(
     let tuning = &active.0;
     let caches = &mut *caches;
     let shader = crate::settings::model_shader();
-    for (entity, mut live, cycle, facing, prop, exit, tint, visible) in &mut models {
+    for (entity, mut live, cycle, facing, prop, exit, tint, visible, axis) in &mut models {
         let anim = match cycle {
             Some(cycle) => {
                 let (kind, t) = cycle.pose;
@@ -319,7 +319,14 @@ fn animate(
         let yaw = look.x.atan2(-look.y);
         let at = transforms.get(entity).map(|at| at.translation.truncate()).unwrap_or_default();
         if let Ok(mut root) = transforms.get_mut(live.root) {
-            root.rotation = if cycle.is_some() { Quat::from_rotation_y(yaw) } else { Quat::IDENTITY };
+            root.rotation = if cycle.is_some() {
+                Quat::from_rotation_y(yaw)
+            } else if axis.is_some_and(|axis| axis.vertical) {
+                // Un pont du nord au sud: son modèle (ouest-est) est tourné d'un quart de tour.
+                Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)
+            } else {
+                Quat::IDENTITY
+            };
             // Sur le sol à la position du personnage (le nord est -z), à l'échelle du monde.
             root.translation = Vec3::new(at.x, 0.0, -at.y);
             root.scale = Vec3::splat(live.scale);

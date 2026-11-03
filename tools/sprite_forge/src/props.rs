@@ -778,44 +778,46 @@ fn gate(open: bool, t: f32) -> Vec<Part> {
     p
 }
 
-/// Le pont du marais, de planches sur l'eau noire: brisé (les planches du milieu manquent, des débris flottent) ou réparé
-/// (planches neuves, claires). Des cordes courent le long de poteaux.
+/// Le pont cassé: un trou béant au milieu du pont, sur deux tuiles de large et deux de long (le pont va de l'ouest à l'est, le trou s'ouvre
+/// sur toute sa largeur). Le tablier y manque et on voit l'eau, bordée de bouts de planches brisés qui pendent vers le vide. Réparé, des planches neuves
+/// le comblent. Le sol, lui, est le pont à corde du décor (`client/src/decor3d/water.rs`): le trou et lui sont dans le même bois.
 fn bridge(repaired: bool, t: f32) -> Vec<Part> {
+    let _ = t;
     let mut p = Vec::new();
-    // L'eau en dessous, qui ondule un peu.
-    p.push(shiny(ellipsoid(Vec3::new(0.0, 0.02, 0.1), Vec3::new(1.35, 0.02, 0.85), 0x1e3f42), 0.9));
-    p.push(shiny(ellipsoid(Vec3::new(-0.3 + 0.1 * (t * TAU).sin(), 0.04, 0.35), Vec3::new(0.35, 0.012, 0.12), 0x4a8a84), 0.9));
-    for k in 0..15 {
-        let x = -1.0 + k as f32 * (2.0 / 14.0);
-        let middle = x.abs() < 0.42;
-        if middle && !repaired {
-            continue;
-        }
-        let color = if middle { WOOD_L } else if k % 2 == 0 { WOOD } else { WOOD_D };
-        p.push(shiny(block(Vec3::new(x, 0.22, 0.0), Vec3::new(0.065, 0.03, 0.42), Mat3::IDENTITY, color), 0.2));
-    }
-    // Poutres longitudinales sous les planches (aux deux bouts quand le pont est brisé).
-    for x in [-0.72f32, 0.72] {
-        p.push(block(Vec3::new(x, 0.15, 0.0), Vec3::new(0.3, 0.04, 0.3), Mat3::IDENTITY, WOOD_D));
-    }
+    let half = 0.65f32;
     if repaired {
-        p.push(block(Vec3::new(0.0, 0.15, 0.0), Vec3::new(0.45, 0.04, 0.3), Mat3::IDENTITY, WOOD_L));
-    } else {
-        // Planches cassées qui flottent, et deux moignons de bois.
-        p.push(shiny(block(Vec3::new(0.15, 0.06, 0.25), Vec3::new(0.2, 0.025, 0.07), Mat3::from_rotation_y(0.4), WOOD_D), 0.2));
-        p.push(shiny(block(Vec3::new(-0.2, 0.06, 0.05), Vec3::new(0.18, 0.025, 0.07), Mat3::from_rotation_y(-0.3), WOOD), 0.2));
-        for x in [-0.42f32, 0.42] {
-            p.push(block(Vec3::new(x, 0.2, 0.0), Vec3::new(0.02, 0.05, 0.4), Mat3::from_rotation_z(x.signum() * 0.5), WOOD_D));
+        // Cinq planches neuves, plus claires que celles du pont, qui comblent le trou.
+        for k in 0..5 {
+            let x = -half + 0.13 + k as f32 * 0.26;
+            p.push(shiny(block(Vec3::new(x, 0.075, 0.0), Vec3::new(0.115, 0.03, half), Mat3::IDENTITY, WOOD_L), 0.2));
+        }
+        return p;
+    }
+    // Le vide: rien du tout. L'eau animée du décor se voit à travers (voir `client/src/decor3d/water.rs`).
+    // Les bords brisés: des bouts de planches de longueurs inégales qui avancent dans le vide et s'affaissent, de chaque côté.
+    let lengths = [[0.20f32, 0.10, 0.24, 0.14], [0.12, 0.22, 0.09, 0.2]];
+    for (side, sg) in [-1.0f32, 1.0].into_iter().enumerate() {
+        for (k, z) in [-0.5f32, -0.17, 0.17, 0.5].into_iter().enumerate() {
+            let length = lengths[side][k];
+            let turn = (k as f32 - 1.5) * 0.09 * sg;
+            let color = if (k + side) % 2 == 0 { WOOD } else { WOOD_D };
+            // Le bout est le long du bord du trou, et penche vers l'intérieur.
+            p.push(shiny(
+                block(
+                    Vec3::new(sg * (half - length / 2.0 + 0.02), 0.05, z),
+                    Vec3::new(length / 2.0, 0.03, 0.1),
+                    Mat3::from_rotation_y(turn) * Mat3::from_rotation_z(sg * -0.18),
+                    color,
+                ),
+                0.2,
+            ));
         }
     }
-    // Poteaux d'angle et cordes de garde-corps.
-    for sx in [-1.0f32, 1.0] {
-        for sz in [-1.0f32, 1.0] {
-            p.extend(log(sx * 1.05, sz * 0.4, 0.75, 0.05, WOOD_D));
-        }
-    }
-    for sz in [-1.0f32, 1.0] {
-        p.push(limb(Vec3::new(-1.05, 0.62, sz * 0.4), Vec3::new(1.05, 0.62 - 0.02 * if repaired { 0.0 } else { 3.0 }, sz * 0.4), 0.014, ROPE));
+    // Deux planches presque détachées, qui pendent dans le trou, et des éclats.
+    p.push(shiny(block(Vec3::new(0.5, 0.02, -0.4), Vec3::new(0.2, 0.025, 0.07), Mat3::from_rotation_y(0.5) * Mat3::from_rotation_z(-0.7), WOOD_D), 0.2));
+    p.push(shiny(block(Vec3::new(-0.48, 0.02, 0.38), Vec3::new(0.18, 0.025, 0.07), Mat3::from_rotation_y(-0.4) * Mat3::from_rotation_z(0.7), WOOD), 0.2));
+    for (x, z, turn) in [(0.12f32, 0.3f32, 0.9f32), (-0.1, -0.15, -0.5), (0.25, -0.05, 0.2)] {
+        p.push(shiny(block(Vec3::new(x, 0.08, z), Vec3::new(0.06, 0.015, 0.025), Mat3::from_rotation_y(turn), WOOD_D), 0.2));
     }
     p
 }
@@ -968,20 +970,6 @@ pub fn build_exit(prop: Prop, t: f32, theme: Theme) -> Vec<Part> {
             }
             // Le sentier de terre devant la barrière.
             parts.push(block(Vec3::new(0.0, 0.01, 1.4), Vec3::new(1.5, 0.012, 1.0), Mat3::IDENTITY, 0x7a5c38));
-        }
-        Prop::BridgeBroken | Prop::BridgeRepaired => {
-            // Rochers des berges, roseaux, et une lanterne à chaque bout.
-            for sg in [-1.0f32, 1.0] {
-                for (dx, r) in [(0.0f32, 0.42f32), (0.45, 0.3), (-0.4, 0.26)] {
-                    parts.push(shiny(ellipsoid(Vec3::new(sg * (2.15 + dx * 0.3), 0.18, -0.9 + dx), Vec3::new(r, r * 0.7, r * 0.9), STONE), 0.3));
-                }
-                for k in 0..6 {
-                    let x = sg * (2.0 + k as f32 * 0.07) + 0.1;
-                    parts.push(cone(Vec3::new(x, 0.0, 0.9), Vec3::new(x + 0.05 * (k % 2) as f32, 0.7 + 0.12 * (k % 3) as f32, 0.9), 0.03, 0.005, 0x4a6a2c));
-                }
-                let flicker = 1.0 + 0.2 * (t * TAU * 3.0 + sg).sin();
-                parts.push(glow(ball(Vec3::new(sg * 1.95, 1.65, 0.7), 0.09 * flicker, 0xffb040)));
-            }
         }
         Prop::DrawbridgeRaised | Prop::DrawbridgeLowered => {
             // Deux tours de pierre à créneaux, avec bannières et torches.
