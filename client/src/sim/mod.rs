@@ -307,6 +307,7 @@ impl Plugin for SimPlugin {
             .add_observer(spawn_party)
             .add_observer(switch_hero)
             .add_observer(set_pause)
+            .add_observer(reload_level)
             .add_observer(apply_input)
             .add_observer(continue_level)
             .add_observer(dialogue_advance)
@@ -324,6 +325,10 @@ pub fn in_game(campaign: Option<Res<Campaign>>) -> bool {
 /// Faut-il jouer le prologue de Samélia avant d'entrer dans la partie de ce nom? Oui pour une partie neuve, ou dont l'introduction du
 /// premier niveau n'a pas été vue.
 pub fn needs_prologue(save_name: &str) -> bool {
+    // L'aperçu de l'éditeur de niveaux va droit au niveau.
+    if crate::editor_view::active() {
+        return false;
+    }
     save::load(save_name).is_none_or(|save| save.level == 1 && !save.intro_done)
 }
 
@@ -1294,6 +1299,35 @@ fn check_wipe(
     commands.insert_resource(dungeon.layout);
 }
 
+/// Recharge le niveau `level` tel qu'il est décrit maintenant, à la place du niveau en cours (l'aperçu de l'éditeur de niveaux).
+#[derive(Event, Clone, Copy, Debug)]
+pub struct ReloadLevel(pub u32);
+
+fn reload_level(
+    request: On<ReloadLevel>,
+    mut commands: Commands,
+    mut rng: ResMut<Rng>,
+    mut session: ResMut<DialogueSession>,
+    mut campaign: ResMut<Campaign>,
+    played: Res<ProloguePlayed>,
+    level: Option<ResMut<Level>>,
+    mut players: Query<&mut Position, With<Player>>,
+    world: Query<Entity, (Or<(With<WorldEntity>, With<LevelExit>)>, Without<Player>)>,
+    triggers: Query<Entity, With<DialogueTrigger>>,
+) {
+    let Some(mut level) = level else {
+        return;
+    };
+    campaign.0.level = request.0;
+    level.0 = request.0;
+    let dungeon = generate_level(&mut commands, &mut rng, &campaign, &mut session, &played, world.iter().chain(triggers.iter()));
+    for (slot, mut pos) in players.iter_mut().enumerate() {
+        pos.0 = spawn_point(slot, &dungeon.layout, &dungeon.room);
+    }
+    commands.insert_resource(dungeon.room);
+    commands.insert_resource(dungeon.layout);
+}
+
 /// Point d'apparition d'un héros dans la salle de départ: quatre par rangée.
 fn spawn_point(slot: usize, layout: &Layout, room: &Room) -> Vec2 {
     // Option de développement: `CASTLE_DEBUG_START=royal` fait apparaître l'équipe dans l'antichambre de la porte royale,
@@ -1394,40 +1428,7 @@ const RESCUE_RANGE: f32 = 22.0;
 
 /// Scènes de dialogue qu'un niveau peut déclencher (les noms sont des chaînes dans les fichiers de niveau).
 fn dialogue_node(name: &str) -> Option<&'static str> {
-    [
-        "prologue",
-        "intro",
-        "royal_door",
-        "alcove",
-        "puzzle_target",
-        "puzzle_rune",
-        "puzzle_gears",
-        "bridge_intro",
-        "bridge_panel",
-        "drawbridge_intro",
-        "drawbridge_panel",
-        "gate_intro",
-        "gate_panel",
-        "castle_intro",
-        "knight_intro",
-        "knight_door",
-        "boss_warg",
-        "boss_troll",
-        "boss_muldant",
-        "samelia_freed",
-        "samelia_taken",
-        "elves_dawn",
-        "boss_gardener",
-        "samelia_rescued",
-        "gate_farewell",
-        "heart_reveal",
-        "rope_intro",
-        "rope_panel",
-        "courtyard_intro",
-        "courtyard_panel",
-    ]
-    .into_iter()
-    .find(|n| *n == name)
+    castle_shared::DIALOGUE_NODES.into_iter().find(|n| *n == name)
 }
 
 /// Compose un niveau à partir d'un château généré: tous les tirages au sort (générateurs, monstres, pièges, trésor, butin,
@@ -1581,6 +1582,10 @@ fn bridge_runs_north_south(room: &Room, corner: Vec2) -> bool {
     [(x - 2, y - 1), (x - 2, y), (x + 1, y - 1), (x + 1, y)].iter().any(|(tx, ty)| room.tile(*tx, *ty) == Tile::Water)
 }
 
+/// Un obstacle posé par `Thing::Barrier`: il s'ouvre avec l'objectif du niveau, mais n'est pas la sortie.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Barrier;
+
 /// Le sens d'un pont cassé: son modèle va de l'ouest à l'est; `vertical`, il est tourné pour aller du nord au sud.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct ExitAxis {
@@ -1659,18 +1664,24 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
                 let reach = Vec2::splat(HIDDEN_EXIT_REACH);
                 commands.spawn((LevelExit { kind: ExitKind::Hidden, open: false }, ExitArea { min: pos - reach, max: pos + reach }, Position(pos)));
             }
-            Thing::Exit { kind: ExitKind::Bridge, at } => {
+            Thing::Exit { kind: ExitKind::Bridge, at } | Thing::Barrier { kind: ExitKind::Bridge, at } => {
                 // Le pont cassé couvre un pont de deux tuiles de large: il se cale sur le bloc de deux sur deux qui contient le plus de pont, et
                 // le barre tant qu'il n'est pas réparé.
                 let room = def.to_dungeon().ok().map(|dungeon| dungeon.room);
                 let corner = room.as_ref().map_or(at.round(), |room| room.bridge_block_corner(*at));
-                commands.spawn((
+                let mut bridge = commands.spawn((
                     WorldEntity,
                     LevelExit { kind: ExitKind::Bridge, open: false },
                     Position(def.world(corner)),
                     Solid(Vec2::splat(TILE_SIZE)),
                     ExitAxis { vertical: room.as_ref().is_some_and(|room| bridge_runs_north_south(room, corner)) },
                 ));
+                if matches!(thing, Thing::Barrier { .. }) {
+                    bridge.insert(Barrier);
+                }
+            }
+            Thing::Barrier { kind, .. } => {
+                commands.spawn((WorldEntity, LevelExit { kind: *kind, open: false }, Barrier, Position(pos), Solid(Vec2::splat(TILE_SIZE))));
             }
             Thing::Exit { kind, .. } => {
                 commands.spawn((WorldEntity, LevelExit { kind: *kind, open: false }, Position(pos)));
@@ -2004,7 +2015,7 @@ fn run_exit(
     mut transition: ResMut<Transition>,
     mut stats: ResMut<LevelStats>,
     clients: Query<(Entity, Has<Ready>), With<ActiveHero>>,
-    exits: Query<(&Position, &LevelExit, Option<&ExitArea>), Without<Player>>,
+    exits: Query<(&Position, &LevelExit, Option<&ExitArea>), (Without<Player>, Without<Barrier>)>,
     mut players: Query<
         (Entity, &mut Position, &mut Health, &PartyId, &Gold, &Keys, Has<Downed>, Has<Controlled>),
         With<Player>,
@@ -3728,7 +3739,7 @@ mod tests {
             app.update();
             let exit = {
                 let world = app.world_mut();
-                let mut query = world.query::<(&Position, &LevelExit)>();
+                let mut query = world.query_filtered::<(&Position, &LevelExit), Without<Barrier>>();
                 let found: Vec<_> = query.iter(world).map(|(p, e)| (p.0, e.open)).collect();
                 assert_eq!(found.len(), 1, "niveau {level}: une seule sortie");
                 found[0].0

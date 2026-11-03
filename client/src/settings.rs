@@ -68,6 +68,10 @@ impl Channel {
 
 /// Le volume réglé pour ce canal, de 0.0 à 1.0.
 pub fn volume(channel: Channel) -> f32 {
+    // L'aperçu de l'éditeur de niveaux est muet.
+    if crate::editor_view::active() {
+        return 0.0;
+    }
     f32::from(VOLUMES[channel.index()].load(Ordering::Relaxed)) / 10.0
 }
 

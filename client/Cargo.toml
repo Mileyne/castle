@@ -9,6 +9,8 @@ default-run = "castle_client"
 profile = ["bevy/trace_chrome"]
 # Apple TV (la cible tvOS est déclarée `os = "ios"`: seule cette option la distingue de l'iPhone). Posée par `tvos/build.sh`.
 tvos = []
+# L'éditeur de niveaux (`castle_editor`): le jeu lui-même, avec des panneaux egui par-dessus. `cargo run --release -p castle_client --features editor --bin castle_editor`
+editor = ["dep:bevy_egui"]
 
 [dependencies]
 castle_shared = { path = "../shared" }
@@ -21,6 +23,7 @@ fluent_content = "0.0.5"
 unic-langid = { version = "0.9", features = ["macros"] }
 sys-locale = "0.3"
 sprite_forge = { path = "../tools/sprite_forge" }
+bevy_egui = { version = "0.43.1", optional = true, default-features = false, features = ["render", "default_fonts", "manage_clipboard"] }
 
 # Manettes sur iOS / tvOS (framework GameController): voir gamecontroller.rs.
 [target.'cfg(target_os = "ios")'.dependencies]
@@ -29,3 +32,8 @@ objc2 = "0.6"
 [dev-dependencies]
 basis-universal = "0.3"
 png = "0.17"
+
+[[bin]]
+name = "castle_editor"
+path = "src/bin/editor.rs"
+required-features = ["editor"]

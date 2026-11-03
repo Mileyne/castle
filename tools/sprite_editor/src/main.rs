@@ -7,14 +7,11 @@
 //!
 //! - **Équilibrage**: points de vie, attaques, apparitions, butin, pièges, pouvoirs et compagnons (`shared/balance.ron`).
 //!
-//! - **Niveaux**: les niveaux de la campagne (`shared/levels/`): murs et sol, éléments posés, zones, objectif, et un
-//!   bouton pour les essayer dans le jeu sans recompiler.
+//! Les niveaux de la campagne s'éditent dans le jeu lui-même: `./editeur.sh` (voir `client/src/editor/`).
 //!
 //! « Appliquer au jeu » enregistre puis régénère les planches du thème dans `client/assets/art/`.
 
 mod balance;
-mod level_art;
-mod levels;
 mod sprites;
 mod tiles;
 
@@ -28,7 +25,6 @@ use sprite_forge::Theme;
 enum Tab {
     Tiles,
     Sprites,
-    Levels,
     Balance,
 }
 
@@ -38,7 +34,6 @@ struct App {
     status: String,
     tiles: tiles::TilesTab,
     sprites: sprites::SpritesTab,
-    levels: levels::LevelsTab,
     balance: balance::BalanceTab,
     /// Génération des planches en cours: le message final arrive ici.
     job: Option<Receiver<String>>,
@@ -58,8 +53,6 @@ impl App {
             theme,
             tab: if std::env::args().any(|a| a == "--tuiles") {
                 Tab::Tiles
-            } else if std::env::args().any(|a| a == "--niveaux") {
-                Tab::Levels
             } else if std::env::args().any(|a| a == "--equilibrage") {
                 Tab::Balance
             } else {
@@ -68,7 +61,6 @@ impl App {
             status: "Prêt".into(),
             tiles: tiles::TilesTab::new(),
             sprites: sprites::SpritesTab::new(theme),
-            levels: levels::LevelsTab::new(repo.clone()),
             balance: balance::BalanceTab::new(repo.clone()),
             job: None,
             repo,
@@ -76,11 +68,11 @@ impl App {
     }
 
     fn dirty(&self) -> bool {
-        self.tiles.dirty() || self.sprites.dirty() || self.levels.dirty() || self.balance.dirty()
+        self.tiles.dirty() || self.sprites.dirty() || self.balance.dirty()
     }
 
     fn save(&mut self) -> bool {
-        let result = self.sprites.save(self.theme).and_then(|()| self.tiles.save(self.theme)).and_then(|()| self.levels.save()).and_then(|()| self.balance.save());
+        let result = self.sprites.save(self.theme).and_then(|()| self.tiles.save(self.theme)).and_then(|()| self.balance.save());
         match result {
             Ok(()) => {
                 self.status = "Enregistré".into();
@@ -135,7 +127,6 @@ impl eframe::App for App {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.tab, Tab::Sprites, "Sprites");
                 ui.selectable_value(&mut self.tab, Tab::Tiles, "Tuiles");
-                ui.selectable_value(&mut self.tab, Tab::Levels, "Niveaux");
                 ui.selectable_value(&mut self.tab, Tab::Balance, "Équilibrage");
                 ui.separator();
                 let dirty = self.dirty();
@@ -173,7 +164,6 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ui, |ui| match self.tab {
             Tab::Sprites => self.sprites.ui(ui, self.theme, busy),
             Tab::Tiles => self.tiles.ui(ui, self.theme),
-            Tab::Levels => self.levels.ui(ui),
             Tab::Balance => self.balance.ui(ui),
         });
     }

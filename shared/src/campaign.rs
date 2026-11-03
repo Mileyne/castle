@@ -51,12 +51,29 @@ pub fn level_file(level: u32) -> String {
     format!("{:02}.ron", level.clamp(1, LEVEL_COUNT))
 }
 
+/// Les niveaux remplacés pendant que le jeu tourne (l'aperçu de l'éditeur de niveaux). Chaque remplacement est gardé jusqu'à la fin du
+/// programme: l'aperçu est un outil de développement, pas du jeu normal.
+fn overrides() -> &'static std::sync::Mutex<std::collections::HashMap<u32, &'static LevelDef>> {
+    static OVERRIDES: OnceLock<std::sync::Mutex<std::collections::HashMap<u32, &'static LevelDef>>> = OnceLock::new();
+    OVERRIDES.get_or_init(Default::default)
+}
+
+/// Remplace le niveau `level` par `def` jusqu'à la fin du programme.
+pub fn override_level(level: u32, def: LevelDef) {
+    if let Ok(mut map) = overrides().lock() {
+        map.insert(level.clamp(1, LEVEL_COUNT), Box::leak(Box::new(def)));
+    }
+}
+
 /// Le niveau `level` de la campagne (au-delà du dernier, on reste sur le dernier).
 ///
 /// Pour essayer des niveaux en cours d'édition sans recompiler, `CASTLE_LEVELS_DIR=<dossier>` fait lire les fichiers de ce
 /// dossier à la place de ceux du programme (le serveur lancé par le client hérite de la variable); un fichier absent ou
 /// illisible retombe sur celui du programme.
 pub fn level_def(level: u32) -> &'static LevelDef {
+    if let Some(def) = overrides().lock().ok().and_then(|map| map.get(&level.clamp(1, LEVEL_COUNT)).copied()) {
+        return def;
+    }
     static LEVELS: OnceLock<Vec<LevelDef>> = OnceLock::new();
     let levels = LEVELS.get_or_init(|| {
         let dir = std::env::var_os("CASTLE_LEVELS_DIR").map(std::path::PathBuf::from);

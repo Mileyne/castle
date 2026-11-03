@@ -9,8 +9,61 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Dungeon, ExitKind, InteractKind, Layout, MonsterKind, PickupKind, QuestKind, Region, Room, RoomKind, TILE_SIZE, Tile,
+    Dungeon, ExitKind, INGREDIENTS_NEEDED, InteractKind, Layout, MonsterKind, PickupKind, QuestKind, Region, Room, RoomKind, TILE_SIZE, Tile,
 };
+
+/// Les scènes de dialogue qu'un déclencheur ou un panneau peut jouer.
+pub const DIALOGUE_NODES: [&str; 30] = [
+    "prologue",
+    "intro",
+    "royal_door",
+    "alcove",
+    "puzzle_target",
+    "puzzle_rune",
+    "puzzle_gears",
+    "bridge_intro",
+    "bridge_panel",
+    "drawbridge_intro",
+    "drawbridge_panel",
+    "gate_intro",
+    "gate_panel",
+    "castle_intro",
+    "knight_intro",
+    "knight_door",
+    "boss_warg",
+    "boss_troll",
+    "boss_muldant",
+    "samelia_freed",
+    "samelia_taken",
+    "elves_dawn",
+    "boss_gardener",
+    "samelia_rescued",
+    "gate_farewell",
+    "heart_reveal",
+    "rope_intro",
+    "rope_panel",
+    "courtyard_intro",
+    "courtyard_panel",
+];
+
+/// Une extrémité d'un lien entre éléments d'un niveau.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkEnd {
+    /// Un élément de `things`, par son rang.
+    Thing(usize),
+    /// La sortie du niveau (l'élément `Exit` s'il y en a un, sinon la zone de sortie).
+    Exit,
+    /// Une porte de `layout.connections`, par son rang.
+    Door(usize),
+}
+
+/// Ce qui relie deux éléments, tel que les règles du jeu le font: voir `LevelDef::links`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Link {
+    pub from: LinkEnd,
+    pub to: LinkEnd,
+    pub why: &'static str,
+}
 
 /// Version du format des fichiers de niveau.
 pub const LEVEL_FORMAT: u32 = 1;
@@ -36,6 +89,9 @@ pub enum Thing {
     Panel { kind: InteractKind, at: Vec2, node: String },
     /// Sortie du niveau. Sans elle, la sortie est au centre de la salle de sortie.
     Exit { kind: ExitKind, at: Vec2 },
+    /// Obstacle qui barre un accès (un pont cassé) jusqu'à ce que l'objectif du niveau soit rempli. Ce n'est pas la sortie: elle est
+    /// plus loin, dans la zone de sortie.
+    Barrier { kind: ExitKind, at: Vec2 },
     /// Grand motif (arbre, rocher, colonne, fontaine...) dont le pied bloque le passage.
     Landmark { kind: crate::decor::LandmarkKind, at: Vec2 },
     /// Scène de dialogue déclenchée quand un héros s'approche.
@@ -57,6 +113,7 @@ impl Thing {
             | Self::Portcullis { at, .. }
             | Self::Panel { at, .. }
             | Self::Exit { at, .. }
+            | Self::Barrier { at, .. }
             | Self::Landmark { at, .. }
             | Self::Trigger { at, .. } => *at,
         }
@@ -78,7 +135,7 @@ impl Thing {
             | Self::Landmark { at, .. }
             | Self::Trigger { at, .. } => *at = to,
             // Un pont cassé couvre un pont de deux tuiles de large: il se pose sur un coin de tuiles.
-            Self::Exit { kind, at } => *at = if *kind == ExitKind::Bridge { to.round() } else { to },
+            Self::Exit { kind, at } | Self::Barrier { kind, at } => *at = if *kind == ExitKind::Bridge { to.round() } else { to },
         }
     }
 }
@@ -305,7 +362,7 @@ impl LevelDef {
             }
             let at = thing.at();
             // Un pont cassé couvre un bloc de deux tuiles sur deux de pont (ou de sol): c'est tout ce bloc qui doit être praticable.
-            if let Thing::Exit { kind: ExitKind::Bridge, .. } = thing {
+            if let Thing::Exit { kind: ExitKind::Bridge, .. } | Thing::Barrier { kind: ExitKind::Bridge, .. } = thing {
                 let corner = dungeon.room.bridge_block_corner(at);
                 if !dungeon.room.bridge_block(corner).iter().all(|(x, y)| dungeon.room.tile(*x, *y).walkable()) {
                     problems.push(format!("{thing:?}: le pont cassé doit couvrir un pont de deux tuiles de large"));
@@ -333,8 +390,102 @@ impl LevelDef {
         if !seen[(exit.y * self.size.x + exit.x) as usize] {
             problems.push("la sortie n'est pas atteignable depuis le départ".to_string());
         }
+        problems.extend(self.check_links());
         if rooms[self.layout.start].kind != RoomKind::Start {
             problems.push("la salle de départ n'est pas de genre Start".to_string());
+        }
+        problems
+    }
+
+    /// Les liens entre les éléments, déduits des règles du jeu (il n'y en a pas d'autres, rien n'est écrit dans le fichier):
+    /// ce qu'il faut trouver pour chaque panneau, ce que chaque panneau défait (un accès: herse, enchantement, porte royale), et
+    /// l'objectif du niveau. La sortie, elle, n'est pas un déblocage: on la prend en atteignant sa zone.
+    pub fn links(&self) -> Vec<Link> {
+        use LinkEnd::{Door, Exit, Thing as At};
+        let mut links = Vec::new();
+        let royal = self.layout.connections.iter().position(|c| c.door == Some(crate::DoorKind::Royal));
+        // Ce que l'objectif ouvre: l'obstacle posé sur la carte s'il y en a un, sinon la sortie.
+        let opens = self.things.iter().position(|t| matches!(t, Thing::Barrier { .. })).map_or(Exit, At);
+        for (i, thing) in self.things.iter().enumerate() {
+            match thing {
+                Thing::Pickup { kind, .. } => {
+                    let (wanted, why) = match kind {
+                        PickupKind::GearPart => (InteractKind::Mechanism, "pièce de rechange du mécanisme"),
+                        PickupKind::Ingredient => (InteractKind::Rune, "ingrédient de la rune"),
+                        PickupKind::TargetDisc => (InteractKind::Target, "disque de la cible"),
+                        _ => continue,
+                    };
+                    for (j, other) in self.things.iter().enumerate() {
+                        if matches!(other, Thing::Panel { kind, .. } if *kind == wanted) {
+                            links.push(Link { from: At(i), to: At(j), why });
+                        }
+                    }
+                }
+                Thing::Panel { kind, .. } => {
+                    for (j, other) in self.things.iter().enumerate() {
+                        match (kind, other) {
+                            (InteractKind::Rune, Thing::Ward { .. }) => links.push(Link { from: At(i), to: At(j), why: "dissipe l'enchantement" }),
+                            (InteractKind::Target, Thing::Portcullis { .. }) => links.push(Link { from: At(i), to: At(j), why: "la flèche lève la herse" }),
+                            _ => {}
+                        }
+                    }
+                    if let Some(door) = royal {
+                        links.push(Link { from: At(i), to: Door(door), why: "à terminer avant de pousser la porte royale" });
+                    }
+                    for (j, other) in self.things.iter().enumerate() {
+                        if matches!(other, Thing::Barrier { .. }) {
+                            links.push(Link { from: At(i), to: At(j), why: "à terminer pour débloquer le passage" });
+                        }
+                    }
+                }
+                Thing::Ward { .. } | Thing::Portcullis { .. } => {
+                    if let Some(door) = royal {
+                        links.push(Link { from: At(i), to: Door(door), why: "barre l'accès à la porte royale" });
+                    }
+                }
+                Thing::Relic { .. } => links.push(Link { from: At(i), to: opens, why: "relique de l'objectif" }),
+                Thing::Captive { .. } => links.push(Link { from: At(i), to: opens, why: "prisonnier de l'objectif" }),
+                Thing::Monster { kind, .. } if kind.is_boss() => links.push(Link { from: At(i), to: opens, why: "le boss garde la sortie" }),
+                _ => {}
+            }
+        }
+        links
+    }
+
+    /// Les anomalies des liens: un panneau auquel il manque de quoi agir, une herse que rien ne lève, un enchantement que rien ne dissipe.
+    fn check_links(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        let count = |f: &dyn Fn(&Thing) -> bool| self.things.iter().filter(|t| f(t)).count();
+        let panels = |wanted: InteractKind| count(&|t| matches!(t, Thing::Panel { kind, .. } if *kind == wanted));
+        let pickups = |wanted: PickupKind| count(&|t| matches!(t, Thing::Pickup { kind, .. } if *kind == wanted));
+        for (wanted, pickup, need, what) in [
+            (InteractKind::Mechanism, PickupKind::GearPart, 1, "pièce de mécanisme (orange)"),
+            (InteractKind::Rune, PickupKind::Ingredient, INGREDIENTS_NEEDED as usize, "ingrédient(s) (violet)"),
+            (InteractKind::Target, PickupKind::TargetDisc, 1, "disque de cible (vert)"),
+        ] {
+            let (have, wanted_panels) = (pickups(pickup), panels(wanted));
+            if wanted_panels > 0 && have < need {
+                problems.push(format!("un panneau demande {need} {what}, le niveau n'en contient que {have}"));
+            }
+            if wanted_panels == 0 && have > 0 {
+                problems.push(format!("{have} {what} posé(s), mais aucun panneau ne s'en sert"));
+            }
+        }
+        if count(&|t| matches!(t, Thing::Portcullis { .. })) > 0 && panels(InteractKind::Target) == 0 {
+            problems.push("la herse ne peut être levée que par un panneau de cible (Rôdeur)".to_string());
+        }
+        if count(&|t| matches!(t, Thing::Ward { .. })) > 0 && panels(InteractKind::Rune) == 0 {
+            problems.push("l'enchantement ne peut être dissipé que par un panneau de rune (Ensorceleur)".to_string());
+        }
+        if count(&|t| matches!(t, Thing::Exit { .. })) > 1 {
+            problems.push("plus d'une sortie posée: seule l'une d'elles sera gardée".to_string());
+        }
+        for thing in &self.things {
+            if let Thing::Trigger { node, .. } | Thing::Panel { node, .. } = thing {
+                if !node.is_empty() && !DIALOGUE_NODES.contains(&node.as_str()) {
+                    problems.push(format!("scène inconnue: « {node} »"));
+                }
+            }
         }
         problems
     }
@@ -496,5 +647,35 @@ mod tests {
         let size = UVec2::new(88, 48);
         let at = Vec2::new(12.5, 30.25);
         assert!((LevelDef::tile_in(size, LevelDef::world_in(size, at)) - at).length() < 1e-4);
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+
+    #[test]
+    fn every_campaign_level_has_consistent_links() {
+        for level in 1..=crate::LEVEL_COUNT {
+            let problems = crate::level_def(level).validate();
+            assert!(problems.is_empty(), "niveau {level}: {problems:?}");
+        }
+    }
+
+    #[test]
+    fn panels_link_to_what_they_need_and_what_they_undo() {
+        let mut def = LevelDef::blank("essai", Region::Forest, UVec2::new(32, 20));
+        let at = Vec2::new(5.5, 5.5);
+        def.things = vec![
+            Thing::Panel { kind: InteractKind::Rune, at, node: String::new() },
+            Thing::Ward { at },
+            Thing::Pickup { kind: PickupKind::Ingredient, at },
+        ];
+        let links = def.links();
+        assert!(links.iter().any(|l| l.from == LinkEnd::Thing(2) && l.to == LinkEnd::Thing(0)));
+        assert!(links.iter().any(|l| l.from == LinkEnd::Thing(0) && l.to == LinkEnd::Thing(1)));
+        assert!(!links.iter().any(|l| l.to == LinkEnd::Exit), "un panneau ne débloque pas la sortie");
+        let problems = def.validate();
+        assert!(problems.iter().any(|p| p.contains("ingrédient")), "{problems:?}");
     }
 }

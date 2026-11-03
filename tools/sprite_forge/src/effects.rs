@@ -1,5 +1,4 @@
-//! Projectiles (orbe magique, flèche, tir de tourelle) et effets de coups (croissant d'épée, onde de marteau),
-//! dans les deux thèmes. Les projectiles sont des modèles rendus vers la droite (+X à l'écran); le jeu les tourne.
+//! Projectiles (orbe magique, flèche, tir de tourelle). Les projectiles sont des modèles rendus vers la droite (+X à l'écran); le jeu les tourne.
 
 use std::f32::consts::{FRAC_PI_2, TAU};
 
@@ -8,13 +7,10 @@ use glam::{Mat3, Vec3};
 use crate::render::{Camera, Part, render};
 use crate::shapes::*;
 
-/// Côté d'une case de projectile et d'effet de coup, en pixels.
+/// Côté d'une case de projectile, en pixels.
 pub const PROJECTILE_CELL: usize = 64;
-pub const FX_CELL: usize = 96;
 /// Cases de la planche de projectiles: orbe (2 images), flèche, tir de tourelle.
 pub const PROJECTILES: usize = 4;
-/// Cases de la planche d'effets: croissant d'épée, onde de marteau.
-pub const FX: usize = 2;
 
 
 fn pointing(parts: &[Part]) -> Vec<[f32; 4]> {
@@ -66,56 +62,4 @@ pub fn projectile(theme: Theme, index: usize) -> Vec<[f32; 4]> {
         }
     };
     pointing(&parts)
-}
-
-fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
-    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
-/// Peint une case de `FX_CELL` pixels: `shade(x, y)` donne la couleur et l'opacité de chaque pixel.
-fn paint(shade: impl Fn(f32, f32) -> [f32; 4]) -> Vec<[f32; 4]> {
-    let mut img = vec![[0.0; 4]; FX_CELL * FX_CELL];
-    for y in 0..FX_CELL {
-        for x in 0..FX_CELL {
-            img[y * FX_CELL + x] = shade(x as f32 + 0.5, y as f32 + 0.5);
-        }
-    }
-    img
-}
-
-/// Croissant lumineux devant le héros: centré à gauche, ouvert vers la droite.
-pub fn slash(_theme: Theme) -> Vec<[f32; 4]> {
-    paint(|x, y| {
-        let (dx, dy) = (x - 6.0, y - 48.0);
-        let d = (dx * dx + dy * dy).sqrt();
-        let angle = dy.atan2(dx).abs().to_degrees();
-        // Épaisseur maximale au centre de l'arc, effilée aux extrémités.
-        let taper = 1.0 - (angle / 64.0).powf(1.6);
-        let outer = 63.0 - 5.0 * (1.0 - taper);
-        let inner = 38.0 + 22.0 * (1.0 - taper);
-        let body = smoothstep(inner - 1.5, inner + 1.5, d) * (1.0 - smoothstep(outer - 1.5, outer + 1.5, d)) * (1.0 - smoothstep(60.0, 66.0, angle));
-        let heat = ((d - inner) / (outer - inner).max(1.0)).clamp(0.0, 1.0);
-        let t = heat.powf(0.8);
-        let color = [0.62 + 0.38 * t, 0.85 + 0.15 * t, 1.0];
-        let a = body;
-        [color[0], color[1], color[2], a]
-    })
-}
-
-/// Onde de choc à l'impact du marteau: anneau, rayons d'étincelles et noyau.
-pub fn smash(_theme: Theme) -> Vec<[f32; 4]> {
-    let (cx, cy) = (56.0, 48.0);
-    paint(|x, y| {
-        let (dx, dy) = (x - cx, y - cy);
-        let d = (dx * dx + dy * dy).sqrt();
-        let ring = smoothstep(19.0, 22.0, d) * (1.0 - smoothstep(26.0, 29.0, d));
-        let angle = dy.atan2(dx);
-        let ray = (angle * 4.0).cos().max(0.0).powi(6) * smoothstep(8.0, 14.0, d) * (1.0 - smoothstep(30.0, 42.0, d));
-        let core = 1.0 - smoothstep(8.0, 16.0, d);
-        let (ring_c, core_c) = ([1.0, 0.54, 0.16], [1.0, 0.94, 0.62]);
-        let a = ring.max(ray * 0.9).max(core);
-        let color = if core > ring { core_c } else { ring_c };
-        [color[0], color[1], color[2], a]
-    })
 }

@@ -11,9 +11,9 @@ pub mod save;
 pub mod tileart;
 pub use balance::{Balance, balance};
 pub use dungeon::*;
-pub use campaign::{ACT_COUNT, BOSS_EVERY, LEVEL_COUNT, act_of, is_boss_level, level_def, level_file};
+pub use campaign::{ACT_COUNT, BOSS_EVERY, LEVEL_COUNT, act_of, is_boss_level, level_def, level_file, override_level};
 pub use decor::{DECOR_VARIANTS, Decor, DecorKind, Landmark, LandmarkKind};
-pub use level::{LEVEL_FORMAT, LevelDef, Thing};
+pub use level::{DIALOGUE_NODES, LEVEL_FORMAT, Link, LinkEnd, LevelDef, Thing};
 use serde::{Deserialize, Serialize};
 
 pub const TILE_SIZE: f32 = 16.0;

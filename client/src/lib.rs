@@ -24,6 +24,9 @@ mod firstperson;
 mod i18n;
 mod lighting;
 mod decor3d;
+#[cfg(feature = "editor")]
+mod editor;
+mod editor_view;
 mod live3d;
 mod merged;
 mod prebake;
@@ -203,7 +206,18 @@ pub fn light_tuner() {
     decor3d::tuner::run();
 }
 
+#[cfg(feature = "editor")]
+pub fn run_editor() {
+    // L'éditeur est le jeu avec des panneaux en plus (voir `editor`).
+    editor::run();
+}
+
 pub fn run() {
+    build_app().run();
+}
+
+/// L'application du jeu, prête à tourner (l'éditeur de niveaux y ajoute ses panneaux).
+pub(crate) fn build_app() -> App {
     #[cfg(target_os = "ios")]
     {
         log_objc_exceptions();
@@ -223,7 +237,8 @@ pub fn run() {
         _ if std::path::Path::new(dev_assets).exists() => dev_assets.to_string(),
         _ => "assets".to_string(),
     };
-    App::new()
+    let mut app = App::new();
+    app
         .add_plugins((
             // `nearest` garde les pixels nets.
             DefaultPlugins
@@ -298,8 +313,8 @@ pub fn run() {
                 animate_projectiles,
                 (projectile_trails, fade_particles).chain(),
             ),
-        )
-        .run();
+        );
+    app
 }
 
 /// Fenêtre du jeu sur iOS: tout l'écran, sans barre d'état ni indicateur d'accueil; le geste de retour à l'accueil

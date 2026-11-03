@@ -43,6 +43,10 @@ enum Sky {
 }
 
 fn sky(region: Region) -> Option<Sky> {
+    // Ni pluie ni brume dans l'aperçu de l'éditeur de niveaux: on y regarde le décor.
+    if crate::editor_view::active() {
+        return None;
+    }
     match region {
         Region::Forest => Some(Sky::Mist),
         Region::Marsh => Some(Sky::Rain),

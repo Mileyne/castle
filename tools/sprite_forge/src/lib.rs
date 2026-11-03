@@ -43,9 +43,8 @@ const DETAIL: usize = match option_env!("FORGE_DETAIL") {
 const CELL: usize = 96 * DETAIL;
 /// Côté d'une tuile du décor, en pixels.
 const TILE_CELL: usize = 48;
-/// Case d'une sortie de niveau, et nombre d'images de son animation.
+/// Case d'une sortie de niveau.
 const EXIT_CELL: usize = 192 * DETAIL;
-const EXIT_FRAMES: usize = 10;
 /// Les cycles sont rendus pour une lecture à 25 images par seconde: repos d'une seconde, marche dont le cycle dure
 /// 16 images (25 images/s à 1,6 cycle/s), attaque de 0,4 s.
 const IDLE_FRAMES: usize = 25;
@@ -61,9 +60,6 @@ const SCALE: f32 = 40.0 * DETAIL as f32;
 const TILE_SCALE: f32 = 40.0;
 const ELEVATION: f32 = 0.42;
 const FEET_Y: f32 = 88.0 * DETAIL as f32;
-/// Colonnes des planches d'un personnage ou d'un monstre: une direction fait trois lignes (51 images), pour que les planches
-/// restent de taille raisonnable (un fichier par personnage, loin des limites de GitHub et des cartes graphiques).
-const SHEET_COLUMNS: usize = 17;
 const SUPERSAMPLE: usize = 3;
 
 /// Ordre des lignes: angle croissant depuis l'est, dans le sens trigonométrique (le haut de l'écran est le nord).
@@ -159,30 +155,6 @@ fn sheet_of_cells(rows: usize, cols: usize, cell: usize, draw: impl Fn(usize, us
         }
     }
     sheet
-}
-
-/// Les cases (RGBA, `CELL` x `CELL`) d'un personnage ou d'un monstre: les huit directions à la suite (direction * FRAMES +
-/// image). `build` donne les pièces d'une pose.
-fn character_cells(build: impl Fn(Pose) -> Vec<render::Part> + Sync) -> Vec<Vec<u8>> {
-    let total = DIRECTIONS * FRAMES;
-    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
-    let per = total.div_ceil(threads);
-    let build = &build;
-    std::thread::scope(|scope| {
-        let handles: Vec<_> = (0..threads)
-            .map(|t| {
-                scope.spawn(move || {
-                    (t * per..((t + 1) * per).min(total))
-                        .map(|index| {
-                            let (direction, frame) = (index / FRAMES, index % FRAMES);
-                            to_rgba8(&render(&build(frame_pose(frame)), &camera(direction), SUPERSAMPLE))
-                        })
-                        .collect::<Vec<_>>()
-                })
-            })
-            .collect();
-        handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
-    })
 }
 
 /// Zone de la case qui contient quelque chose dans au moins une image: le reste est transparent partout et n'est pas stocké.
@@ -318,9 +290,9 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
     tuning::set_active(tuning::load(theme));
     let retouched = overrides::load_all(theme);
 
-    // Héros, ennemis et objets: un fichier par personnage, monstre ou objet, rogné à ce qu'il dessine, et compressé. Les
+    // Objets: un fichier par objet, rogné à ce qu'il dessine, et compressé. Les
     // dimensions rognées sont écrites dans `sprite_meta.rs`, que le jeu compile.
-    for dir in ["heroes", "monsters", "objects"] {
+    for dir in ["objects"] {
         std::fs::create_dir_all(out_dir.join(dir)).unwrap();
     }
     let mut metas: Vec<SheetMeta> = Vec::new();
@@ -331,12 +303,6 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
         println!("{dir}/{name}: cases de {}x{} px ({}x{} dans la case d'origine)", crop.w, crop.h, crop.x, crop.y);
         metas.push(SheetMeta { dir, name, crop });
     };
-    for &class in CLASSES.iter() {
-        save("heroes", file_name(class), character_cells(|pose| build(class, pose, theme)), SHEET_COLUMNS);
-    }
-    for &monster in monsters::MONSTERS.iter() {
-        save("monsters", file_name(monster), character_cells(|pose| monsters::build(monster, pose, theme)), SHEET_COLUMNS);
-    }
     // Objets: une ligne de vingt images d'animation, vus de face comme les héros.
     for &prop in props::PROPS.iter() {
         let cells: Vec<Vec<u8>> = (0..props::FRAMES)
@@ -352,23 +318,6 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
     }
     source += "];\n";
     std::fs::write(out_dir.join("sprite_meta.rs"), source).unwrap();
-
-    // Grands motifs du décor: une planche par motif (une seule image, case des sorties de niveau).
-    std::fs::create_dir_all(out_dir.join("landmarks")).unwrap();
-    let landmark_camera = Camera { yaw: 0.0, elevation: ELEVATION, scale: SCALE, size: EXIT_CELL, feet_y: FEET_Y * 2.0, outline: true, shadow: true };
-    for (index, name) in landmarks::LANDMARKS.iter().enumerate() {
-        let image = to_rgba8(&render(&landmarks::build(index), &landmark_camera, SUPERSAMPLE));
-        write_basis(&out_dir.join("landmarks").join(format!("{name}.basis")), EXIT_CELL, EXIT_CELL, &image);
-    }
-
-    // Sorties de niveau: dessinées en grand (cases de 192 px, éléments agrandis), avec un cycle de vacillement plus court.
-    let exit_cell = EXIT_CELL;
-    let exit_camera = Camera { yaw: 0.0, elevation: ELEVATION, scale: SCALE, size: exit_cell, feet_y: FEET_Y * 2.0, outline: true, shadow: true };
-    let exit_sheet = sheet_of_cells(props::EXITS.len(), EXIT_FRAMES, exit_cell, |row, col| {
-        let t = col as f32 / EXIT_FRAMES as f32;
-        render(&props::build_exit(props::EXITS[row], t, theme), &exit_camera, SUPERSAMPLE)
-    });
-    write_basis(&out_dir.join("exits.basis"), EXIT_FRAMES * exit_cell, props::EXITS.len() * exit_cell, &exit_sheet);
 
     // Tuiles: le sol et les faces de mur sont rendus en grands motifs (4x4 tuiles, 4x1 tuiles) puis découpés,
     // pour que les dalles et les blocs traversent les bordures de tuiles. Une ligne par région.
@@ -433,8 +382,6 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
     // Projectiles (orientés vers la droite) et effets de coups, dans le style du thème.
     let projectile_sheet = sheet_of_cells(1, effects::PROJECTILES, effects::PROJECTILE_CELL, |_, col| effects::projectile(theme, col));
     write_png(&out_dir.join("projectiles.png"), effects::PROJECTILES * effects::PROJECTILE_CELL, effects::PROJECTILE_CELL, &projectile_sheet);
-    let fx_sheet = sheet_of_cells(1, effects::FX, effects::FX_CELL, |_, col| if col == 0 { effects::slash(theme) } else { effects::smash(theme) });
-    write_png(&out_dir.join("fx.png"), effects::FX * effects::FX_CELL, effects::FX_CELL, &fx_sheet);
 
     // Vignettes des héros: les visages des photos de référence (dossier `photos/`), identiques dans tous les styles.
     // Carrés (x, y, côté) repérés sur chaque photo, dans l'ordre de `CLASSES`.
@@ -457,7 +404,10 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
             portraits[dst..dst + PORTRAIT * 4].copy_from_slice(&tile[row * PORTRAIT * 4..(row + 1) * PORTRAIT * 4]);
         }
     }
-    write_png(&out_dir.join("portraits.png"), columns * PORTRAIT, PORTRAIT, &portraits);
+    // Les médaillons du dépôt sont retouchés à part (calligraphie, bichromie): la photo brute ne doit pas les écraser.
+    if !out_dir.join("portraits.png").exists() {
+        write_png(&out_dir.join("portraits.png"), columns * PORTRAIT, PORTRAIT, &portraits);
+    }
 
     // Marques d'usure du sol: masques blancs que le jeu teinte et étire.
     let decal_sheet = sheet_of_cells(1, decals::COLUMNS, decals::CELL, |_, col| decals::cells()[col].clone());
@@ -489,7 +439,6 @@ pub fn generate(theme: Theme, out_dir: &Path, preview: Option<&Path>) {
         };
         zoomed("portraits_x2.png", columns * PORTRAIT, PORTRAIT, &portraits, 2);
         zoomed("projectiles_x2.png", effects::PROJECTILES * effects::PROJECTILE_CELL, effects::PROJECTILE_CELL, &projectile_sheet, 2);
-        zoomed("fx_x2.png", effects::FX * effects::FX_CELL, effects::FX_CELL, &fx_sheet, 2);
         // Aperçu d'une zone de 12x4 tuiles par région: trois motifs de sol, puis des faces de mur, des dessus et des faces décorées.
         let sheet_w = tiles::COLUMNS * TILE_CELL;
         let tile_at = |sheet: &[u8], region: usize, col: usize, tx: usize, ty: usize, out: &mut Vec<u8>, out_w: usize| {

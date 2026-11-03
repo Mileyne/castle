@@ -45,7 +45,7 @@ pub fn level_models(level: u32) -> Vec<ModelSource> {
             // Un générateur fait apparaître des monstres de la région: les plus courants.
             Thing::Generator { .. } => models.extend([MonsterKind::Skeleton, MonsterKind::Goblin].map(monster_model)),
             Thing::Landmark { kind, .. } => models.extend(landmark_model(*kind)),
-            Thing::Exit { kind, .. } => models.extend(exit_models(*kind)),
+            Thing::Exit { kind, .. } | Thing::Barrier { kind, .. } => models.extend(exit_models(*kind)),
             _ => {}
         }
     }

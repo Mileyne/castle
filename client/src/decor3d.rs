@@ -519,8 +519,27 @@ pub(crate) fn follow_camera(
     window: Single<&Window, With<PrimaryWindow>>,
     first_person: Res<crate::firstperson::FirstPerson>,
     hero: Option<Single<&Transform, (With<LocalPlayer>, Without<DecorCamera>, Without<Camera2d>)>>,
+    editor: Option<Res<crate::editor_view::EditorCamera>>,
+    room: Option<Res<Room>>,
 ) {
     let (flat_transform, flat_projection) = *flat;
+    // Aperçu de l'éditeur de niveaux: la caméra libre qu'il demande, en perspective.
+    if let (Some(camera), Some(room)) = (editor.as_deref(), room.as_deref()) {
+        let world = (camera.target - room.size().as_vec2() / 2.0) * TILE_SIZE;
+        let target = to_3d(world, 0.0);
+        let towards = Vec3::new(camera.yaw.sin() * camera.pitch.cos(), camera.pitch.sin(), camera.yaw.cos() * camera.pitch.cos());
+        *deep.0 = Transform::from_translation(target + towards * camera.dist * TILE_SIZE).looking_at(target, Vec3::Y);
+        let wanted = PerspectiveProjection { fov: crate::editor_view::FIELD_OF_VIEW.to_radians(), near: 1.0, far: 30000.0, ..default() };
+        match &mut *deep.1 {
+            Projection::Perspective(perspective) => {
+                perspective.fov = wanted.fov;
+                perspective.near = wanted.near;
+                perspective.far = wanted.far;
+            }
+            projection => *projection = Projection::Perspective(wanted),
+        }
+        return;
+    }
     // À la première personne: aux yeux du héros, le regard dans le sens de la vue (l'angle de la vue tourne la direction des touches).
     if let (true, Some(hero)) = (first_person.on, &hero) {
         let yaw = yaw();
