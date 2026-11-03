@@ -300,6 +300,10 @@ struct DialoguePortrait;
 #[derive(Component)]
 struct BodyText;
 
+/// La suite du texte, pas encore révélée (transparente, mais elle occupe déjà sa place).
+#[derive(Component)]
+struct BodyHidden;
+
 #[derive(Component)]
 struct PromptText;
 
@@ -601,7 +605,11 @@ fn spawn_panel(mut commands: Commands, assets: Res<AssetServer>) {
                 .spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(8.0), flex_grow: 1.0, ..default() })
                 .with_children(|column| {
                     column.spawn((Text::default(), SpeakerText, ui_font(&assets, 16.0)));
-                    column.spawn((Text::default(), BodyText, ui_font(&assets, 16.0)));
+                    // Le texte entier est mis en page dès le début, pour que la case ait sa hauteur définitive: la partie pas encore
+                    // révélée est un second morceau, transparent.
+                    column
+                        .spawn((Text::default(), BodyText, ui_font(&assets, 16.0)))
+                        .with_child((TextSpan::default(), BodyHidden, ui_font(&assets, 16.0), TextColor(Color::NONE)));
                     column.spawn((
                         Text::default(),
                         Tr::new("dialogue-continue"),
@@ -620,6 +628,7 @@ fn update_panel(
     mut panel: Single<&mut Visibility, With<DialoguePanel>>,
     mut speaker: Single<(&mut Text, &mut TextColor), (With<SpeakerText>, Without<BodyText>, Without<PromptText>)>,
     mut body: Single<&mut Text, (With<BodyText>, Without<SpeakerText>, Without<PromptText>)>,
+    mut hidden: Single<&mut TextSpan, With<BodyHidden>>,
     mut prompt: Single<&mut Tr, With<PromptText>>,
     art: Res<crate::art::Art>,
     mut portrait: Single<(&mut ImageNode, &mut Visibility), (With<DialoguePortrait>, Without<DialoguePanel>)>,
@@ -699,6 +708,11 @@ fn update_panel(
     }
     if body.0 != shown {
         body.0 = shown;
+    }
+    // Ce qui reste à écrire, invisible mais déjà mis en page.
+    let rest: String = if state.is_voting() { String::new() } else { full.chars().skip(revealed as usize).collect() };
+    if hidden.0 != rest {
+        hidden.0 = rest;
     }
     state.revealed = revealed;
 
