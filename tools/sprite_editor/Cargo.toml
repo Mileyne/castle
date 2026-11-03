@@ -11,3 +11,4 @@ castle_shared = { path = "../../shared" }
 bevy = { workspace = true }
 basis-universal = "0.3"
 image = { version = "0.25", default-features = false, features = ["png"] }
+serde_json = { version = "1", features = ["preserve_order"] }
