@@ -225,7 +225,7 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut standard:
     if let Ok(path) = std::env::var("MODEL_VIEWER_GLB") {
         commands.spawn((WorldAssetRoot(assets.load(bevy::gltf::GltfAssetLabel::Scene(0).from_asset(path))), Transform::default()));
     }
-    let font = TextFont { font: assets.load("fonts/PressStart2P-Regular.ttf").into(), font_size: 11.0.into(), ..default() };
+    let font = TextFont { font: assets.load("fonts/Cinzel.ttf").into(), font_size: 11.0.into(), ..default() };
     commands.spawn((
         Hud,
         Text::new(""),

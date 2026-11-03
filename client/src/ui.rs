@@ -51,11 +51,14 @@ struct PortraitSlot(HeroClass);
 #[derive(Component)]
 struct ManaFill(HeroClass);
 
-/// Police pixel-art (Press Start 2P, licence OFL) qui couvre les accents latins.
+/// Les tailles du jeu ont été choisies pour une police pixel, large et haute; Cinzel, plus étroite, en demande de plus grandes.
+const FONT_SCALE: f32 = 1.3;
+
+/// Police du jeu: Cinzel (capitales romaines gravées, licence OFL), qui couvre les accents latins.
 pub fn ui_font(assets: &AssetServer, size: f32) -> TextFont {
     TextFont {
-        font: assets.load("fonts/PressStart2P-Regular.ttf").into(),
-        font_size: size.into(),
+        font: assets.load("fonts/Cinzel.ttf").into(),
+        font_size: (size * FONT_SCALE).into(),
         ..default()
     }
 }
