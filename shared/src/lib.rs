@@ -3,11 +3,13 @@
 use bevy::prelude::*;
 
 mod dungeon;
+pub mod balance;
 pub mod campaign;
 pub mod decor;
 pub mod level;
 pub mod save;
 pub mod tileart;
+pub use balance::{Balance, balance};
 pub use dungeon::*;
 pub use campaign::{ACT_COUNT, BOSS_EVERY, LEVEL_COUNT, act_of, is_boss_level, level_def, level_file};
 pub use decor::{DECOR_VARIANTS, Decor, DecorKind, Landmark, LandmarkKind};
@@ -80,12 +82,42 @@ pub struct ClassStats {
 }
 
 impl HeroClass {
-    pub fn stats(self) -> ClassStats {
+    /// Toutes les valeurs d'équilibrage de la classe (dont celles de son comportement de compagnon).
+    pub fn tuning(self) -> &'static balance::Hero {
+        let heroes = &balance().heroes;
         match self {
-            Self::Knight => ClassStats { name_key: "class-knight", max_hp: 260, speed: 70.0, special_key: "special-knight", max_mana: 60.0, mana_regen: 3.0, special_cost: 30.0, special_cooldown: 12.0, attack: Attack::Melee { range: 22.0, damage: 12.0, cooldown: 0.45 } },
-            Self::Sorcerer => ClassStats { name_key: "class-sorcerer", max_hp: 150, speed: 80.0, special_key: "special-sorcerer", max_mana: 100.0, mana_regen: 6.0, special_cost: 40.0, special_cooldown: 8.0, attack: Attack::Shot { speed: 180.0, damage: 10.0, cooldown: 0.5, lifetime: 1.2 } },
-            Self::Ranger => ClassStats { name_key: "class-ranger", max_hp: 180, speed: 95.0, special_key: "special-ranger", max_mana: 70.0, mana_regen: 4.0, special_cost: 35.0, special_cooldown: 10.0, attack: Attack::Shot { speed: 260.0, damage: 8.0, cooldown: 0.35, lifetime: 1.0 } },
-            Self::Forgebraise => ClassStats { name_key: "class-forgebraise", max_hp: 200, speed: 75.0, special_key: "special-forgebraise", max_mana: 80.0, mana_regen: 4.0, special_cost: 35.0, special_cooldown: 14.0, attack: Attack::Melee { range: 20.0, damage: 16.0, cooldown: 0.7 } },
+            Self::Knight => &heroes.knight,
+            Self::Sorcerer => &heroes.sorcerer,
+            Self::Ranger => &heroes.ranger,
+            Self::Forgebraise => &heroes.forgebraise,
+        }
+    }
+
+    /// Les statistiques de la classe: les valeurs viennent de l'équilibrage (`balance.ron`); le genre d'attaque (coup ou tir), les
+    /// clés de traduction et le pouvoir de chaque classe sont dans le code.
+    pub fn stats(self) -> ClassStats {
+        let heroes = &balance().heroes;
+        let (name_key, special_key, melee, h) = match self {
+            Self::Knight => ("class-knight", "special-knight", true, &heroes.knight),
+            Self::Sorcerer => ("class-sorcerer", "special-sorcerer", false, &heroes.sorcerer),
+            Self::Ranger => ("class-ranger", "special-ranger", false, &heroes.ranger),
+            Self::Forgebraise => ("class-forgebraise", "special-forgebraise", true, &heroes.forgebraise),
+        };
+        let attack = if melee {
+            Attack::Melee { range: h.attack_range, damage: h.attack_damage, cooldown: h.attack_cooldown }
+        } else {
+            Attack::Shot { speed: h.shot_speed, damage: h.attack_damage, cooldown: h.attack_cooldown, lifetime: h.shot_lifetime }
+        };
+        ClassStats {
+            name_key,
+            max_hp: h.max_hp,
+            speed: h.speed,
+            special_key,
+            max_mana: h.max_mana,
+            mana_regen: h.mana_regen,
+            special_cost: h.special_cost,
+            special_cooldown: h.special_cooldown,
+            attack,
         }
     }
 }
@@ -352,6 +384,7 @@ pub enum MonsterKind {
     Dragon,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MonsterStats {
     pub max_hp: f32,
     pub speed: f32,
@@ -364,19 +397,19 @@ pub struct MonsterStats {
 
 impl MonsterKind {
     pub fn stats(self) -> MonsterStats {
+        let m = &balance().monsters;
         match self {
-            Self::Skeleton => MonsterStats { max_hp: 30.0, speed: 40.0, damage: 8.0, cooldown: 0.8, half_size: 5.0, sight: 110.0 },
-            Self::Bat => MonsterStats { max_hp: 12.0, speed: 75.0, damage: 4.0, cooldown: 0.6, half_size: 3.5, sight: 150.0 },
-            Self::Goblin => MonsterStats { max_hp: 18.0, speed: 62.0, damage: 5.0, cooldown: 0.5, half_size: 4.0, sight: 130.0 },
-            Self::Orc => MonsterStats { max_hp: 70.0, speed: 33.0, damage: 14.0, cooldown: 1.1, half_size: 8.5, sight: 100.0 },
-            Self::Ghoul => MonsterStats { max_hp: 40.0, speed: 52.0, damage: 9.0, cooldown: 0.7, half_size: 5.0, sight: 140.0 },
-            Self::Wolf => MonsterStats { max_hp: 24.0, speed: 68.0, damage: 6.0, cooldown: 0.6, half_size: 6.0, sight: 150.0 },
-            // Les boss voient toute l'arène. Leurs points de vie sont réglés pour une équipe de quatre héros.
-            Self::Warg => MonsterStats { max_hp: 1300.0, speed: 72.0, damage: 16.0, cooldown: 0.9, half_size: 18.0, sight: 600.0 },
-            Self::Troll => MonsterStats { max_hp: 2200.0, speed: 34.0, damage: 26.0, cooldown: 1.3, half_size: 22.0, sight: 600.0 },
-            Self::Muldant => MonsterStats { max_hp: 3000.0, speed: 40.0, damage: 28.0, cooldown: 1.2, half_size: 20.0, sight: 700.0 },
-            Self::Gardener => MonsterStats { max_hp: 2000.0, speed: 36.0, damage: 22.0, cooldown: 1.3, half_size: 22.0, sight: 600.0 },
-            Self::Dragon => MonsterStats { max_hp: 3400.0, speed: 38.0, damage: 30.0, cooldown: 1.2, half_size: 22.0, sight: 700.0 },
+            Self::Skeleton => m.skeleton,
+            Self::Bat => m.bat,
+            Self::Goblin => m.goblin,
+            Self::Orc => m.orc,
+            Self::Ghoul => m.ghoul,
+            Self::Wolf => m.wolf,
+            Self::Warg => m.warg,
+            Self::Troll => m.troll,
+            Self::Muldant => m.muldant,
+            Self::Gardener => m.gardener,
+            Self::Dragon => m.dragon,
         }
     }
 
@@ -398,22 +431,24 @@ impl MonsterKind {
     }
 
     /// Les monstres qu'un générateur peut produire à ce niveau, avec leur poids relatif: le gobelin arrive d'emblée,
-    /// la goule au niveau 2 et l'orque au niveau 3, pour que la difficulté monte avec le château.
-    pub fn spawn_table(level: u32) -> &'static [(MonsterKind, f32)] {
+    /// la goule au niveau 2 et l'orque au niveau 3, pour que la difficulté monte avec le château (tables de `balance.ron`).
+    pub fn spawn_table(level: u32) -> &'static [balance::SpawnWeight] {
+        let spawn = &balance().spawn;
         match level {
-            0 | 1 => &[(Self::Skeleton, 0.40), (Self::Bat, 0.25), (Self::Goblin, 0.35)],
-            2 => &[(Self::Skeleton, 0.30), (Self::Bat, 0.20), (Self::Goblin, 0.25), (Self::Ghoul, 0.25)],
-            _ => &[(Self::Skeleton, 0.22), (Self::Bat, 0.15), (Self::Goblin, 0.20), (Self::Ghoul, 0.20), (Self::Orc, 0.23)],
+            0 | 1 => &spawn.castle_level_1,
+            2 => &spawn.castle_level_2,
+            _ => &spawn.castle_level_3_and_more,
         }
     }
 
     /// Les monstres qu'un générateur produit dans cette région: les extérieurs ont leurs propres bêtes, l'intérieur du château
     /// suit la table du niveau.
-    pub fn spawn_table_in(region: Region, level: u32) -> &'static [(MonsterKind, f32)] {
+    pub fn spawn_table_in(region: Region, level: u32) -> &'static [balance::SpawnWeight] {
+        let spawn = &balance().spawn;
         match region {
-            Region::Forest => &[(Self::Wolf, 0.6), (Self::Goblin, 0.25), (Self::Bat, 0.15)],
-            Region::Marsh => &[(Self::Ghoul, 0.35), (Self::Wolf, 0.25), (Self::Bat, 0.25), (Self::Goblin, 0.15)],
-            Region::Approach => &[(Self::Wolf, 0.35), (Self::Goblin, 0.3), (Self::Skeleton, 0.2), (Self::Orc, 0.15)],
+            Region::Forest => &spawn.forest,
+            Region::Marsh => &spawn.marsh,
+            Region::Approach => &spawn.approach,
             _ => Self::spawn_table(level),
         }
     }
@@ -429,20 +464,20 @@ impl MonsterKind {
     }
 
     /// Le monstre tiré par `roll` (entre 0 et 1) dans une table donnée.
-    pub fn pick_from_table(table: &'static [(MonsterKind, f32)], roll: f32) -> MonsterKind {
+    pub fn pick_from_table(table: &'static [balance::SpawnWeight], roll: f32) -> MonsterKind {
         Self::pick_from(table, roll)
     }
 
-    fn pick_from(table: &'static [(MonsterKind, f32)], roll: f32) -> MonsterKind {
-        let total: f32 = table.iter().map(|(_, weight)| weight).sum();
+    fn pick_from(table: &'static [balance::SpawnWeight], roll: f32) -> MonsterKind {
+        let total: f32 = table.iter().map(|w| w.weight).sum();
         let mut left = roll.clamp(0.0, 1.0) * total;
-        for (kind, weight) in table {
-            if left < *weight {
-                return *kind;
+        for w in table {
+            if left < w.weight {
+                return w.monster;
             }
-            left -= weight;
+            left -= w.weight;
         }
-        table[table.len() - 1].0
+        table[table.len() - 1].monster
     }
 }
 
@@ -969,9 +1004,9 @@ mod monster_tests {
 
     #[test]
     fn spawn_tables_are_complete_and_grow_with_the_level() {
-        let kinds = |level| MonsterKind::spawn_table(level).iter().map(|(k, _)| *k).collect::<Vec<_>>();
+        let kinds = |level| MonsterKind::spawn_table(level).iter().map(|w| w.monster).collect::<Vec<_>>();
         for level in 1..8 {
-            let total: f32 = MonsterKind::spawn_table(level).iter().map(|(_, w)| w).sum();
+            let total: f32 = MonsterKind::spawn_table(level).iter().map(|w| w.weight).sum();
             assert!((total - 1.0).abs() < 1e-5, "niveau {level}: poids {total}");
         }
         assert!(kinds(1).contains(&MonsterKind::Goblin));

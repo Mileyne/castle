@@ -38,7 +38,7 @@ pub struct OutdoorSpec {
     pub boss: Option<MonsterKind>,
     pub filler: MonsterKind,
     /// Les monstres des clairières de combat, à la place de ceux de la région (les bêtes d'un monde particulier).
-    pub fauna: Option<&'static [(MonsterKind, f32)]>,
+    pub fauna: Option<&'static [castle_shared::balance::SpawnWeight]>,
     /// Samélia, en cage dans l'arène: elle remplace un des prisonniers de l'objectif « délivrer ».
     pub guide: bool,
     /// La région du niveau précédent: la clairière de départ en reprend le décor, pour que le passage d'un niveau à l'autre soit continu.

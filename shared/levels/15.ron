@@ -1608,7 +1608,39 @@
     ),
     Pickup(
       kind: Food,
-      at: (33.281837, 41.1465),
+      at: (29.5, 39.5),
+    ),
+    Pickup(
+      kind: Food,
+      at: (32.5, 39.5),
+    ),
+    Pickup(
+      kind: Food,
+      at: (34.5, 39.5),
+    ),
+    Pickup(
+      kind: Food,
+      at: (37.5, 39.5),
+    ),
+    Pickup(
+      kind: Food,
+      at: (29.5, 42.5),
+    ),
+    Pickup(
+      kind: Food,
+      at: (32.5, 42.5),
+    ),
+    Pickup(
+      kind: Food,
+      at: (34.5, 42.5),
+    ),
+    Pickup(
+      kind: Food,
+      at: (37.5, 42.5),
+    ),
+    Pickup(
+      kind: Key,
+      at: (78.5, 39.5),
     ),
     Pickup(
       kind: Potion,

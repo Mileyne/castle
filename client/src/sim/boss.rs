@@ -155,7 +155,7 @@ pub fn boss_ai(
                 if already.contains(&entity) || p.0.distance(center) > radius + HERO_HALF_SIZE {
                     continue;
                 }
-                let factor = if shielded { BULWARK_DAMAGE_FACTOR } else { 1.0 };
+                let factor = if shielded { balance().abilities.bulwark_damage_factor } else { 1.0 };
                 health.current -= amount * factor * ease;
                 hit.push(entity);
             }
@@ -245,7 +245,7 @@ pub fn boss_ai(
                         });
                     continue;
                 }
-                let reach = stats.half_size + HERO_HALF_SIZE + MONSTER_REACH_SLACK;
+                let reach = stats.half_size + HERO_HALF_SIZE + balance().rules.monster_reach_slack;
                 if dist <= reach {
                     if cooldown.0 == 0.0 {
                         // Le corps à corps frappe le héros le plus proche.
@@ -254,7 +254,7 @@ pub fn boss_ai(
                             .filter(|(_, p, ..)| p.0.distance(pos.0) <= reach)
                             .min_by(|a, b| a.1.0.distance(pos.0).total_cmp(&b.1.0.distance(pos.0)))
                         {
-                            let factor = if shielded { BULWARK_DAMAGE_FACTOR } else { 1.0 };
+                            let factor = if shielded { balance().abilities.bulwark_damage_factor } else { 1.0 };
                             health.current -= stats.damage * factor * ease;
                             cooldown.0 = stats.cooldown;
                             strikes.0 = strikes.0.wrapping_add(1);

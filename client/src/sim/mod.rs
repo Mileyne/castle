@@ -11,37 +11,14 @@ mod outdoor;
 use castle_shared::save::{self, SaveGame};
 use castle_shared::*;
 
-/// Compagnons: distance de détection des ennemis, portée de tir, retour auprès du chef.
-const AI_AGGRO: f32 = 110.0;
 /// Un itinéraire est recalculé quand le but a bougé de plus que cela, ou après ce délai.
 const ROUTE_GOAL_DRIFT: f32 = 24.0;
 const ROUTE_MAX_AGE: f32 = 0.6;
-const AI_SHOT_REACH: f32 = 150.0;
-const AI_LEASH: f32 = 220.0;
-/// Les compagnons n'engagent que les ennemis à cette distance du héros dirigé.
-const AI_GROUP_RADIUS: f32 = 150.0;
-/// Les compagnons soutiennent le héros dirigé sans le remplacer: leurs coups font un peu moins mal et sont un peu plus
-/// lents, et ils s'attaquent aux monstres comme aux générateurs.
-const AI_DAMAGE_FACTOR: f32 = 0.6;
-const AI_COOLDOWN_FACTOR: f32 = 1.25;
-/// Les corps se bloquent: marge ajoutée à la portée de frappe d'un monstre.
-const MONSTER_REACH_SLACK: f32 = 6.0;
 
-/// Distance à laquelle un allié relève un héros à terre, et temps nécessaire.
-const REVIVE_RANGE: f32 = 20.0;
-const REVIVE_TIME: f32 = 1.5;
 
 /// Une scène de dialogue ne démarre que si aucun monstre n'est à cette distance d'un héros.
 const DIALOGUE_SAFE_RADIUS: f32 = 170.0;
 
-const GENERATOR_HEALTH: f32 = 40.0;
-/// Un générateur ne produit que si un héros est à moins de cette distance.
-const GENERATOR_ACTIVATION: f32 = 220.0;
-const GENERATOR_INTERVAL: f32 = 2.2;
-/// Nombre maximal de monstres vivants dans la salle.
-const MAX_MONSTERS: usize = 28;
-/// La sortie s'active quand tous les héros debout sont dans ce rayon, pendant ce délai.
-const EXIT_RADIUS: f32 = 48.0;
 
 /// Demi-côté de la zone d'une sortie invisible posée à la main, en pixels.
 const HIDDEN_EXIT_REACH: f32 = 64.0;
@@ -52,43 +29,13 @@ struct ExitArea {
     min: Vec2,
     max: Vec2,
 }
-const EXIT_DELAY: f32 = 1.5;
 
-/// Rempart: rayon d'effet, durée et part des dégâts qui passe encore.
-const BULWARK_RADIUS: f32 = 90.0;
-const BULWARK_DURATION: f32 = 6.0;
-const BULWARK_DAMAGE_FACTOR: f32 = 0.5;
-/// Tempête Arcane: décalage devant la sorcière, rayon, dégâts.
-const ARCANE_OFFSET: f32 = 56.0;
-const ARCANE_RADIUS: f32 = 48.0;
-const ARCANE_DAMAGE: f32 = 35.0;
-/// Pluie de Flèches: décalage, rayon, dégâts par impulsion, intervalle et durée.
-const RAIN_OFFSET: f32 = 80.0;
-const RAIN_RADIUS: f32 = 56.0;
-const RAIN_DAMAGE: f32 = 6.0;
-const RAIN_INTERVAL: f32 = 0.25;
-const RAIN_DURATION: f32 = 2.0;
-/// Tourelle: durée de vie, portée, cadence, dégâts et vitesse des tirs.
-const TURRET_LIFETIME: f32 = 15.0;
-const TURRET_RANGE: f32 = 110.0;
-const TURRET_COOLDOWN: f32 = 0.6;
-const TURRET_DAMAGE: f32 = 7.0;
-const TURRET_SHOT_SPEED: f32 = 220.0;
 
-/// Pièges: dégâts, délai entre deux déclenchements, rayon de déclenchement, temps de désamorçage.
-const TRAP_DAMAGE: f32 = 12.0;
-const TRAP_COOLDOWN: f32 = 1.0;
-const TRAP_TRIGGER_RADIUS: f32 = 8.0;
-const TRAP_DISARM_TIME: f32 = 0.6;
 /// Enchantement de la porte royale: vitesse à laquelle il repousse un héros trop proche.
 const WARD_PUSH_SPEED: f32 = 130.0;
 /// Une flèche du Rôdeur qui passe à moins de cette distance de la cible fixée la touche.
 const TARGET_HIT_RADIUS: f32 = 14.0;
 
-/// Un piège dort, pointes rentrées, tant que personne n'est proche: un héros à moins de `TRAP_WAKE_RADIUS` le réveille
-/// (pointes sorties), et il se rendort `TRAP_SLEEP_DELAY` secondes après le départ du dernier héros.
-const TRAP_WAKE_RADIUS: f32 = 56.0;
-const TRAP_SLEEP_DELAY: f32 = 1.2;
 
 /// Temps écoulé depuis qu'un héros était proche d'un piège réveillé.
 #[derive(Component, Default)]
@@ -97,40 +44,33 @@ struct TrapIdle(f32);
 /// Piège désarmé pour de bon par le Rôdeur: il ne se réveille plus.
 #[derive(Component)]
 struct Disarmed;
-/// Une porte à clé s'ouvre quand un héros muni d'une clé s'en approche à moins de cette distance.
-const DOOR_OPEN_RANGE: f32 = 16.0;
 
 /// Dialogues: pause minimale entre deux répliques, délai de vote, durée maximale sans activité.
 const DIALOGUE_ADVANCE_COOLDOWN: f32 = 0.25;
 const DIALOGUE_VOTE_TIMEOUT: f32 = 15.0;
 const DIALOGUE_IDLE_TIMEOUT: f32 = 90.0;
 
-const PICKUP_RANGE: f32 = 10.0;
-const FOOD_HEAL: f32 = 25.0;
 
-/// Potion de régénération: durée de l'effet et part des PV maximum rendue chaque seconde, pour tous les héros de l'équipe.
-const POTION_DURATION: f32 = 8.0;
-const POTION_HEAL_PER_SECOND: f32 = 0.06;
-/// Nombre de potions posées dans un niveau, et chance qu'un monstre en laisse une en mourant.
-const POTION_DROP_CHANCE: f32 = 0.04;
 
 /// Régénération en cours sur un héros: secondes restantes.
 #[derive(Component)]
 struct Regen(f32);
 
 fn potions_in_level(level: u32) -> u32 {
-    2 + level.min(9) / 3
+    let spawn = &balance().spawn;
+    spawn.potions_per_level_base + level.min(spawn.potions_levels_cap) / spawn.potions_every_levels.max(1)
 }
 
 /// Monstres posés d'avance dans chaque salle de combat, en plus de ceux des générateurs.
 fn monsters_per_room(level: u32) -> u32 {
-    (1 + level / 2).min(6)
+    let spawn = &balance().spawn;
+    (spawn.monsters_per_room_base + level / spawn.monsters_per_room_every_levels.max(1)).min(spawn.monsters_per_room_max)
 }
 
 /// Les premiers niveaux sont plus doux: les monstres vont moins vite, voient moins loin et les générateurs produisent
 /// moins souvent. Le facteur monte de niveau en niveau jusqu'à 1.
 fn ease(level: u32) -> f32 {
-    (0.7 + 0.1 * level.saturating_sub(1) as f32).min(1.0)
+    (balance().spawn.easing_start + balance().spawn.easing_step * level.saturating_sub(1) as f32).min(1.0)
 }
 
 /// Direction demandée par le joueur, jamais répliquée.
@@ -338,7 +278,7 @@ impl Plugin for SimPlugin {
                         open_locked_doors,
                         monster_ai.run_if(not_in_transition),
                         reap_dead,
-                        collect_pickups,
+                        (collect_pickups, collect_food),
                         run_regen,
                         collect_relics,
                         rescue_captives,
@@ -744,7 +684,7 @@ fn player_attacks(
         if !attacking.0 || cooldown.0 > 0.0 {
             continue;
         }
-        cooldown.0 = class.stats().attack.cooldown() * if controlled { 1.0 } else { AI_COOLDOWN_FACTOR };
+        cooldown.0 = class.stats().attack.cooldown() * if controlled { 1.0 } else { class.tuning().companion_cooldown_factor };
         // Le client joue le geste; l'effet suit à l'instant de la frappe (`resolve_attacks`).
         strikes.0 = strikes.0.wrapping_add(1);
         commands.spawn(PendingAttack { hero: entity, timer: ATTACK_WINDUP });
@@ -769,7 +709,7 @@ fn resolve_attacks(
         let Ok((pos, facing, class, controlled)) = heroes.get(attack.hero) else {
             continue;
         };
-        let power = if controlled { 1.0 } else { AI_DAMAGE_FACTOR };
+        let power = if controlled { 1.0 } else { class.tuning().companion_damage_factor };
         match class.stats().attack {
             Attack::Melee { range, damage, .. } => {
                 for (target_pos, mut health, hurtbox) in &mut targets {
@@ -866,14 +806,14 @@ fn run_generators(
             .iter()
             .map(|p| p.0)
             .min_by(|a, b| a.distance(pos.0).total_cmp(&b.distance(pos.0)));
-        let Some(target) = nearest.filter(|t| t.distance(pos.0) <= GENERATOR_ACTIVATION) else {
+        let Some(target) = nearest.filter(|t| t.distance(pos.0) <= balance().spawn.generator_activation) else {
             continue;
         };
         timer.0 -= time.delta_secs();
-        if timer.0 > 0.0 || alive >= MAX_MONSTERS {
+        if timer.0 > 0.0 || alive >= balance().spawn.max_monsters as usize {
             continue;
         }
-        timer.0 = GENERATOR_INTERVAL / ease(level.0);
+        timer.0 = balance().spawn.generator_interval / ease(level.0);
         let kind = MonsterKind::pick_in(region.0, level.0, rng.next_f32());
         // Le monstre sort du côté du héros, sauf si un mur gêne.
         let out = pos.0 + (target - pos.0).normalize_or_zero() * (GENERATOR_HALF_SIZE + 6.0);
@@ -941,9 +881,9 @@ fn monster_ai(
         let Some((dist, target_pos, mut health, shielded)) = target else {
             continue;
         };
-        if dist <= stats.half_size + HERO_HALF_SIZE + MONSTER_REACH_SLACK {
+        if dist <= stats.half_size + HERO_HALF_SIZE + balance().rules.monster_reach_slack {
             if cooldown.0 == 0.0 {
-                let factor = if shielded { BULWARK_DAMAGE_FACTOR } else { 1.0 };
+                let factor = if shielded { balance().abilities.bulwark_damage_factor } else { 1.0 };
                 health.current -= stats.damage * factor * ease;
                 cooldown.0 = stats.cooldown;
                 // Le client joue le geste d'attaque à chaque coup.
@@ -1008,7 +948,7 @@ fn reap_dead(
                 }
             }
             commands.trigger(ScreenShake(1.0));
-            for _ in 0..8 {
+            for _ in 0..balance().drops.boss_coins {
                 spawn_pickup(&mut commands, PickupKind::Coin, pos.0, &mut rng);
             }
             spawn_pickup(&mut commands, PickupKind::Potion, pos.0, &mut rng);
@@ -1028,21 +968,17 @@ fn reap_dead(
         }
         if is_generator {
             commands.trigger(ScreenShake(0.6));
-            for _ in 0..3 {
+            for _ in 0..balance().drops.generator_coins {
                 spawn_pickup(&mut commands, PickupKind::Coin, pos.0, &mut rng);
-            }
-            if rng.next_f32() < 0.5 {
-                spawn_pickup(&mut commands, PickupKind::Key, pos.0, &mut rng);
             }
         } else {
             let roll = rng.next_f32();
-            let kind = if roll < 0.45 {
+            let drops = &balance().drops;
+            let kind = if roll < drops.monster_coin_chance {
                 Some(PickupKind::Coin)
-            } else if roll < 0.55 {
+            } else if roll < drops.monster_coin_chance + drops.monster_food_chance {
                 Some(PickupKind::Food)
-            } else if roll < 0.58 {
-                Some(PickupKind::Key)
-            } else if roll < 0.58 + POTION_DROP_CHANCE {
+            } else if roll < drops.monster_coin_chance + drops.monster_food_chance + drops.monster_potion_chance {
                 Some(PickupKind::Potion)
             } else {
                 None
@@ -1062,7 +998,7 @@ fn collect_relics(
     mut quests: Query<&mut Quest>,
 ) {
     for (entity, relic_pos) in &relics {
-        if players.iter().any(|pos| pos.0.distance(relic_pos.0) <= PICKUP_RANGE) {
+        if players.iter().any(|pos| pos.0.distance(relic_pos.0) <= balance().pickups.pickup_range) {
             commands.entity(entity).despawn();
             for mut quest in &mut quests {
                 if quest.kind == QuestKind::Retrieve && !quest.is_done() {
@@ -1100,7 +1036,7 @@ fn rescue_captives(
                 ));
             }
             // Un prisonnier délivré remercie: quelques pièces et de quoi se soigner.
-            for _ in 0..3 {
+            for _ in 0..balance().drops.rescue_coins {
                 spawn_pickup(&mut commands, PickupKind::Coin, captive_pos.0, &mut rng);
             }
             spawn_pickup(&mut commands, PickupKind::Food, captive_pos.0, &mut rng);
@@ -1162,7 +1098,7 @@ fn open_exit(
 fn collect_pickups(
     mut commands: Commands,
     mut players: Query<
-        (&Position, &mut Health, &mut Gold, &mut Keys, &PartyId),
+        (&Position, &mut Gold, &mut Keys, &PartyId),
         (With<Player>, With<Controlled>, Without<Downed>),
     >,
     team: Query<(Entity, &PartyId), With<Player>>,
@@ -1171,8 +1107,8 @@ fn collect_pickups(
     mut stats: ResMut<LevelStats>,
 ) {
     for (entity, pickup_pos, pickup) in &pickups {
-        for (pos, mut health, mut gold, mut keys, party) in &mut players {
-            if pos.0.distance(pickup_pos.0) > PICKUP_RANGE {
+        for (pos, mut gold, mut keys, party) in &mut players {
+            if pos.0.distance(pickup_pos.0) > balance().pickups.pickup_range {
                 continue;
             }
             match pickup.0 {
@@ -1208,22 +1144,47 @@ fn collect_pickups(
                     // Toute l'équipe de celui qui boit se régénère (boire une deuxième fois relance la durée).
                     for (hero, hero_party) in &team {
                         if hero_party == party {
-                            commands.entity(hero).insert((Regen(POTION_DURATION), Regenerating));
+                            commands.entity(hero).insert((Regen(balance().pickups.potion_duration), Regenerating));
                         }
                     }
                 }
-                PickupKind::Food => {
-                    // La nourriture reste au sol si le héros est déjà en pleine forme.
-                    if health.current >= health.max {
-                        continue;
-                    }
-                    health.current = (health.current + FOOD_HEAL).min(health.max);
-                    stats.food += 1;
-                }
+                // La nourriture a sa propre règle (`collect_food`): elle va au héros le plus mal en point.
+                PickupKind::Food => continue,
             }
             commands.entity(entity).despawn();
             break;
         }
+    }
+}
+
+/// Un héros ramasse la nourriture dès qu'il lui manque au moins une ration de PV (75 sur 100 pour une ration de 25): il n'en gaspille jamais.
+fn can_eat(health: &Health) -> bool {
+    health.max - health.current >= balance().pickups.food_heal
+}
+
+/// La nourriture soigne les héros qui peuvent manger (`can_eat`), qu'ils soient dirigés ou qu'ils suivent. Si plusieurs
+/// sont à portée, c'est le plus mal en point (la plus petite part de PV restants) qui la mange; les autres la laissent au sol.
+fn collect_food(
+    mut commands: Commands,
+    mut heroes: Query<(&Position, &mut Health), (With<Player>, Without<Downed>)>,
+    pickups: Query<(Entity, &Position, &Pickup), Without<Player>>,
+    mut stats: ResMut<LevelStats>,
+) {
+    for (entity, pickup_pos, pickup) in &pickups {
+        if pickup.0 != PickupKind::Food {
+            continue;
+        }
+        let share = |health: &Health| health.current / health.max;
+        let hungry = heroes
+            .iter_mut()
+            .filter(|(pos, health)| pos.0.distance(pickup_pos.0) <= balance().pickups.pickup_range && can_eat(health))
+            .min_by(|a, b| share(&a.1).total_cmp(&share(&b.1)));
+        let Some((_, mut health)) = hungry else {
+            continue;
+        };
+        health.current = (health.current + balance().pickups.food_heal).min(health.max);
+        stats.food += 1;
+        commands.entity(entity).despawn();
     }
 }
 
@@ -1237,7 +1198,7 @@ fn run_regen(
         let step = time.delta_secs().min(regen.0);
         regen.0 -= step;
         if !downed {
-            health.current = (health.current + health.max * POTION_HEAL_PER_SECOND * step).min(health.max);
+            health.current = (health.current + health.max * balance().pickups.potion_heal_per_second * step).min(health.max);
         }
         if regen.0 <= 0.0 || downed {
             commands.entity(entity).remove::<(Regen, Regenerating)>();
@@ -1271,13 +1232,13 @@ fn revive_players(
     standing: Query<&Position, (With<Player>, Without<Downed>)>,
 ) {
     for (entity, pos, mut revive, mut health) in &mut downed {
-        let helped = standing.iter().any(|p| p.0.distance(pos.0) <= REVIVE_RANGE);
+        let helped = standing.iter().any(|p| p.0.distance(pos.0) <= balance().rules.revive_range);
         if helped {
             revive.0 += time.delta_secs();
         } else {
             revive.0 = (revive.0 - time.delta_secs()).max(0.0);
         }
-        if revive.0 >= REVIVE_TIME {
+        if revive.0 >= balance().rules.revive_time {
             revive.0 = 0.0;
             health.current = health.max * 0.5;
             commands.entity(entity).remove::<Downed>();
@@ -1345,6 +1306,12 @@ fn spawn_point(slot: usize, layout: &Layout, room: &Room) -> Vec2 {
 /// Centre d'une tuile en pixels; la carte est centrée sur l'origine, comme `Room::tile_center`.
 fn tile_to_world(room: &Room, tile: UVec2) -> Vec2 {
     room.tile_center(tile.x, tile.y)
+}
+
+/// Les huit places de la nourriture dans la salle au trésor: deux rangées de quatre, réparties dans la salle.
+fn treasure_food_spots(info: &RoomInfo) -> Vec<UVec2> {
+    let size = info.size();
+    (1..=2).flat_map(|row| (1..=4).map(move |col| info.min + UVec2::new(col * size.x / 5, row * size.y / 3))).collect()
 }
 
 /// Un point au hasard sur le sol d'une salle, à `margin` tuiles des bords.
@@ -1486,8 +1453,8 @@ fn plan_level(dungeon: &Dungeon, name: &str, region: Region, level: u32, rng: &m
                     let kind = MonsterKind::pick(level, rng.next_f32());
                     things.push(Thing::Monster { kind, at: at(random_point(room, info, 2, rng)) });
                 }
-                if rng.next_f32() < 0.4 {
-                    for _ in 0..3 {
+                if rng.next_f32() < balance().spawn.trap_room_chance {
+                    for _ in 0..balance().spawn.traps_per_room {
                         things.push(Thing::Trap { at: at(random_point(room, info, 2, rng)) });
                     }
                 }
@@ -1497,10 +1464,25 @@ fn plan_level(dungeon: &Dungeon, name: &str, region: Region, level: u32, rng: &m
                 for offset in [(-20.0, -12.0), (-20.0, 12.0), (0.0, -12.0), (0.0, 12.0), (20.0, 0.0)] {
                     things.push(Thing::Pickup { kind: PickupKind::Coin, at: scattered(center + Vec2::from(offset), rng) });
                 }
-                things.push(Thing::Pickup { kind: PickupKind::Food, at: scattered(center, rng) });
+                // La salle au trésor est pleine de nourriture.
+                for at_food in treasure_food_spots(info) {
+                    things.push(Thing::Pickup { kind: PickupKind::Food, at: at(tile_to_world(room, at_food)) });
+                }
                 things.push(Thing::Pickup { kind: PickupKind::Potion, at: scattered(center + Vec2::new(0.0, -22.0), rng) });
             }
             RoomKind::Start | RoomKind::Exit => {}
+        }
+    }
+
+    // La seule clé du niveau, pour la porte de la salle au trésor: dans la salle de combat la plus éloignée de cette salle.
+    if let Some(treasure) = layout.treasure.and_then(|t| layout.rooms.get(t)) {
+        let far = layout
+            .rooms
+            .iter()
+            .filter(|r| r.kind == RoomKind::Combat)
+            .max_by_key(|r| r.center().as_ivec2().distance_squared(treasure.center().as_ivec2()));
+        if let Some(info) = far {
+            things.push(Thing::Pickup { kind: PickupKind::Key, at: at(tile_to_world(room, info.center())) });
         }
     }
 
@@ -1602,10 +1584,10 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
                 commands.spawn((
                     WorldEntity,
                     Generator,
-                    Health::full(GENERATOR_HEALTH),
+                    Health::full(balance().spawn.generator_health),
                     Position(pos),
                     Hurtbox(GENERATOR_HALF_SIZE),
-                    SpawnTimer(GENERATOR_INTERVAL),
+                    SpawnTimer(balance().spawn.generator_interval),
                 ));
             }
             Thing::Pickup { kind, .. } => {
@@ -1792,9 +1774,6 @@ const CAMPAIGN_REGIONS: [Region; LEVEL_COUNT as usize] = [
     Region::Royal,
 ];
 
-/// Les bêtes du monde des elfes: de petits gobelins, des chauves-souris, et des goules à la place des créatures végétales (à venir).
-const ELF_FAUNA: &[(MonsterKind, f32)] = &[(MonsterKind::Goblin, 0.55), (MonsterKind::Bat, 0.2), (MonsterKind::Ghoul, 0.25)];
-
 /// Les niveaux extérieurs de la campagne, qui sont générés (les autres viennent de châteaux générés): chaque niveau commence dans le
 /// décor où le précédent s'est terminé (`arrival`), et le premier dans une clairière.
 ///
@@ -1853,18 +1832,18 @@ fn outdoor_spec(level: u32) -> Option<outdoor::OutdoorSpec> {
         },
         // Acte 2. Les racines: une chasse dans l'aube verte, parmi de petits gobelins.
         5 => OutdoorSpec {
-            fauna: Some(ELF_FAUNA),
+            fauna: Some(&balance().spawn.elf_fauna),
             ..base("Les racines", Region::Forest, level, 3, 4, Some((QuestKind::Hunt, 14)), ExitKind::Gate, Some(Region::Forest))
         },
         // Le marais luminescent: le Forgebraise remet en marche l'écluse.
         6 => OutdoorSpec {
-            fauna: Some(ELF_FAUNA),
+            fauna: Some(&balance().spawn.elf_fauna),
             mechanism: Some(Mechanism { kind: InteractKind::Mechanism, intro: "bridge_intro", panel: "bridge_panel" }),
             ..base("Le marais luminescent", Region::Marsh, level, 4, 4, Some((QuestKind::Repair, 1)), ExitKind::Bridge, Some(Region::Forest))
         },
         // La rivière: le Chevalier tend le grand pont de corde.
         7 => OutdoorSpec {
-            fauna: Some(ELF_FAUNA),
+            fauna: Some(&balance().spawn.elf_fauna),
             mechanism: Some(Mechanism { kind: InteractKind::Push, intro: "rope_intro", panel: "rope_panel" }),
             ..base("La rivière et le pont de corde", Region::Marsh, level, 4, 5, Some((QuestKind::Breach, 1)), ExitKind::Bridge, Some(Region::Marsh))
         },
@@ -2026,14 +2005,14 @@ fn run_exit(
             && !standing.is_empty()
             && standing.iter().all(|(_, p, ..)| match area {
                 Some(area) => p.0.cmpge(area.min).all() && p.0.cmple(area.max).all(),
-                None => p.0.distance(exit_pos.0) <= EXIT_RADIUS,
+                None => p.0.distance(exit_pos.0) <= balance().rules.exit_radius,
             });
         if !all_in {
             *countdown = 0.0;
             return;
         }
         *countdown += time.delta_secs();
-        if *countdown < EXIT_DELAY {
+        if *countdown < balance().rules.exit_delay {
             return;
         }
         *countdown = 0.0;
@@ -2104,28 +2083,28 @@ fn player_specials(
         match class {
             HeroClass::Knight => {
                 for (ally, ally_pos) in &allies {
-                    if ally_pos.0.distance(pos.0) <= BULWARK_RADIUS {
-                        commands.entity(ally).insert((Shielded, ShieldTimer(BULWARK_DURATION)));
+                    if ally_pos.0.distance(pos.0) <= balance().abilities.bulwark_radius {
+                        commands.entity(ally).insert((Shielded, ShieldTimer(balance().abilities.bulwark_duration)));
                     }
                 }
             }
             HeroClass::Sorcerer => {
                 commands.spawn((
                     WorldEntity,
-                    Zone { radius: ARCANE_RADIUS, class: *class },
-                    Position(pos.0 + facing.0 * ARCANE_OFFSET),
+                    Zone { radius: balance().abilities.arcane_radius, class: *class },
+                    Position(pos.0 + facing.0 * balance().abilities.arcane_offset),
                     ZoneLife(0.4),
                     // Un seul coup, au premier instant.
-                    ZoneDamage { damage: ARCANE_DAMAGE, interval: 10.0, timer: 0.0 },
+                    ZoneDamage { damage: balance().abilities.arcane_damage, interval: 10.0, timer: 0.0 },
                 ));
             }
             HeroClass::Ranger => {
                 commands.spawn((
                     WorldEntity,
-                    Zone { radius: RAIN_RADIUS, class: *class },
-                    Position(pos.0 + facing.0 * RAIN_OFFSET),
-                    ZoneLife(RAIN_DURATION),
-                    ZoneDamage { damage: RAIN_DAMAGE, interval: RAIN_INTERVAL, timer: 0.0 },
+                    Zone { radius: balance().abilities.rain_radius, class: *class },
+                    Position(pos.0 + facing.0 * balance().abilities.rain_offset),
+                    ZoneLife(balance().abilities.rain_duration),
+                    ZoneDamage { damage: balance().abilities.rain_damage, interval: balance().abilities.rain_interval, timer: 0.0 },
                 ));
             }
             HeroClass::Forgebraise => {
@@ -2140,7 +2119,7 @@ fn player_specials(
                     Turret,
                     TurretOwner(entity),
                     Position(pos.0 + facing.0 * 14.0),
-                    TurretLife(TURRET_LIFETIME),
+                    TurretLife(balance().abilities.turret_lifetime),
                     Cooldown::default(),
                 ));
             }
@@ -2206,18 +2185,18 @@ fn run_turrets(
         let nearest = targets
             .iter()
             .map(|t| t.0)
-            .filter(|t| t.distance(pos.0) <= TURRET_RANGE)
+            .filter(|t| t.distance(pos.0) <= balance().abilities.turret_range)
             .min_by(|a, b| a.distance(pos.0).total_cmp(&b.distance(pos.0)));
         if let Some(target) = nearest {
             let dir = (target - pos.0).normalize_or_zero();
-            cooldown.0 = TURRET_COOLDOWN;
+            cooldown.0 = balance().abilities.turret_cooldown;
             commands.spawn((
                 WorldEntity,
                 Projectile { class: HeroClass::Forgebraise, dir },
                 Position(pos.0 + dir * 8.0),
-                Velocity(dir * TURRET_SHOT_SPEED),
-                Damage(TURRET_DAMAGE),
-                Lifetime(TURRET_RANGE / TURRET_SHOT_SPEED + 0.2),
+                Velocity(dir * balance().abilities.turret_shot_speed),
+                Damage(balance().abilities.turret_damage),
+                Lifetime(balance().abilities.turret_range / balance().abilities.turret_shot_speed + 0.2),
             ));
         }
     }
@@ -2352,6 +2331,7 @@ fn run_traps(
     time: Res<Time>,
     mut traps: Query<(Entity, &Position, &mut Trap, &mut Hold, &mut TrapCooldown, &mut TrapIdle, Has<Disarmed>), Without<Player>>,
     mut players: Query<(&Position, &HeroClass, &Interacting, &mut Health), (With<Player>, Without<Downed>)>,
+    mut monsters: Query<(&Position, &Monster, &mut Health), Without<Player>>,
 ) {
     let dt = time.delta_secs();
     for (entity, pos, mut trap, mut hold, mut cooldown, mut idle, disarmed) in &mut traps {
@@ -2369,7 +2349,7 @@ fn run_traps(
         });
         if disarming {
             hold.0 += dt;
-            if hold.0 >= TRAP_DISARM_TIME {
+            if hold.0 >= balance().traps.disarm_time {
                 commands.entity(entity).insert(Disarmed);
                 if trap.armed {
                     trap.armed = false;
@@ -2380,7 +2360,7 @@ fn run_traps(
             hold.0 = (hold.0 - dt).max(0.0);
         }
         // Réveil à l'approche d'un héros, sommeil quand tout le monde s'est éloigné.
-        let near = players.iter().any(|(p, ..)| p.0.distance(pos.0) <= TRAP_WAKE_RADIUS);
+        let near = players.iter().any(|(p, ..)| p.0.distance(pos.0) <= balance().traps.wake_radius);
         if near {
             idle.0 = 0.0;
             if !trap.armed {
@@ -2388,7 +2368,7 @@ fn run_traps(
             }
         } else {
             idle.0 += dt;
-            if idle.0 >= TRAP_SLEEP_DELAY && trap.armed {
+            if idle.0 >= balance().traps.sleep_delay && trap.armed {
                 trap.armed = false;
             }
         }
@@ -2396,9 +2376,16 @@ fn run_traps(
             continue;
         }
         for (p, _, _, mut health) in &mut players {
-            if p.0.distance(pos.0) <= TRAP_TRIGGER_RADIUS {
-                health.current -= TRAP_DAMAGE;
-                cooldown.0 = TRAP_COOLDOWN;
+            if p.0.distance(pos.0) <= balance().traps.trigger_radius {
+                health.current -= balance().traps.damage;
+                cooldown.0 = balance().traps.cooldown;
+            }
+        }
+        // Les monstres se blessent aussi sur les pointes, sans les éviter. Ni les chauves-souris (elles volent) ni les boss.
+        for (p, monster, mut health) in &mut monsters {
+            if p.0.distance(pos.0) <= balance().traps.trigger_radius && monster.0 != MonsterKind::Bat && !monster.0.is_boss() {
+                health.current -= balance().traps.damage;
+                cooldown.0 = balance().traps.cooldown;
             }
         }
     }
@@ -2416,7 +2403,7 @@ fn open_locked_doors(
         }
         let near = heroes
             .iter()
-            .find(|(p, _, _, downed)| !downed && p.0.distance(pos.0) <= DOOR_OPEN_RANGE + TILE_SIZE / 2.0)
+            .find(|(p, _, _, downed)| !downed && p.0.distance(pos.0) <= balance().rules.door_open_range + TILE_SIZE / 2.0)
             .map(|(_, party, ..)| *party);
         let Some(party) = near else {
             continue;
@@ -2677,10 +2664,6 @@ fn unstick(route: &mut Route, pos: Vec2, dir: Vec2, dt: f32) -> Vec2 {
 const STUCK_CHECK: f32 = 0.8;
 const STUCK_DISTANCE: f32 = 4.0;
 const STUCK_DETOUR: f32 = 0.5;
-/// Un compagnon n'est ramené de force auprès du chef qu'au-delà de cette distance, ou après avoir été plus loin que `AI_LEASH`
-/// pendant `AI_LEASH_PATIENCE` secondes.
-const AI_LEASH_FAR: f32 = 480.0;
-const AI_LEASH_PATIENCE: f32 = 6.0;
 
 /// Les compagnons (héros non dirigés) suivent le héros dirigé, relèvent les alliés à terre et combattent seuls,
 /// avec leur seule arme de base: les pouvoirs spéciaux restent réservés au héros que dirige le joueur.
@@ -2697,16 +2680,22 @@ fn hero_ai(
             &mut Facing,
             &mut Attacking,
             &mut Route,
+            &Health,
         ),
         (With<Player>, Without<Controlled>, Without<Downed>),
     >,
     leaders: Query<(&PartyId, &Position), (With<Controlled>, Without<Downed>)>,
+    foods: Query<(&Position, &Pickup), Without<Player>>,
+    traps: Query<(&Position, Has<Disarmed>), (With<Trap>, Without<Player>)>,
     downed: Query<(&PartyId, &Position), (With<Player>, With<Downed>)>,
     enemies: Query<&Position, (Or<(With<Monster>, With<Generator>)>, Without<Player>)>,
 ) {
     let dt = time.delta_secs();
-    let solids: Vec<_> = doors.iter().map(|(p, s)| (p.0, s.0)).collect();
-    for (party, class, pos, mut dir, mut facing, mut attacking, mut route) in &mut heroes {
+    let mut solids: Vec<_> = doors.iter().map(|(p, s)| (p.0, s.0)).collect();
+    // Les compagnons contournent les pièges, comme des obstacles. Si aucun chemin n'en évite un (couloir barré), ils passent quand
+    // même: `steer` essaie alors d'approcher en ligne droite.
+    solids.extend(traps.iter().filter(|(_, disarmed)| !disarmed).map(|(p, _)| (p.0, Vec2::splat(balance().traps.trigger_radius + 2.0))));
+    for (party, class, pos, mut dir, mut facing, mut attacking, mut route, health) in &mut heroes {
         dir.0 = Vec2::ZERO;
         attacking.0 = false;
         let leader = leaders.iter().find(|(id, _)| *id == party).map(|(_, p)| p.0);
@@ -2716,8 +2705,8 @@ fn hero_ai(
             .iter()
             .map(|e| (e.0.distance(pos.0), e.0))
             .filter(|(d, e)| {
-                *d <= AI_AGGRO
-                    && leader.is_none_or(|l| l.distance(*e) <= AI_GROUP_RADIUS)
+                *d <= class.tuning().companion_aggro
+                    && leader.is_none_or(|l| l.distance(*e) <= class.tuning().companion_group_radius)
                     && room.segment_clear(pos.0, *e, 1.0)
             })
             .min_by(|a, b| a.0.total_cmp(&b.0));
@@ -2736,7 +2725,7 @@ fn hero_ai(
                 }
                 Attack::Shot { .. } => {
                     // Les tireurs gardent leurs distances.
-                    attacking.0 = distance <= AI_SHOT_REACH;
+                    attacking.0 = distance <= class.tuning().companion_shot_reach;
                     if distance < 45.0 {
                         dir.0 = -to;
                     } else if distance > 100.0 {
@@ -2755,10 +2744,14 @@ fn hero_ai(
             .map(|(_, p)| p.0)
             .min_by(|a, b| a.distance(pos.0).total_cmp(&b.distance(pos.0)));
         if let Some(ally) = ally {
-            if ally.distance(pos.0) > REVIVE_RANGE * 0.5 {
+            if ally.distance(pos.0) > balance().rules.revive_range * 0.5 {
                 dir.0 = steer(&room, &solids, &mut route, pos.0, ally, dt);
                 dir.0 = unstick(&mut route, pos.0, dir.0, dt);
             }
+        } else if let Some(food) = wounded_food_goal(class.tuning(), health, pos.0, leader, &foods) {
+            // Un compagnon blessé va manger la nourriture proche: `collect_food` la lui donne en arrivant.
+            dir.0 = steer(&room, &solids, &mut route, pos.0, food, dt);
+            dir.0 = unstick(&mut route, pos.0, dir.0, dt);
         } else if let Some(leader) = leader {
             // Dans un couloir étroit la place prévue en formation tombe dans un mur: on suit alors le chef de près.
             let slot = leader + formation_offset(*class);
@@ -2778,6 +2771,20 @@ fn hero_ai(
     }
 }
 
+/// La nourriture que va chercher un compagnon, s'il peut manger (`can_eat`): la plus proche dans un rayon d'une salle
+/// (`companion_food_radius`), sans s'éloigner de plus de `companion_leash` du chef.
+fn wounded_food_goal(ai: &balance::Hero, health: &Health, at: Vec2, leader: Option<Vec2>, foods: &Query<(&Position, &Pickup), Without<Player>>) -> Option<Vec2> {
+    if !can_eat(health) {
+        return None;
+    }
+    foods
+        .iter()
+        .filter(|(_, pickup)| pickup.0 == PickupKind::Food)
+        .map(|(pos, _)| pos.0)
+        .filter(|food| food.distance(at) <= ai.companion_food_radius && leader.is_none_or(|l| l.distance(*food) <= ai.companion_leash))
+        .min_by(|a, b| a.distance(at).total_cmp(&b.distance(at)))
+}
+
 /// Place de chaque compagnon autour du héros dirigé.
 fn formation_offset(class: HeroClass) -> Vec2 {
     match class {
@@ -2788,25 +2795,26 @@ fn formation_offset(class: HeroClass) -> Vec2 {
     }
 }
 
-/// Un compagnon vraiment perdu est ramené auprès du chef: très loin, tout de suite; moyennement loin (plus que `AI_LEASH`), après
-/// `AI_LEASH_PATIENCE` secondes pendant lesquelles il n'a pas réussi à rejoindre le groupe. Avant cela, il se débrouille (itinéraire
+/// Un compagnon vraiment perdu est ramené auprès du chef: très loin, tout de suite; moyennement loin (plus que `companion_leash`), après
+/// `companion_leash_patience` secondes pendant lesquelles il n'a pas réussi à rejoindre le groupe. Avant cela, il se débrouille (itinéraire
 /// autour des obstacles, pas de côté si coincé, voir `steer` et `unstick`).
 fn leash_followers(
     time: Res<Time>,
-    mut followers: Query<(&PartyId, &mut Position, &mut Route), (With<Player>, Without<Controlled>, Without<Downed>)>,
+    mut followers: Query<(&PartyId, &HeroClass, &mut Position, &mut Route), (With<Player>, Without<Controlled>, Without<Downed>)>,
     leaders: Query<(&PartyId, &Position), (With<Controlled>, Without<Downed>)>,
 ) {
-    for (party, mut pos, mut route) in &mut followers {
+    for (party, class, mut pos, mut route) in &mut followers {
         let Some((_, leader)) = leaders.iter().find(|(id, _)| *id == party) else {
             continue;
         };
         let distance = leader.0.distance(pos.0);
-        if distance <= AI_LEASH {
+        let ai = class.tuning();
+        if distance <= ai.companion_leash {
             route.lost = 0.0;
             continue;
         }
         route.lost += time.delta_secs();
-        if distance > AI_LEASH_FAR || route.lost > AI_LEASH_PATIENCE {
+        if distance > ai.companion_leash_far || route.lost > ai.companion_leash_patience {
             pos.0 = leader.0;
             route.lost = 0.0;
             route.waypoints.clear();
@@ -2848,27 +2856,27 @@ mod tests {
         app.update();
     }
 
-    /// Une potion rend POTION_HEAL_PER_SECOND des PV maximum par seconde, pendant POTION_DURATION secondes, sans dépasser le maximum.
+    /// Une potion rend pickups.potion_heal_per_second des PV maximum par seconde, pendant pickups.potion_duration secondes, sans dépasser le maximum.
     #[test]
     fn regeneration_heals_over_time_then_stops() {
         let mut app = app_with_time();
         app.add_systems(Update, run_regen);
         let id = hero(app.world_mut(), 0, Vec2::ZERO, true, 10.0);
-        app.world_mut().entity_mut(id).insert((Regen(POTION_DURATION), Regenerating));
+        app.world_mut().entity_mut(id).insert((Regen(balance().pickups.potion_duration), Regenerating));
 
         advance(&mut app, 1.0);
         let hp = app.world().get::<Health>(id).unwrap().current;
-        assert!((hp - (10.0 + 100.0 * POTION_HEAL_PER_SECOND)).abs() < 0.01, "après 1 s: {hp}");
+        assert!((hp - (10.0 + 100.0 * balance().pickups.potion_heal_per_second)).abs() < 0.01, "après 1 s: {hp}");
 
-        advance(&mut app, POTION_DURATION);
+        advance(&mut app, balance().pickups.potion_duration);
         let health = app.world().get::<Health>(id).unwrap();
         let healed = health.current - 10.0;
-        // L'effet dure POTION_DURATION en tout: pas un PV de plus.
-        assert!((healed - 100.0 * POTION_HEAL_PER_SECOND * POTION_DURATION).abs() < 0.05, "total soigné: {healed}");
+        // L'effet dure pickups.potion_duration en tout: pas un PV de plus.
+        assert!((healed - 100.0 * balance().pickups.potion_heal_per_second * balance().pickups.potion_duration).abs() < 0.05, "total soigné: {healed}");
         assert!(app.world().get::<Regen>(id).is_none() && app.world().get::<Regenerating>(id).is_none());
 
         // Jamais au-delà du maximum.
-        app.world_mut().entity_mut(id).insert((Regen(POTION_DURATION), Regenerating));
+        app.world_mut().entity_mut(id).insert((Regen(balance().pickups.potion_duration), Regenerating));
         app.world_mut().get_mut::<Health>(id).unwrap().current = 99.0;
         advance(&mut app, 3.0);
         assert_eq!(app.world().get::<Health>(id).unwrap().current, 100.0);
@@ -2879,7 +2887,7 @@ mod tests {
         let mut app = app_with_time();
         app.add_systems(Update, run_regen);
         let id = hero(app.world_mut(), 0, Vec2::ZERO, true, 0.0);
-        app.world_mut().entity_mut(id).insert((Regen(POTION_DURATION), Regenerating, Downed));
+        app.world_mut().entity_mut(id).insert((Regen(balance().pickups.potion_duration), Regenerating, Downed));
         advance(&mut app, 2.0);
         assert_eq!(app.world().get::<Health>(id).unwrap().current, 0.0);
         assert!(app.world().get::<Regen>(id).is_none());
@@ -2909,6 +2917,159 @@ mod tests {
         app.update();
         assert!(app.world().get_entity(potion).is_ok());
         assert!(app.world().get::<Regen>(idle).is_none());
+    }
+
+    /// La nourriture ne va qu'aux héros à qui il manque au moins une ration de PV (dirigés ou non); le plus mal en point passe avant.
+    #[test]
+    fn food_goes_to_the_most_wounded_hero_below_half_health() {
+        let spot = Vec2::new(40.0, 40.0);
+        let setup = || {
+            let mut app = app_with_time();
+            app.init_resource::<LevelStats>().add_systems(Update, collect_food);
+            app
+        };
+
+        // Un héros à 80 PV sur 100 ne la mange pas (une ration en gaspillerait une partie): elle reste au sol.
+        let mut app = setup();
+        let healthy = hero(app.world_mut(), 0, spot, true, 80.0);
+        let food = app.world_mut().spawn((Pickup(PickupKind::Food), Position(spot))).id();
+        app.update();
+        assert!(app.world().get_entity(food).is_ok());
+        assert_eq!(app.world().get::<Health>(healthy).unwrap().current, 80.0);
+
+        // Dès qu'il lui manque exactement une ration (75 sur 100), il la mange.
+        let mut app = setup();
+        let at_limit = hero(app.world_mut(), 0, spot, true, 100.0 - balance().pickups.food_heal);
+        let food = app.world_mut().spawn((Pickup(PickupKind::Food), Position(spot))).id();
+        app.update();
+        assert!(app.world().get_entity(food).is_err());
+        assert_eq!(app.world().get::<Health>(at_limit).unwrap().current, 100.0);
+
+        // Plusieurs héros éligibles à portée: le plus mal en point la mange, même s'il n'est pas dirigé; les autres rien.
+        let mut app = setup();
+        let leader = hero(app.world_mut(), 0, spot, true, 40.0);
+        let worse = hero(app.world_mut(), 0, spot + Vec2::new(3.0, 0.0), false, 10.0);
+        let healthy = hero(app.world_mut(), 0, spot, false, 90.0);
+        let far = hero(app.world_mut(), 0, Vec2::new(-300.0, 0.0), false, 1.0);
+        let food = app.world_mut().spawn((Pickup(PickupKind::Food), Position(spot))).id();
+        app.update();
+        assert!(app.world().get_entity(food).is_err(), "la nourriture est mangée");
+        assert_eq!(app.world().get::<Health>(worse).unwrap().current, 10.0 + balance().pickups.food_heal);
+        assert_eq!(app.world().get::<Health>(leader).unwrap().current, 40.0);
+        assert_eq!(app.world().get::<Health>(healthy).unwrap().current, 90.0);
+        assert_eq!(app.world().get::<Health>(far).unwrap().current, 1.0, "trop loin");
+        assert_eq!(app.world().resource::<LevelStats>().food, 1);
+    }
+
+    /// Un piège réveillé blesse aussi les monstres qui marchent dessus, sauf les chauves-souris et les boss.
+    #[test]
+    fn an_armed_trap_hurts_monsters_that_step_on_it() {
+        let mut app = app_with_time();
+        app.add_systems(Update, run_traps);
+        let spot = Vec2::new(100.0, 100.0);
+        hero(app.world_mut(), 0, spot + Vec2::new(30.0, 0.0), true, 100.0);
+        let monster = |world: &mut World, kind| world.spawn((Monster(kind), Position(spot), Health { current: 50.0, max: 50.0 })).id();
+        let goblin = monster(app.world_mut(), MonsterKind::Goblin);
+        let bat = monster(app.world_mut(), MonsterKind::Bat);
+        let boss = monster(app.world_mut(), MonsterKind::Troll);
+        app.world_mut().spawn((Trap { armed: false }, Position(spot), Hold::default(), TrapCooldown::default(), TrapIdle::default()));
+        advance(&mut app, 0.1);
+        let hp = |app: &App, id| app.world().get::<Health>(id).unwrap().current;
+        assert_eq!(hp(&app, goblin), 50.0 - balance().traps.damage);
+        assert_eq!(hp(&app, bat), 50.0, "il vole");
+        assert_eq!(hp(&app, boss), 50.0);
+    }
+
+    /// Un compagnon contourne un piège posé sur son chemin au lieu de marcher dessus.
+    #[test]
+    fn a_companion_walks_around_a_trap_on_its_way() {
+        let floor = vec![".".repeat(60); 40];
+        let rows: Vec<&str> = floor.iter().map(String::as_str).collect();
+        let mut app = app_with_time();
+        app.insert_resource(Room::from_rows(&rows));
+        app.add_systems(Update, (hero_ai, run_traps).chain());
+        let leader = Vec2::new(400.0, 300.0);
+        hero(app.world_mut(), 0, leader, true, 100.0);
+        // Le compagnon part de l'ouest, le piège est exactement entre lui et sa place près du chef.
+        let start = Vec2::new(250.0, 300.0 + formation_offset(HeroClass::Knight).y);
+        let companion = hero(app.world_mut(), 0, start, false, 100.0);
+        app.world_mut().entity_mut(companion).insert((Route::default(), Facing(Vec2::X), Attacking(false), MoveDir(Vec2::ZERO)));
+        let slot = leader + formation_offset(HeroClass::Knight);
+        let trap_at = Vec2::new((start.x + slot.x) / 2.0, start.y);
+        app.world_mut().spawn((Trap { armed: false }, Position(trap_at), Hold::default(), TrapCooldown::default(), TrapIdle::default()));
+        let mut closest = f32::MAX;
+        for _ in 0..200 {
+            advance(&mut app, 0.05);
+            let at = app.world().get::<Position>(companion).unwrap().0;
+            let dir = app.world().get::<MoveDir>(companion).unwrap().0;
+            app.world_mut().get_mut::<Position>(companion).unwrap().0 = at + dir * 60.0 * 0.05;
+            closest = closest.min(at.distance(trap_at));
+        }
+        assert!(closest > balance().traps.trigger_radius, "il n'est jamais passé sur le piège (au plus près: {closest})");
+        let end = app.world().get::<Position>(companion).unwrap().0;
+        assert!(end.distance(slot) < 20.0, "mais il a bien rejoint sa place: {end:?} pour {slot:?}");
+        assert_eq!(app.world().get::<Health>(companion).unwrap().current, 100.0);
+    }
+
+    /// Un compagnon qui peut manger (il lui manque une ration de PV) va chercher la nourriture proche, pas celle qui est loin; un compagnon en
+    /// bonne santé reste avec le chef.
+    #[test]
+    fn a_wounded_companion_walks_to_nearby_food() {
+        let floor = vec![".".repeat(60); 40];
+        let rows: Vec<&str> = floor.iter().map(String::as_str).collect();
+        let setup = |hp: f32, food_at: Vec2| {
+            let mut app = app_with_time();
+            app.insert_resource(Room::from_rows(&rows));
+            app.add_systems(Update, hero_ai);
+            let leader = Vec2::ZERO;
+            hero(app.world_mut(), 0, leader, true, 100.0);
+            let companion = hero(app.world_mut(), 0, leader + formation_offset(HeroClass::Knight), false, hp);
+            app.world_mut().entity_mut(companion).insert(Route::default());
+            app.world_mut().entity_mut(companion).insert((Facing(Vec2::X), Attacking(false), MoveDir(Vec2::ZERO)));
+            app.world_mut().spawn((Pickup(PickupKind::Food), Position(food_at)));
+            (app, companion)
+        };
+        let direction = |app: &App, id: Entity| app.world().get::<MoveDir>(id).unwrap().0;
+
+        // Blessé, nourriture à 80 unités: il s'y dirige (elle est à sa droite, loin de sa place d'escorte).
+        let (mut app, companion) = setup(30.0, Vec2::new(70.0, -14.0));
+        advance(&mut app, 0.1);
+        assert!(direction(&app, companion).x > 0.5, "il va vers la nourriture: {:?}", direction(&app, companion));
+
+        // Trop loin (hors du rayon): il suit le chef, qui est à gauche de lui.
+        let (mut app, companion) = setup(30.0, Vec2::new(70.0 + HeroClass::Knight.tuning().companion_food_radius, -14.0));
+        advance(&mut app, 0.1);
+        assert!(direction(&app, companion).x <= 0.0, "il ignore la nourriture lointaine");
+
+        // En bonne santé: il ne s'en occupe pas.
+        let (mut app, companion) = setup(80.0, Vec2::new(70.0, -14.0));
+        advance(&mut app, 0.1);
+        assert!(direction(&app, companion).x <= 0.0, "il ne quitte pas le chef");
+    }
+
+    /// Chaque niveau avec une salle au trésor (porte à clé) a une seule clé, et cette salle est pleine de nourriture.
+    #[test]
+    fn a_treasure_level_has_one_key_and_a_room_full_of_food() {
+        for level in 1..=castle_shared::LEVEL_COUNT {
+            let def = castle_shared::level_def(level);
+            let keys = def.things.iter().filter(|t| matches!(t, Thing::Pickup { kind: PickupKind::Key, .. })).count();
+            let Some(treasure) = def.layout.treasure.and_then(|t| def.layout.rooms.get(t)) else {
+                assert_eq!(keys, 0, "niveau {level}: une clé sans porte à ouvrir");
+                continue;
+            };
+            assert_eq!(keys, 1, "niveau {level}: une seule clé");
+            let food_inside = def
+                .things
+                .iter()
+                .filter(|t| match t {
+                    Thing::Pickup { kind: PickupKind::Food, at } => {
+                        at.x >= treasure.min.x as f32 && at.x <= treasure.max.x as f32 + 1.0 && at.y >= treasure.min.y as f32 && at.y <= treasure.max.y as f32 + 1.0
+                    }
+                    _ => false,
+                })
+                .count();
+            assert_eq!(food_inside, 8, "niveau {level}: la salle au trésor est pleine de nourriture");
+        }
     }
 
     /// Un château contient beaucoup de monstres d'avance, plusieurs générateurs par salle et des potions.
@@ -2958,15 +3119,15 @@ mod tests {
         advance(&mut app, 0.1);
         assert!(!is_armed(&app, t), "loin: le piège dort");
 
-        move_hero(&mut app, hero, Vec2::new(TRAP_WAKE_RADIUS - 1.0, 0.0));
+        move_hero(&mut app, hero, Vec2::new(balance().traps.wake_radius - 1.0, 0.0));
         advance(&mut app, 0.1);
         assert!(is_armed(&app, t), "à l'approche: pointes sorties");
         assert_eq!(app.world().get::<Health>(hero).unwrap().current, 100.0, "réveillé mais pas encore marché dessus");
 
-        move_hero(&mut app, hero, Vec2::new(TRAP_WAKE_RADIUS + 20.0, 0.0));
-        advance(&mut app, TRAP_SLEEP_DELAY * 0.5);
+        move_hero(&mut app, hero, Vec2::new(balance().traps.wake_radius + 20.0, 0.0));
+        advance(&mut app, balance().traps.sleep_delay * 0.5);
         assert!(is_armed(&app, t), "il ne se rendort pas tout de suite");
-        advance(&mut app, TRAP_SLEEP_DELAY);
+        advance(&mut app, balance().traps.sleep_delay);
         assert!(!is_armed(&app, t), "personne autour: il se rendort");
     }
 
@@ -2975,18 +3136,18 @@ mod tests {
         let mut app = app_with_time();
         app.add_systems(Update, run_traps);
         let t = trap(app.world_mut(), Vec2::ZERO);
-        let hero = hero(app.world_mut(), 0, Vec2::new(TRAP_WAKE_RADIUS - 1.0, 0.0), true, 100.0);
+        let hero = hero(app.world_mut(), 0, Vec2::new(balance().traps.wake_radius - 1.0, 0.0), true, 100.0);
         advance(&mut app, 0.1);
         assert!(is_armed(&app, t));
         // Le héros marche sur le piège réveillé.
         move_hero(&mut app, hero, Vec2::new(1.0, 0.0));
         advance(&mut app, 0.1);
-        assert_eq!(app.world().get::<Health>(hero).unwrap().current, 100.0 - TRAP_DAMAGE);
+        assert_eq!(app.world().get::<Health>(hero).unwrap().current, 100.0 - balance().traps.damage);
         // Pas de nouveau coup avant la fin du délai.
         advance(&mut app, 0.1);
-        assert_eq!(app.world().get::<Health>(hero).unwrap().current, 100.0 - TRAP_DAMAGE);
-        advance(&mut app, TRAP_COOLDOWN);
-        assert_eq!(app.world().get::<Health>(hero).unwrap().current, 100.0 - 2.0 * TRAP_DAMAGE);
+        assert_eq!(app.world().get::<Health>(hero).unwrap().current, 100.0 - balance().traps.damage);
+        advance(&mut app, balance().traps.cooldown);
+        assert_eq!(app.world().get::<Health>(hero).unwrap().current, 100.0 - 2.0 * balance().traps.damage);
     }
 
     #[test]
@@ -3326,7 +3487,7 @@ mod tests {
             .world_mut()
             .spawn((Player, PartyId(0), HeroClass::Ranger, Position(Vec2::new(10.0, 0.0)), Health { current: 100.0, max: 100.0 }, Interacting(true)))
             .id();
-        advance(&mut app, TRAP_DISARM_TIME + 0.2);
+        advance(&mut app, balance().traps.disarm_time + 0.2);
         assert!(app.world().get::<Disarmed>(t).is_some(), "désarmé");
         assert!(!is_armed(&app, t));
         // Même collé au piège, il ne se réveille plus et ne blesse pas.
