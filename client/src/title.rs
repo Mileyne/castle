@@ -242,6 +242,12 @@ fn spawn_title(mut commands: Commands, assets: Res<AssetServer>) {
                         Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: Val::Px(10.0), ..default() },
                     ));
                 });
+            // Signature et version, en bas à gauche de l'écran.
+            screen.spawn((
+                Text::new(format!("Mileyne Games  v{}", env!("CARGO_PKG_VERSION"))),
+                menu_style(&assets, 8.0, css::LIGHT_GRAY.into()),
+                Node { position_type: PositionType::Absolute, left: Val::Px(20.0), bottom: Val::Px(12.0), ..default() },
+            ));
         });
 }
 
@@ -357,7 +363,6 @@ fn rebuild_menu(
                         row.spawn((menu_text(&assets, 16.0, color), Tr::new(key), tag));
                     });
                 }
-                line(ui, "menu-hint", 8.0, css::LIGHT_GRAY.into());
             }
             Screen::Saves => {
                 line(ui, "menu-play", 16.0, css::LIGHT_SKY_BLUE.into());
@@ -394,8 +399,10 @@ fn rebuild_menu(
                 if menu.saves.is_empty() {
                     line(ui, "menu-no-saves", 10.0, css::LIGHT_GRAY.into());
                 }
-                let hint = if menu.confirm_delete { "menu-confirm-delete" } else { "menu-saves-hint" };
-                line(ui, hint, 8.0, if menu.confirm_delete { css::TOMATO.into() } else { css::LIGHT_GRAY.into() });
+                // Seule la demande de confirmation s'affiche: pas de rappel des touches.
+                if menu.confirm_delete {
+                    line(ui, "menu-confirm-delete", 8.0, css::TOMATO.into());
+                }
             }
             Screen::NewName => {
                 line(ui, "menu-enter-name", 14.0, css::LIGHT_SKY_BLUE.into());
@@ -452,7 +459,6 @@ fn rebuild_menu(
                         });
                     }
                 }
-                line(ui, "menu-input-hint", 8.0, css::LIGHT_GRAY.into());
             }
             Screen::Settings => {
                 line(ui, "menu-settings", 16.0, css::LIGHT_SKY_BLUE.into());
