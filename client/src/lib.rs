@@ -47,15 +47,6 @@ mod touch;
 mod weather;
 mod ui;
 
-/// Réglages de la salve du Rôdeur lus par les effets (nombre de flèches, angle de l'éventail en radians).
-pub(crate) fn balance_arrows() -> usize {
-    balance().abilities.volley_arrows.round().max(1.0) as usize
-}
-
-pub(crate) fn balance_spread() -> f32 {
-    balance().abilities.volley_spread.to_radians()
-}
-
 /// Vitesse de rattrapage visuel vers la position du serveur.
 const SMOOTHING: f32 = 20.0;
 /// Hauteur des bras d'un héros au-dessus de sa position au sol, en unités du monde: les projectiles en partent.

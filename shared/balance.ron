@@ -342,6 +342,7 @@
     freeze_radius: 260.0,
     freeze_duration: 10.0,
     freeze_boss_factor: 0.3,
+    volley_duration: 10.0,
     volley_arrows: 3.0,
     volley_spread: 28.0,
     volley_damage_factor: 1.0,

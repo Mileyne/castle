@@ -73,7 +73,7 @@ Chaque personnage doit être immédiatement identifiable à l'écran et utile en
 ### 3. Le Rôdeur — Distance / exploration
 - **Caractère :** pragmatique, solitaire, ironique, grand observateur.
 - **Attaque principale :** arc ou arbalète.
-- **Pouvoir spécial : Salve** — tire trois flèches d'un coup, en éventail.
+- **Pouvoir spécial : Salve** — pendant 10 secondes, chaque tir part en éventail de trois flèches.
 - **Passifs :** détection des passages secrets, bonus de critique, désamorçage de pièges.
 - **Évolutions :** Chasseur royal, Ombre des bois, Maître traqueur.
 

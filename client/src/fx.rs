@@ -4,7 +4,8 @@
 //!   protégé, tant que l'immunité dure; elle clignote dans les dernières secondes.
 //! - **Gel** (Ensorceleur): une onde de givre qui s'étend jusqu'à la portée exacte du pouvoir, une tempête de flocons; chaque monstre
 //!   figé se couvre de cristaux de glace qui scintillent, et devient bleuté.
-//! - **Salve** (Rôdeur): un éclair de lumière et des traits de vent le long de chaque flèche; chaque flèche laisse une traînée dorée.
+//! - **Salve** (Rôdeur): un éclair de lumière, puis une aura verte et dorée autour du Rôdeur tant que l'effet dure (elle clignote à la fin);
+//!   chaque flèche de l'éventail laisse une traînée lumineuse.
 //! - **Frappe titanesque** (Forgebraise): un flash, une onde de choc qui s'arrête au rayon de l'impact, des fissures incandescentes dans
 //!   le sol, des braises et de la poussière.
 //!
@@ -20,7 +21,7 @@ use castle_shared::{Frozen, HeroClass, Position, Shielded, SpecialFx};
 
 use crate::decor3d::{DecorCamera, LAYER};
 use crate::live3d::ModelTint;
-use crate::sim::{Hurtbox, ShieldTimer, Volley};
+use crate::sim::{Hurtbox, ShieldTimer, Volley, Volleying};
 
 pub struct FxPlugin;
 
@@ -36,7 +37,7 @@ impl Plugin for FxPlugin {
             .add_observer(|removed: On<Remove<Frozen>>, mut commands: Commands| {
                 commands.entity(removed.entity).remove::<ModelTint>();
             })
-            .add_systems(Update, (aegis_start, freeze_start, ambient_sparks, volley_trails, update_fx).chain());
+            .add_systems(Update, (aegis_start, freeze_start, volley_start, ambient_sparks, volley_trails, update_fx).chain());
     }
 }
 
@@ -233,6 +234,7 @@ enum Plane {
 enum Needs {
     Frozen,
     Shielded,
+    Volleying,
 }
 
 #[derive(Component)]
@@ -369,6 +371,7 @@ fn update_fx(
     camera: Query<&Transform, (With<DecorCamera>, Without<Fx>)>,
     frozen: Query<&Position, With<Frozen>>,
     shielded: Query<(&Position, Option<&ShieldTimer>), With<Shielded>>,
+    volleying: Query<(&Position, &Volleying)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut effects: Query<(Entity, &mut Fx, &mut Transform)>,
 ) {
@@ -382,6 +385,12 @@ fn update_fx(
         if let Some((owner, needs, offset)) = fx.owner {
             let place = match needs {
                 Needs::Frozen => frozen.get(owner).ok().map(|p| p.0),
+                Needs::Volleying => volleying.get(owner).ok().map(|(p, volley)| {
+                    if fx.warns && volley.0 < 2.5 {
+                        warning = 0.55 + 0.45 * (fx.age * 16.0).sin();
+                    }
+                    p.0
+                }),
                 Needs::Shielded => shielded.get(owner).ok().map(|(p, timer)| {
                     if fx.warns && timer.is_some_and(|t| t.0 < 2.5) {
                         warning = 0.55 + 0.45 * (fx.age * 16.0).sin();
@@ -506,34 +515,26 @@ fn on_special(
                 emit(commands, materials, assets, flake);
             }
         }
-        // Le Rôdeur tire une salve: un éclair à l'encoche et un trait de vent derrière chaque flèche.
+        // Le Rôdeur encoche une salve: un éclair de lumière sur lui (l'aura qui dure est posée par `volley_start`).
         HeroClass::Ranger => {
-            let muzzle = event.from + event.dir * 10.0;
-            let mut flash = Spec::new(&assets.glow, Plane::Billboard, at3(muzzle, 12.0), (10.0, 52.0), 0.22, LEAF);
+            let at = event.from;
+            let mut flash = Spec::new(&assets.glow, Plane::Billboard, at3(at, 12.0), (14.0, 90.0), 0.3, LEAF);
             flash.alpha = 0.9;
             emit(commands, materials, assets, flash);
-            let mut star = Spec::new(&assets.spark, Plane::Billboard, at3(muzzle, 12.0), (16.0, 46.0), 0.25, HOT);
+            let mut star = Spec::new(&assets.spark, Plane::Billboard, at3(at, 12.0), (20.0, 70.0), 0.35, HOT);
             star.alpha = 0.9;
             star.spin = 2.0;
             emit(commands, materials, assets, star);
-            let count = crate::balance_arrows();
-            let spread = crate::balance_spread();
-            for k in 0..count {
-                let offset = if count > 1 { (k as f32 / (count - 1) as f32 - 0.5) * spread } else { 0.0 };
-                let direction = Vec2::from_angle(offset).rotate(event.dir);
-                let mut wind = Spec::new(&assets.streak, Plane::Ground, at3(muzzle + direction * 34.0, 0.0), (74.0, 120.0), 0.32, LEAF);
-                wind.aspect = 0.14;
-                wind.angle = direction.to_angle();
-                wind.alpha = 0.8;
-                emit(commands, materials, assets, wind);
-            }
-            for _ in 0..8 {
-                let direction = Vec2::from_angle(rng.between(-0.35, 0.35)).rotate(event.dir);
-                let speed = rng.between(40.0, 120.0);
+            let mut ring = Spec::new(&assets.ring, Plane::Ground, at3(at, 0.0), (14.0, 100.0), 0.55, LEAF);
+            ring.fade_in = 0.04;
+            emit(commands, materials, assets, ring);
+            for _ in 0..14 {
+                let angle = rng.next() * std::f32::consts::TAU;
                 let size = rng.between(4.0, 8.0);
-                let mut spark = Spec::new(&assets.spark, Plane::Billboard, at3(muzzle, 12.0), (size, size * 0.4), rng.between(0.3, 0.55), GOLD);
-                spark.vel = Vec3::new(direction.x * speed, rng.between(-5.0, 15.0), -direction.y * speed);
-                spark.drag = 3.0;
+                let mut spark = Spec::new(&assets.spark, Plane::Billboard, at3(at, 4.0), (size, size * 0.5), rng.between(0.5, 0.9), GOLD);
+                spark.vel = Vec3::new(angle.cos() * rng.between(20.0, 70.0), rng.between(30.0, 80.0), -angle.sin() * rng.between(20.0, 70.0));
+                spark.drag = 2.0;
+                spark.spin = rng.between(-4.0, 4.0);
                 emit(commands, materials, assets, spark);
             }
         }
@@ -650,6 +651,34 @@ fn aegis_start(
     }
 }
 
+/// Le Rôdeur entre dans l'effet de la Salve: une aura verte et dorée le suit jusqu'à la fin de l'effet.
+fn volley_start(
+    mut commands: Commands,
+    assets: Option<Res<FxAssets>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    fresh: Query<Entity, Added<Volleying>>,
+    places: Query<&Position>,
+) {
+    let Some(assets) = assets else {
+        return;
+    };
+    for ranger in &fresh {
+        let here = places.get(ranger).map_or(Vec2::ZERO, |p| p.0);
+        let mut aura = Spec::new(&assets.glow, Plane::Billboard, at3(here, 11.0), (44.0, 44.0), f32::INFINITY, LEAF);
+        aura.alpha = 0.26;
+        aura.pulse = (0.3, 4.0);
+        aura.owner = Some((ranger, Needs::Volleying, Vec3::new(0.0, 11.0, 0.0)));
+        aura.warns = true;
+        emit(&mut commands, &mut materials, &assets, aura);
+        let mut base = Spec::new(&assets.glow, Plane::Ground, at3(here, 0.0), (42.0, 42.0), f32::INFINITY, GOLD);
+        base.alpha = 0.35;
+        base.pulse = (0.25, 4.0);
+        base.owner = Some((ranger, Needs::Volleying, Vec3::ZERO));
+        base.warns = true;
+        emit(&mut commands, &mut materials, &assets, base);
+    }
+}
+
 /// Un monstre vient d'être figé: éclat de givre, cristaux de glace autour de lui et lueur froide au sol, tant qu'il reste figé.
 fn freeze_start(
     mut commands: Commands,
@@ -714,6 +743,7 @@ fn ambient_sparks(
     mut rng: ResMut<FxRng>,
     mut clock: ResMut<FxClock>,
     shielded: Query<&Position, With<Shielded>>,
+    volleying: Query<&Position, With<Volleying>>,
     frozen: Query<(&Position, Option<&Hurtbox>), With<Frozen>>,
 ) {
     let Some(assets) = assets else {
@@ -731,6 +761,16 @@ fn ambient_sparks(
             let at = at3(pos.0, 1.0) + Vec3::new(angle.cos() * 9.0, 0.0, -angle.sin() * 9.0);
             let mut mote = Spec::new(&assets.spark, Plane::Billboard, at, (size, size * 0.5), rng.between(0.7, 1.1), GOLD);
             mote.vel = Vec3::new(0.0, rng.between(18.0, 34.0), 0.0);
+            mote.spin = rng.between(-3.0, 3.0);
+            emit(commands, materials, assets, mote);
+        }
+        // Les éclats verts qui montent autour d'un Rôdeur sous Salve.
+        for pos in &volleying {
+            let angle = rng.next() * std::f32::consts::TAU;
+            let size = rng.between(3.0, 6.0);
+            let at = at3(pos.0, 1.0) + Vec3::new(angle.cos() * 8.0, 0.0, -angle.sin() * 8.0);
+            let mut mote = Spec::new(&assets.spark, Plane::Billboard, at, (size, size * 0.5), rng.between(0.6, 1.0), LEAF);
+            mote.vel = Vec3::new(0.0, rng.between(16.0, 30.0), 0.0);
             mote.spin = rng.between(-3.0, 3.0);
             emit(commands, materials, assets, mote);
         }

@@ -122,9 +122,13 @@ struct ZoneDamage {
     timer: f32,
 }
 
-/// Flèche d'une salve du Rôdeur (le client lui donne une traînée lumineuse).
+/// Flèche tirée sous l'effet de la Salve (le client lui donne une traînée lumineuse).
 #[derive(Component)]
 pub struct Volley;
+
+/// Le Rôdeur tire trois flèches à chaque tir pendant ce nombre de secondes (pouvoir Salve).
+#[derive(Component)]
+pub struct Volleying(pub f32);
 
 /// Héros actuellement dirigé par un joueur (les autres de son équipe suivent et se défendent seuls).
 #[derive(Component)]
@@ -296,7 +300,7 @@ impl Plugin for SimPlugin {
             )
             .add_systems(
                 Update,
-                (separate_bodies, tick_frozen)
+                (separate_bodies, tick_frozen, tick_volley)
                     .run_if(in_game)
                     .run_if(not_in_transition)
                     .run_if(not_paused)
@@ -727,7 +731,7 @@ fn resolve_attacks(
     mut commands: Commands,
     time: Res<Time>,
     mut pending: Query<(Entity, &mut PendingAttack)>,
-    heroes: Query<(&Position, &Facing, &HeroClass, Has<Controlled>), (With<Player>, Without<Downed>)>,
+    heroes: Query<(&Position, &Facing, &HeroClass, Has<Controlled>, Has<Volleying>), (With<Player>, Without<Downed>)>,
     mut targets: Query<(&Position, &mut Health, &Hurtbox), Without<Player>>,
 ) {
     for (entity, mut attack) in &mut pending {
@@ -737,7 +741,7 @@ fn resolve_attacks(
         }
         commands.entity(entity).despawn();
         // Le héros peut être tombé ou parti entre-temps: le coup est alors perdu.
-        let Ok((pos, facing, class, controlled)) = heroes.get(attack.hero) else {
+        let Ok((pos, facing, class, controlled, volleying)) = heroes.get(attack.hero) else {
             continue;
         };
         let power = if controlled { 1.0 } else { class.tuning().companion_damage_factor };
@@ -755,14 +759,26 @@ fn resolve_attacks(
                 commands.trigger(AttackFx { pos: pos.0, dir: facing.0, class: *class });
             }
             Attack::Shot { speed, damage, lifetime, .. } => {
-                commands.spawn((
-                    WorldEntity,
-                    Projectile { class: *class, dir: facing.0 },
-                    Position(pos.0 + facing.0 * 8.0),
-                    Velocity(facing.0 * speed),
-                    Damage(damage * power),
-                    Lifetime(lifetime),
-                ));
+                // Sous l'effet de la Salve, un tir est un éventail de flèches.
+                let abilities = &balance().abilities;
+                let count = if volleying { abilities.volley_arrows.round().max(1.0) as usize } else { 1 };
+                let spread = abilities.volley_spread.to_radians();
+                let factor = if volleying { abilities.volley_damage_factor } else { 1.0 };
+                for k in 0..count {
+                    let offset = if count > 1 { (k as f32 / (count - 1) as f32 - 0.5) * spread } else { 0.0 };
+                    let arrow = Vec2::from_angle(offset).rotate(facing.0);
+                    let mut shot = commands.spawn((
+                        WorldEntity,
+                        Projectile { class: *class, dir: arrow },
+                        Position(pos.0 + arrow * 8.0),
+                        Velocity(arrow * speed),
+                        Damage(damage * power * factor),
+                        Lifetime(lifetime),
+                    ));
+                    if volleying {
+                        shot.insert(Volley);
+                    }
+                }
             }
         }
     }
@@ -2178,7 +2194,7 @@ fn player_specials(
             }
         }
     }
-    for (_, pos, facing, class, mut mana, mut input, mut cooldown, mut strikes) in &mut players {
+    for (hero, pos, facing, class, mut mana, mut input, mut cooldown, mut strikes) in &mut players {
         if demo_fire {
             input.queued = true;
             mana.current = mana.current.max(class.stats().special_cost);
@@ -2214,25 +2230,9 @@ fn player_specials(
                 }
                 commands.trigger(SpecialFx { class: *class, from: pos.0, at: pos.0, dir, radius: abilities.freeze_radius });
             }
-            // Salve: plusieurs flèches d'un coup, en éventail.
+            // Salve: pendant un moment, chaque tir du Rôdeur part en éventail de plusieurs flèches (voir `resolve_attacks`).
             HeroClass::Ranger => {
-                if let Attack::Shot { speed, damage, lifetime, .. } = stats.attack {
-                    let count = abilities.volley_arrows.round().max(1.0) as usize;
-                    let spread = abilities.volley_spread.to_radians();
-                    for k in 0..count {
-                        let offset = if count > 1 { (k as f32 / (count - 1) as f32 - 0.5) * spread } else { 0.0 };
-                        let arrow = Vec2::from_angle(offset).rotate(dir);
-                        commands.spawn((
-                            WorldEntity,
-                            Projectile { class: *class, dir: arrow },
-                            Position(pos.0 + arrow * 8.0),
-                            Velocity(arrow * speed),
-                            Damage(damage * abilities.volley_damage_factor),
-                            Lifetime(lifetime),
-                            Volley,
-                        ));
-                    }
-                }
+                commands.entity(hero).insert(Volleying(abilities.volley_duration));
                 commands.trigger(SpecialFx { class: *class, from: pos.0, at: pos.0, dir, radius: 0.0 });
             }
             // Frappe titanesque: un coup de marteau de plusieurs fois la force normale, qui écrase une zone devant lui.
@@ -2253,6 +2253,16 @@ fn player_specials(
                 commands.trigger(SpecialFx { class: *class, from: pos.0, at, dir, radius: abilities.smash_radius });
                 commands.trigger(ScreenShake(1.0));
             }
+        }
+    }
+}
+
+/// La Salve s'épuise.
+fn tick_volley(mut commands: Commands, time: Res<Time>, mut rangers: Query<(Entity, &mut Volleying)>) {
+    for (entity, mut volley) in &mut rangers {
+        volley.0 -= time.delta_secs();
+        if volley.0 <= 0.0 {
+            commands.entity(entity).remove::<Volleying>();
         }
     }
 }
@@ -3212,6 +3222,31 @@ mod tests {
             let at = app.world().get::<Position>(companion).unwrap().0;
             assert!(at.distance(trap_at) > balance().traps.trigger_radius, "le compagnon est sur le piège en {at}");
         }
+    }
+
+    /// Un Rôdeur tire une flèche; sous l'effet de la Salve, chaque tir en fait trois (pendant la durée de l'effet seulement).
+    #[test]
+    fn a_ranger_under_volley_fires_three_arrows_per_shot() {
+        let shots = |volleying: bool| {
+            let mut app = app_with_time();
+            app.add_systems(Update, resolve_attacks);
+            let ranger = hero(app.world_mut(), 0, Vec2::ZERO, true, 100.0);
+            app.world_mut().entity_mut(ranger).insert((HeroClass::Ranger, Facing(Vec2::X)));
+            if volleying {
+                app.world_mut().entity_mut(ranger).insert(Volleying(10.0));
+            }
+            app.world_mut().spawn(PendingAttack { hero: ranger, timer: 0.0 });
+            advance(&mut app, 0.05);
+            app.world_mut().query::<&Projectile>().iter(app.world()).count()
+        };
+        assert_eq!(shots(false), 1);
+        assert_eq!(shots(true), balance().abilities.volley_arrows.round() as usize);
+        // L'effet s'épuise.
+        let mut app = app_with_time();
+        app.add_systems(Update, tick_volley);
+        let ranger = app.world_mut().spawn(Volleying(balance().abilities.volley_duration)).id();
+        advance(&mut app, balance().abilities.volley_duration + 0.5);
+        assert!(app.world().get::<Volleying>(ranger).is_none());
     }
 
     /// Une place occupée par un personnage n'accueille personne.

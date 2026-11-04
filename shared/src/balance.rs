@@ -164,7 +164,9 @@ pub struct Abilities {
     pub freeze_radius: f32,
     pub freeze_duration: f32,
     pub freeze_boss_factor: f32,
-    /// Salve du Rôdeur: nombre de flèches, écart total de l'éventail (degrés) et multiplicateur de dégâts de chaque flèche.
+    /// Salve du Rôdeur: durée de l'effet (s), nombre de flèches par tir, écart total de l'éventail (degrés) et multiplicateur de dégâts de
+    /// chaque flèche.
+    pub volley_duration: f32,
     pub volley_arrows: f32,
     pub volley_spread: f32,
     pub volley_damage_factor: f32,

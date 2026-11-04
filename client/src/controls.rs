@@ -20,7 +20,7 @@ use bevy::{
 use crate::settings;
 
 /// Combien de temps il faut maintenir la touche de tir pour lancer le pouvoir spécial, en secondes.
-pub const SPECIAL_HOLD: f32 = 0.45;
+pub const SPECIAL_HOLD: f32 = 1.0;
 
 /// Comment le joueur joue en ce moment: le dernier appareil qu'il a utilisé.
 #[derive(Resource, Clone, Copy, PartialEq, Eq, Debug)]
