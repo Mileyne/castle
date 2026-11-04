@@ -26,7 +26,6 @@ speaker-sorcerer = Sorcerer
 speaker-ranger = Ranger
 speaker-forgebraise = Forgebraise
 speaker-samelia = Samélia
-speaker-castle = Nareff
 speaker-gardener = The Black Gardener
 
 # Dialogue: introduction scene

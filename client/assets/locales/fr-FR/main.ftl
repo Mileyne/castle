@@ -26,7 +26,6 @@ speaker-sorcerer = Ensorceleur
 speaker-ranger = Rôdeur
 speaker-forgebraise = Forgebraise
 speaker-samelia = Samélia
-speaker-castle = Nareff
 speaker-gardener = Le Jardinier Noir
 
 # Dialogues: scène d'introduction
