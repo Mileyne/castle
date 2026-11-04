@@ -96,7 +96,8 @@ pub fn boss_ai(
     layout: Res<Layout>,
     level: Res<Level>,
     mut rng: ResMut<Rng>,
-    minions: Query<&Monster, Without<BossBrain>>,
+    minions: Query<(&Monster, &Position), Without<BossBrain>>,
+    heroes: Query<&Position, (With<Player>, Without<BossBrain>)>,
     mut bosses: Query<
         (
             Entity,
@@ -185,18 +186,25 @@ pub fn boss_ai(
                         let (_, minion, base) = waves(kind);
                         // Le chef de meute rameute plus de loups quand il est blessé, sans dépasser la taille de la meute.
                         let wanted = if kind == MonsterKind::Warg && enraged { base + 1 } else { base };
-                        let alive = minions.iter().filter(|m| m.0 == minion).count();
+                        let alive = minions.iter().filter(|(m, _)| m.0 == minion).count();
                         let count = if kind == MonsterKind::Warg { wanted.min(MAX_PACK.saturating_sub(alive)) } else { wanted };
+                        // Les corps déjà en place: nul ne surgit sur quelqu'un.
+                        let mut occupied: Vec<(Vec2, f32)> = heroes
+                            .iter()
+                            .map(|p| (p.0, HERO_HALF_SIZE))
+                            .chain(minions.iter().map(|(m, p)| (p.0, m.0.stats().half_size)))
+                            .collect();
                         for k in 0..count {
                             // Les renforts surgissent en cercle autour du boss, hors des murs.
                             let around = rng.next_f32() * std::f32::consts::TAU + k as f32;
                             let at = pos.0 + Vec2::from_angle(around) * (stats.half_size + 30.0);
-                            let at = if room.overlaps_wall(at, minion.stats().half_size) {
-                                pos.0
-                            } else {
-                                at
-                            };
+                            let half = minion.stats().half_size;
+                            // Ni dans un mur, ni sur quelqu'un: ce renfort-là ne vient pas.
+                            if room.overlaps_wall(at, half) || spot_taken(at, half, occupied.iter().copied()) {
+                                continue;
+                            }
                             spawn_monster(&mut commands, minion, at);
+                            occupied.push((at, half));
                         }
                         commands.trigger(ScreenShake(0.5));
                         brain.timer = RECOVER_TIME;

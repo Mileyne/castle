@@ -63,6 +63,7 @@ const LANTERN_HEIGHT: f32 = 22.0;
 const TORCH_LIGHT_HEIGHT: f32 = 21.0;
 
 mod flame;
+mod gate;
 mod foliage;
 pub(crate) mod water;
 pub(crate) mod look;
@@ -94,6 +95,10 @@ impl Plugin for Decor3dPlugin {
             .add_systems(
                 Update,
                 (keep_the_image, build_chunks.after(crate::art::rebuild_world), water::build_water, rebuild_walls_for_view, follow_camera, update_materials, face_flames, apply_mood, drive_lamps).chain(),
+            )
+            .add_systems(
+                Update,
+                (gate::spawn_doors, gate::spawn_portcullises, gate::update_gates).chain(),
             )
             .add_systems(
                 Update,

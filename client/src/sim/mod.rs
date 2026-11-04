@@ -298,6 +298,15 @@ impl Plugin for SimPlugin {
             )
             .add_systems(
                 Update,
+                separate_bodies
+                    .run_if(in_game)
+                    .run_if(not_in_transition)
+                    .run_if(not_paused)
+                    .after(monster_ai)
+                    .after(boss::boss_ai),
+            )
+            .add_systems(
+                Update,
                 boss::boss_ai
                     .run_if(in_game)
                     .run_if(not_in_transition)
@@ -803,11 +812,18 @@ fn run_generators(
     mut rng: ResMut<Rng>,
     mut generators: Query<(&Position, &mut SpawnTimer), With<Generator>>,
     players: Query<&Position, (With<Player>, Without<Downed>, Without<Generator>)>,
-    monsters: Query<(), With<Monster>>,
+    monsters: Query<(&Position, &Monster)>,
+    heroes: Query<&Position, With<Player>>,
     level: Res<Level>,
     region: Res<LevelRegion>,
 ) {
     let mut alive = monsters.iter().count();
+    // Les corps déjà en place (héros, même à terre, et monstres), puis ceux qui sortent pendant cette image.
+    let mut occupied: Vec<(Vec2, f32)> = heroes
+        .iter()
+        .map(|p| (p.0, HERO_HALF_SIZE))
+        .chain(monsters.iter().map(|(p, m)| (p.0, m.0.stats().half_size)))
+        .collect();
     for (pos, mut timer) in &mut generators {
         let nearest = players
             .iter()
@@ -820,12 +836,18 @@ fn run_generators(
         if timer.0 > 0.0 || alive >= balance().spawn.max_monsters as usize {
             continue;
         }
-        timer.0 = balance().spawn.generator_interval / ease(level.0);
         let kind = MonsterKind::pick_in(region.0, level.0, rng.next_f32());
+        let half = kind.stats().half_size;
         // Le monstre sort du côté du héros, sauf si un mur gêne.
         let out = pos.0 + (target - pos.0).normalize_or_zero() * (GENERATOR_HALF_SIZE + 6.0);
-        let at = if room.overlaps_wall(out, kind.stats().half_size) { pos.0 } else { out };
+        let at = if room.overlaps_wall(out, half) { pos.0 } else { out };
+        // Si quelqu'un se tient déjà là, rien ne sort: le générateur retente à l'image suivante, dès que la place est libre.
+        if spot_taken(at, half, occupied.iter().copied()) {
+            continue;
+        }
+        timer.0 = balance().spawn.generator_interval / ease(level.0);
         spawn_monster(&mut commands, kind, at);
+        occupied.push((at, half));
         alive += 1;
     }
 }
@@ -2628,6 +2650,63 @@ fn dialogue_finished(
     *session = DialogueSession::default();
 }
 
+/// Vrai si une boîte de demi-taille `half` centrée en `at` chevauche l'un des corps `others` (position, demi-taille): on n'y fait pas
+/// apparaître quelqu'un.
+fn spot_taken(at: Vec2, half: f32, others: impl IntoIterator<Item = (Vec2, f32)>) -> bool {
+    others.into_iter().any(|(p, h)| (at.x - p.x).abs() < half + h && (at.y - p.y).abs() < half + h)
+}
+
+/// Vitesse maximale à laquelle deux corps qui se chevauchent sont repoussés l'un de l'autre, en unités par seconde.
+const SEPARATION_SPEED: f32 = 140.0;
+
+/// Deux personnages (héros ou monstres) ne restent pas l'un dans l'autre: ceux dont les boîtes se chevauchent (une apparition, un
+/// compagnon ramené près du chef, un recul...) sont repoussés l'un de l'autre, sans entrer dans un mur. Le contact normal n'y suffit pas:
+/// les boîtes qui se touchent sans se chevaucher n'en sont pas affectées.
+fn separate_bodies(
+    time: Res<Time>,
+    room: Res<Room>,
+    mut bodies: Query<(Entity, &mut Position, Option<&Monster>, Has<Player>), (Or<(With<Player>, With<Monster>)>, Without<Downed>)>,
+) {
+    let max_step = SEPARATION_SPEED * time.delta_secs();
+    let all: Vec<(Entity, Vec2, f32)> = bodies
+        .iter()
+        .map(|(entity, pos, monster, _)| (entity, pos.0, monster.map_or(HERO_HALF_SIZE, |m| m.0.stats().half_size)))
+        .collect();
+    let mut push = vec![Vec2::ZERO; all.len()];
+    for i in 0..all.len() {
+        for j in (i + 1)..all.len() {
+            let (a, b) = (&all[i], &all[j]);
+            let reach = a.2 + b.2;
+            let d = b.1 - a.1;
+            if d.x.abs() >= reach || d.y.abs() >= reach {
+                continue;
+            }
+            // Le long de l'axe où ils s'enfoncent le moins l'un dans l'autre; sur la même place, une direction propre à la paire.
+            let dir = if d.length_squared() > 1e-4 {
+                d.normalize()
+            } else {
+                Vec2::from_angle((i * 7 + j * 13) as f32)
+            };
+            let depth = (reach - d.length()).max(1.0);
+            let step = (depth * 0.5).min(max_step);
+            push[i] -= dir * step;
+            push[j] += dir * step;
+        }
+    }
+    for ((entity, pos, ..), push) in all.iter().zip(push) {
+        if push == Vec2::ZERO {
+            continue;
+        }
+        if let Ok((_, mut position, monster, _)) = bodies.get_mut(*entity) {
+            let half = monster.map_or(HERO_HALF_SIZE, |m| m.0.stats().half_size);
+            let moved = room.move_and_collide_solids(*pos, push.clamp_length_max(max_step), half, &[]);
+            if moved != position.0 {
+                position.0 = moved;
+            }
+        }
+    }
+}
+
 fn spawn_monster(commands: &mut Commands, kind: MonsterKind, pos: Vec2) {
     let stats = kind.stats();
     let mut monster = commands.spawn((
@@ -3019,6 +3098,39 @@ mod tests {
         assert_eq!(hp(&app, goblin), 50.0 - balance().traps.damage);
         assert_eq!(hp(&app, bat), 50.0, "il vole");
         assert_eq!(hp(&app, boss), 50.0);
+    }
+
+    /// Un héros et un monstre posés sur la même place sont repoussés jusqu'à ne plus se chevaucher.
+    #[test]
+    fn overlapping_characters_are_pushed_apart() {
+        let floor = vec![".".repeat(60); 40];
+        let rows: Vec<&str> = floor.iter().map(String::as_str).collect();
+        let mut app = app_with_time();
+        app.insert_resource(Room::from_rows(&rows));
+        app.add_systems(Update, separate_bodies);
+        let at = Vec2::new(0.0, 0.0);
+        let first = hero(app.world_mut(), 0, at, true, 100.0);
+        let second = hero(app.world_mut(), 0, at, false, 100.0);
+        let goblin = app.world_mut().spawn((Monster(MonsterKind::Goblin), Position(at + Vec2::new(2.0, 1.0)))).id();
+        for _ in 0..60 {
+            advance(&mut app, 0.05);
+        }
+        let place = |app: &App, e: Entity| app.world().get::<Position>(e).unwrap().0;
+        let clear = |a: Vec2, b: Vec2, reach: f32| (a.x - b.x).abs() >= reach - 0.01 || (a.y - b.y).abs() >= reach - 0.01;
+        let goblin_half = MonsterKind::Goblin.stats().half_size;
+        assert!(clear(place(&app, first), place(&app, second), 2.0 * HERO_HALF_SIZE));
+        assert!(clear(place(&app, first), place(&app, goblin), HERO_HALF_SIZE + goblin_half));
+        assert!(clear(place(&app, second), place(&app, goblin), HERO_HALF_SIZE + goblin_half));
+    }
+
+    /// Une place occupée par un personnage n'accueille personne.
+    #[test]
+    fn nobody_appears_on_an_occupied_spot() {
+        let there = Vec2::new(10.0, 10.0);
+        let hero = (there + Vec2::new(5.0, 0.0), HERO_HALF_SIZE);
+        assert!(spot_taken(there, 6.0, [hero]));
+        assert!(!spot_taken(there, 6.0, [(there + Vec2::new(40.0, 0.0), HERO_HALF_SIZE)]));
+        assert!(!spot_taken(there, 6.0, []));
     }
 
     /// Un compagnon contourne un piège posé sur son chemin au lieu de marcher dessus.

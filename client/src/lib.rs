@@ -487,11 +487,6 @@ fn dress_new_entities(
     portcullises: Query<(Entity, &Position, &Portcullis), Added<Portcullis>>,
     landmarks: Query<(Entity, &Position, &Landmark), Added<Landmark>>,
 ) {
-    // Un objet animé: sa ligne de planche, et un sprite sauf s'il a un modèle 3D (voir `live3d`), qui le dessine alors seul.
-    let prop = |row: usize| {
-        let (sprite, anchor) = art.prop_sprite(row, 0, Vec2::splat(SPRITE_SIZE));
-        (sprite, Prop(row), anchor)
-    };
     // Un héros ou un monstre n'a pas de sprite: son modèle 3D le dessine. Il garde son cycle de marche, qui choisit sa pose.
     for (entity, pos, _) in &players {
         commands.entity(entity).insert((Visibility::default(), WalkCycle::default(), Transform::from_translation(pos.0.extend(1.0))));
@@ -534,20 +529,9 @@ fn dress_new_entities(
             Transform::from_translation(pos.0.extend(0.4)),
         ));
     }
-    // La herse: deux moitiés côte à côte, comme la porte.
-    for (entity, pos, herse) in &portcullises {
-        let axis = if herse.vertical { Vec2::Y } else { Vec2::X };
-        commands
-            .entity(entity)
-            .insert((Transform::from_translation(pos.0.extend(0.75)), Visibility::default()))
-            .with_children(|parent| {
-                for side in [-1.0, 1.0] {
-                    parent.spawn((
-                        prop(object::PORTCULLIS),
-                        Transform::from_translation((axis * side * TILE_SIZE / 2.0).extend(0.0)),
-                    ));
-                }
-            });
+    // La herse et les portes sont dessinées dans la scène 3D (voir `decor3d::gate`).
+    for (entity, pos, _) in &portcullises {
+        commands.entity(entity).insert((Transform::from_translation(pos.0.extend(0.75)), Visibility::default()));
     }
     for (entity, pos, _) in &landmarks {
         commands.entity(entity).insert((Visibility::default(), Transform::from_translation(pos.0.extend(1.0))));
@@ -558,25 +542,8 @@ fn dress_new_entities(
     for (entity, pos) in &traps {
         commands.entity(entity).insert((Prop(object::TRAP_ARMED), Visibility::default(), Transform::from_translation(pos.0.extend(0.3))));
     }
-    for (entity, pos, door) in &doors {
-        // Une porte fait deux tuiles, côte à côte ou l'une sur l'autre selon le couloir.
-        let index_for = |side: f32| match door.kind {
-            DoorKind::Locked => object::DOOR_LOCKED,
-            DoorKind::Royal if side < 0.0 => object::DOOR_ROYAL,
-            DoorKind::Royal => object::DOOR_ROYAL_EMBLEM,
-        };
-        let axis = if door.vertical { Vec2::Y } else { Vec2::X };
-        commands
-            .entity(entity)
-            .insert((Transform::from_translation(pos.0.extend(0.7)), Visibility::default()))
-            .with_children(|parent| {
-                for side in [-1.0, 1.0] {
-                    parent.spawn((
-                        prop(index_for(side)),
-                        Transform::from_translation((axis * side * TILE_SIZE / 2.0).extend(0.0)),
-                    ));
-                }
-            });
+    for (entity, pos, _) in &doors {
+        commands.entity(entity).insert((Transform::from_translation(pos.0.extend(0.7)), Visibility::default()));
     }
     for (entity, pos, shot) in &projectiles {
         let index = match shot.class {

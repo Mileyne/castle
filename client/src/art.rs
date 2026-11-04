@@ -174,8 +174,11 @@ pub mod object {
     // Les lignes 5 (levier) et 7 (mécanisme) de la planche sont des objets au sol que l'énigme n'utilise plus.
     pub const TRAP_ARMED: usize = 8;
     pub const TRAP_OFF: usize = 9;
+    #[allow(dead_code)] // dessinée en 3D (decor3d/gate.rs); la ligne reste pour garder l'ordre des planches
     pub const DOOR_LOCKED: usize = 10;
+    #[allow(dead_code)]
     pub const DOOR_ROYAL: usize = 11;
+    #[allow(dead_code)]
     pub const DOOR_ROYAL_EMBLEM: usize = 12;
     pub const POTION: usize = 14;
     pub const WALL_RUNE: usize = 15;
@@ -184,6 +187,7 @@ pub mod object {
     pub const WALL_TARGET_EMPTY: usize = 18;
     pub const WALL_TARGET_MOUNTED: usize = 19;
     pub const WALL_TARGET_HIT: usize = 20;
+    #[allow(dead_code)]
     pub const PORTCULLIS: usize = 21;
     pub const INGREDIENT: usize = 22;
     pub const GEAR_PART: usize = 23;
