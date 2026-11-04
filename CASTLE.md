@@ -59,28 +59,28 @@ Chaque personnage doit être immédiatement identifiable à l'écran et utile en
 ### 1. Le Chevalier — Tank / protecteur
 - **Caractère :** loyal, courageux, têtu, méfiant envers la magie.
 - **Attaque principale :** épée et bouclier.
-- **Pouvoir spécial : Rempart** — mur protecteur réduisant les dégâts reçus par l'équipe.
+- **Pouvoir spécial : Égide** — toute l'équipe est immunisée (aucun dégât, pièges compris) pendant 10 secondes.
 - **Passifs :** plus de points de vie, résistance à la peur, peut forcer certaines portes.
 - **Évolutions :** Paladin lumineux, Gardien de fer, Croisé du roi.
 
 ### 2. L'Ensorceleur — Dégâts magiques
 - **Caractère :** curieuse, sarcastique, ambitieuse, fascinée par le château.
 - **Attaque principale :** projectiles magiques.
-- **Pouvoir spécial : Tempête Arcane** — explosion de magie touchant toute une zone.
+- **Pouvoir spécial : Gel** — fige tous les monstres proches pendant 10 secondes (3 s pour un boss).
 - **Passifs :** détecte les secrets, régénération lente de mana.
 - **Évolutions :** Sorcière runique, Archimage, Tempête vivante.
 
 ### 3. Le Rôdeur — Distance / exploration
 - **Caractère :** pragmatique, solitaire, ironique, grand observateur.
 - **Attaque principale :** arc ou arbalète.
-- **Pouvoir spécial : Pluie de Flèches** — grande zone de dégâts.
+- **Pouvoir spécial : Salve** — tire trois flèches d'un coup, en éventail.
 - **Passifs :** détection des passages secrets, bonus de critique, désamorçage de pièges.
 - **Évolutions :** Chasseur royal, Ombre des bois, Maître traqueur.
 
 ### 4. Le Forgebraise — Support offensif
 - **Caractère :** joyeux, impulsif, amateur d'explosifs, grand artisan.
 - **Attaque principale :** marteau runique.
-- **Pouvoir spécial : Tourelle automatique** — déploie une machine défensive.
+- **Pouvoir spécial : Frappe titanesque** — un coup de marteau cinq fois plus puissant, qui écrase une zone devant lui.
 - **Passifs :** réparation d'objets, fabrication de bombes, accès à certaines salles mécaniques.
 - **Évolutions :** Maître ingénieur, Alchimiste de guerre, Forge-tempête.
 
@@ -242,7 +242,7 @@ Objectif: les personnages parlent, dans la langue de chaque joueur.
 
 ### Phase 3 — Pouvoirs et coopération
 Objectif: les classes ont chacune un rôle.
-- [x] Pouvoirs spéciaux: Rempart, Tempête Arcane, Pluie de Flèches, Tourelle (touche E)
+- [x] Pouvoirs spéciaux: Égide, Gel, Salve, Frappe titanesque (touche E); effets dans `client/src/fx.rs` (lueurs, flocons, étincelles, fissures dessinés en 3D, plus de cercles); `CASTLE_DEMO_SPECIALS=1 ./niveau.sh 1` les lance seuls pour les regarder
 - [x] Mana et temps de recharge
 - [x] Passifs (détection des leviers et mécanismes cachés par l'Ensorceleur et le Rôdeur, désamorçage des pièges par le Rôdeur, porte royale poussée par le Chevalier; portes à clé)
 - [x] Pièges toujours visibles: endormis (pointes rentrées) tant que personne n'est à moins de 56 px, ils se réveillent (pointes sorties, 12 dégâts à qui marche dessus) à l'approche d'un héros debout et se rendorment 1,2 s après son départ. Le Rôdeur peut les désarmer pour de bon en maintenant l'action; ils restent alors visibles et inoffensifs

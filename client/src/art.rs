@@ -167,6 +167,7 @@ impl Art {
 /// Objets: leur numéro est leur place dans `PROPS` (`tools/sprite_forge`); chacun a sa propre planche.
 pub mod object {
     pub const GENERATOR: usize = 0;
+    #[allow(dead_code)] // plus de tourelle en jeu; la ligne reste pour garder l'ordre des planches
     pub const TURRET: usize = 1;
     pub const COIN: usize = 2;
     pub const FOOD: usize = 3;

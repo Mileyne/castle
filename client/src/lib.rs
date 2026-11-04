@@ -23,6 +23,7 @@ mod gamecontroller;
 #[cfg(target_os = "ios")]
 mod prefs;
 mod firstperson;
+mod fx;
 mod i18n;
 mod lighting;
 mod decor3d;
@@ -45,6 +46,15 @@ mod title;
 mod touch;
 mod weather;
 mod ui;
+
+/// Réglages de la salve du Rôdeur lus par les effets (nombre de flèches, angle de l'éventail en radians).
+pub(crate) fn balance_arrows() -> usize {
+    balance().abilities.volley_arrows.round().max(1.0) as usize
+}
+
+pub(crate) fn balance_spread() -> f32 {
+    balance().abilities.volley_spread.to_radians()
+}
 
 /// Vitesse de rattrapage visuel vers la position du serveur.
 const SMOOTHING: f32 = 20.0;
@@ -267,6 +277,7 @@ pub fn build_app() -> App {
             boss::BossPlugin,
             live3d::Live3dPlugin,
             decor3d::Decor3dPlugin,
+            fx::FxPlugin,
             prebake::PrebakePlugin,
             touch::TouchPlugin,
             music::MusicPlugin,
@@ -478,7 +489,6 @@ fn dress_new_entities(
     monsters: Query<(Entity, &Position, &Monster), Added<Monster>>,
     generators: Query<(Entity, &Position), Added<Generator>>,
     pickups: Query<(Entity, &Position, &Pickup), Added<Pickup>>,
-    turrets: Query<(Entity, &Position), Added<Turret>>,
     projectiles: Query<(Entity, &Position, &Projectile), Added<Projectile>>,
     interactables: Query<(Entity, &Position, &Interactable), Added<Interactable>>,
     doors: Query<(Entity, &Position, &Door), Added<Door>>,
@@ -496,9 +506,6 @@ fn dress_new_entities(
     }
     for (entity, pos) in &generators {
         commands.entity(entity).insert((Prop(object::GENERATOR), Visibility::default(), Transform::from_translation(pos.0.extend(0.5))));
-    }
-    for (entity, pos) in &turrets {
-        commands.entity(entity).insert((Prop(object::TURRET), Visibility::default(), Transform::from_translation(pos.0.extend(0.8))));
     }
     for (entity, pos, pickup) in &pickups {
         let index = match pickup.0 {
@@ -645,11 +652,9 @@ fn draw_health_bars(mut gizmos: Gizmos, entities: Query<(&Transform, &Health), W
     }
 }
 
-/// Zones d'effet et rempart, dessinés en cercles concentriques.
+/// Jauges des actions en cours et enchantement de la porte royale (les pouvoirs des héros ont leurs effets dans `fx`).
 fn draw_effects(
     mut gizmos: Gizmos,
-    zones: Query<(&Position, &Zone)>,
-    shielded: Query<&Transform, With<Shielded>>,
     actions: Query<(&Position, &Interactable)>,
     wards: Query<(&Position, &Ward)>,
     time: Res<Time>,
@@ -678,23 +683,6 @@ fn draw_effects(
             let (dir, outer) = (Vec2::from_angle(angle), ward.radius);
             gizmos.line_2d(pos.0 + dir * (outer - 5.0), pos.0 + dir * (outer + 1.0), violet.with_alpha(0.6));
         }
-    }
-    for (pos, zone) in &zones {
-        let color = class_color(zone.class);
-        for k in [1.0, 0.66, 0.33] {
-            gizmos.circle_2d(
-                Isometry2d::from_translation(pos.0),
-                zone.radius * k,
-                color.with_alpha(0.4 + 0.3 * (1.0 - k)),
-            );
-        }
-    }
-    for transform in &shielded {
-        gizmos.circle_2d(
-            Isometry2d::from_translation(transform.translation.truncate()),
-            HERO_HALF_SIZE + 4.0,
-            Color::from(css::DEEP_SKY_BLUE),
-        );
     }
 }
 

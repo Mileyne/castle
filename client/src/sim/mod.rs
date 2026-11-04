@@ -107,8 +107,9 @@ struct SpecialInput {
 #[derive(Component, Default)]
 struct SpecialCooldown(f32);
 
+/// Temps restant de l'immunité de l'Égide (le client s'en sert pour signaler sa fin).
 #[derive(Component)]
-struct ShieldTimer(f32);
+pub struct ShieldTimer(pub f32);
 
 /// Durée restante d'une zone et rythme de ses dégâts.
 #[derive(Component)]
@@ -121,11 +122,9 @@ struct ZoneDamage {
     timer: f32,
 }
 
+/// Flèche d'une salve du Rôdeur (le client lui donne une traînée lumineuse).
 #[derive(Component)]
-struct TurretLife(f32);
-
-#[derive(Component)]
-struct TurretOwner(Entity);
+pub struct Volley;
 
 /// Héros actuellement dirigé par un joueur (les autres de son équipe suivent et se défendent seuls).
 #[derive(Component)]
@@ -187,7 +186,7 @@ struct TrapCooldown(f32);
 
 /// Demi-côté de la boîte qui reçoit les coups (monstres et générateurs).
 #[derive(Component)]
-struct Hurtbox(f32);
+pub struct Hurtbox(pub f32);
 
 /// Temps avant la prochaine apparition d'un monstre.
 #[derive(Component)]
@@ -264,7 +263,6 @@ impl Plugin for SimPlugin {
                         player_specials,
                         tick_shields,
                         run_zones,
-                        run_turrets,
                         move_projectiles,
                     )
                         .chain(),
@@ -298,7 +296,7 @@ impl Plugin for SimPlugin {
             )
             .add_systems(
                 Update,
-                separate_bodies
+                (separate_bodies, tick_frozen)
                     .run_if(in_game)
                     .run_if(not_in_transition)
                     .run_if(not_paused)
@@ -886,6 +884,7 @@ fn monster_ai(
         ),
     >,
     bosses: Query<(&Position, &Monster), With<boss::BossBrain>>,
+    frozen: Query<(), With<Frozen>>,
     mut players: Query<
         (&Position, &mut Health, Has<Shielded>),
         (With<Player>, Without<Downed>, Without<Monster>),
@@ -914,6 +913,10 @@ fn monster_ai(
         .map(|(e, p, _, m, _)| (e, p.0, m.0.stats().half_size))
         .collect();
     for (entity, mut pos, mut cooldown, monster, mut strikes) in &mut monsters {
+        // Un monstre figé ne bouge plus et n'attaque plus.
+        if frozen.contains(entity) {
+            continue;
+        }
         let stats = monster.0.stats();
         cooldown.0 = (cooldown.0 - dt).max(0.0);
         // Un monstre n'engage un héros que dans sa propre salle: depuis un couloir ou une autre salle, rien.
@@ -929,7 +932,7 @@ fn monster_ai(
         };
         if dist <= stats.half_size + HERO_HALF_SIZE + balance().rules.monster_reach_slack {
             if cooldown.0 == 0.0 {
-                let factor = if shielded { balance().abilities.bulwark_damage_factor } else { 1.0 };
+                let factor = if shielded { 0.0 } else { 1.0 };
                 health.current -= stats.damage * factor * ease;
                 cooldown.0 = stats.cooldown;
                 // Le client joue le geste d'attaque à chaque coup.
@@ -2145,10 +2148,42 @@ fn player_specials(
         (Entity, &Position, &Facing, &HeroClass, &mut Mana, &mut SpecialInput, &mut SpecialCooldown, &mut Strikes),
         (With<Player>, Without<Downed>),
     >,
-    allies: Query<(Entity, &Position), (With<Player>, Without<Downed>)>,
-    turrets: Query<(Entity, &TurretOwner)>,
+    allies: Query<Entity, (With<Player>, Without<Downed>)>,
+    monsters: Query<(Entity, &Position, &Monster), Without<Player>>,
+    mut demo: Local<Option<(f32, f32)>>,
 ) {
-    for (entity, pos, facing, class, mut mana, mut input, mut cooldown, mut strikes) in &mut players {
+    let abilities = &balance().abilities;
+    // Option de développement: `CASTLE_DEMO_SPECIALS=1` fait surgir des monstres autour de l'équipe, puis lance les quatre pouvoirs
+    // (toutes les huit secondes), pour les regarder.
+    let mut demo_fire = false;
+    if std::env::var("CASTLE_DEMO_SPECIALS").is_ok() {
+        // (Le premier cycle attend la fin de la carte de présentation du niveau.)
+        let (wait, left) = demo.get_or_insert((14.0, 0.0));
+        if *wait > 0.0 {
+            *wait -= time.delta_secs();
+        } else {
+            *left -= time.delta_secs();
+            let (now, before) = (*left, *left + time.delta_secs());
+            if now <= 0.0 {
+                *left = 8.0;
+                let center = players.iter().next().map_or(Vec2::ZERO, |p| p.1.0);
+                for k in 0..6 {
+                    let kind = [MonsterKind::Goblin, MonsterKind::Orc, MonsterKind::Skeleton][k % 3];
+                    spawn_monster(&mut commands, kind, center + Vec2::new(120.0 + 30.0 * (k % 3) as f32, (k as f32 - 2.5) * 22.0));
+                }
+                info!("demo specials: monsters spawned");
+            } else if now <= 6.5 && before > 6.5 {
+                demo_fire = true;
+                info!("demo specials: fire ({} monsters)", monsters.iter().count());
+            }
+        }
+    }
+    for (_, pos, facing, class, mut mana, mut input, mut cooldown, mut strikes) in &mut players {
+        if demo_fire {
+            input.queued = true;
+            mana.current = mana.current.max(class.stats().special_cost);
+            cooldown.0 = 0.0;
+        }
         cooldown.0 = (cooldown.0 - time.delta_secs()).max(0.0);
         if !std::mem::take(&mut input.queued) {
             continue;
@@ -2160,49 +2195,74 @@ fn player_specials(
         mana.current -= stats.special_cost;
         cooldown.0 = stats.special_cooldown;
         strikes.0 = strikes.0.wrapping_add(1);
+        let dir = facing.0.try_normalize().unwrap_or(Vec2::X);
         match class {
+            // Égide: toute l'équipe est immunisée un moment (aucun dégât, où qu'elle soit).
             HeroClass::Knight => {
-                for (ally, ally_pos) in &allies {
-                    if ally_pos.0.distance(pos.0) <= balance().abilities.bulwark_radius {
-                        commands.entity(ally).insert((Shielded, ShieldTimer(balance().abilities.bulwark_duration)));
-                    }
+                for ally in &allies {
+                    commands.entity(ally).insert((Shielded, ShieldTimer(abilities.aegis_duration)));
                 }
+                commands.trigger(SpecialFx { class: *class, from: pos.0, at: pos.0, dir, radius: 0.0 });
             }
+            // Gel: tous les monstres proches sont figés (un boss moins longtemps).
             HeroClass::Sorcerer => {
-                commands.spawn((
-                    WorldEntity,
-                    Zone { radius: balance().abilities.arcane_radius, class: *class },
-                    Position(pos.0 + facing.0 * balance().abilities.arcane_offset),
-                    ZoneLife(0.4),
-                    // Un seul coup, au premier instant.
-                    ZoneDamage { damage: balance().abilities.arcane_damage, interval: 10.0, timer: 0.0 },
-                ));
-            }
-            HeroClass::Ranger => {
-                commands.spawn((
-                    WorldEntity,
-                    Zone { radius: balance().abilities.rain_radius, class: *class },
-                    Position(pos.0 + facing.0 * balance().abilities.rain_offset),
-                    ZoneLife(balance().abilities.rain_duration),
-                    ZoneDamage { damage: balance().abilities.rain_damage, interval: balance().abilities.rain_interval, timer: 0.0 },
-                ));
-            }
-            HeroClass::Forgebraise => {
-                // Une seule tourelle par Forgebraise.
-                for (turret, owner) in &turrets {
-                    if owner.0 == entity {
-                        commands.entity(turret).despawn();
+                for (monster, monster_pos, kind) in &monsters {
+                    if monster_pos.0.distance(pos.0) <= abilities.freeze_radius {
+                        let factor = if kind.0.is_boss() { abilities.freeze_boss_factor } else { 1.0 };
+                        commands.entity(monster).insert(Frozen(abilities.freeze_duration * factor));
                     }
                 }
+                commands.trigger(SpecialFx { class: *class, from: pos.0, at: pos.0, dir, radius: abilities.freeze_radius });
+            }
+            // Salve: plusieurs flèches d'un coup, en éventail.
+            HeroClass::Ranger => {
+                if let Attack::Shot { speed, damage, lifetime, .. } = stats.attack {
+                    let count = abilities.volley_arrows.round().max(1.0) as usize;
+                    let spread = abilities.volley_spread.to_radians();
+                    for k in 0..count {
+                        let offset = if count > 1 { (k as f32 / (count - 1) as f32 - 0.5) * spread } else { 0.0 };
+                        let arrow = Vec2::from_angle(offset).rotate(dir);
+                        commands.spawn((
+                            WorldEntity,
+                            Projectile { class: *class, dir: arrow },
+                            Position(pos.0 + arrow * 8.0),
+                            Velocity(arrow * speed),
+                            Damage(damage * abilities.volley_damage_factor),
+                            Lifetime(lifetime),
+                            Volley,
+                        ));
+                    }
+                }
+                commands.trigger(SpecialFx { class: *class, from: pos.0, at: pos.0, dir, radius: 0.0 });
+            }
+            // Frappe titanesque: un coup de marteau de plusieurs fois la force normale, qui écrase une zone devant lui.
+            HeroClass::Forgebraise => {
+                let hammer = match stats.attack {
+                    Attack::Melee { damage, .. } => damage,
+                    Attack::Shot { damage, .. } => damage,
+                };
+                let at = pos.0 + dir * abilities.smash_offset;
                 commands.spawn((
                     WorldEntity,
-                    Turret,
-                    TurretOwner(entity),
-                    Position(pos.0 + facing.0 * 14.0),
-                    TurretLife(balance().abilities.turret_lifetime),
-                    Cooldown::default(),
+                    Zone { radius: abilities.smash_radius, class: *class },
+                    Position(at),
+                    ZoneLife(0.2),
+                    // Un seul coup, au premier instant.
+                    ZoneDamage { damage: hammer * abilities.smash_factor, interval: 10.0, timer: 0.0 },
                 ));
+                commands.trigger(SpecialFx { class: *class, from: pos.0, at, dir, radius: abilities.smash_radius });
+                commands.trigger(ScreenShake(1.0));
             }
+        }
+    }
+}
+
+/// Le gel s'use; un monstre dégelé repart.
+fn tick_frozen(mut commands: Commands, time: Res<Time>, mut frozen: Query<(Entity, &mut Frozen)>) {
+    for (entity, mut frozen) in &mut frozen {
+        frozen.0 -= time.delta_secs();
+        if frozen.0 <= 0.0 {
+            commands.entity(entity).remove::<Frozen>();
         }
     }
 }
@@ -2240,44 +2300,6 @@ fn run_zones(
         life.0 -= dt;
         if life.0 <= 0.0 {
             commands.entity(entity).despawn();
-        }
-    }
-}
-
-/// Les tourelles tirent sur la cible la plus proche à portée.
-fn run_turrets(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut turrets: Query<(Entity, &Position, &mut Cooldown, &mut TurretLife), With<Turret>>,
-    targets: Query<&Position, (With<Hurtbox>, Without<Player>, Without<Turret>)>,
-) {
-    let dt = time.delta_secs();
-    for (entity, pos, mut cooldown, mut life) in &mut turrets {
-        life.0 -= dt;
-        if life.0 <= 0.0 {
-            commands.entity(entity).despawn();
-            continue;
-        }
-        cooldown.0 = (cooldown.0 - dt).max(0.0);
-        if cooldown.0 > 0.0 {
-            continue;
-        }
-        let nearest = targets
-            .iter()
-            .map(|t| t.0)
-            .filter(|t| t.distance(pos.0) <= balance().abilities.turret_range)
-            .min_by(|a, b| a.distance(pos.0).total_cmp(&b.distance(pos.0)));
-        if let Some(target) = nearest {
-            let dir = (target - pos.0).normalize_or_zero();
-            cooldown.0 = balance().abilities.turret_cooldown;
-            commands.spawn((
-                WorldEntity,
-                Projectile { class: HeroClass::Forgebraise, dir },
-                Position(pos.0 + dir * 8.0),
-                Velocity(dir * balance().abilities.turret_shot_speed),
-                Damage(balance().abilities.turret_damage),
-                Lifetime(balance().abilities.turret_range / balance().abilities.turret_shot_speed + 0.2),
-            ));
         }
     }
 }
@@ -2410,7 +2432,7 @@ fn run_traps(
     mut commands: Commands,
     time: Res<Time>,
     mut traps: Query<(Entity, &Position, &mut Trap, &mut Hold, &mut TrapCooldown, &mut TrapIdle, Has<Disarmed>), Without<Player>>,
-    mut players: Query<(&Position, &HeroClass, &Interacting, &mut Health), (With<Player>, Without<Downed>)>,
+    mut players: Query<(&Position, &HeroClass, &Interacting, &mut Health, Has<Shielded>), (With<Player>, Without<Downed>)>,
     mut monsters: Query<(&Position, &Monster, &mut Health), Without<Player>>,
 ) {
     let dt = time.delta_secs();
@@ -2424,7 +2446,7 @@ fn run_traps(
         }
         cooldown.0 = (cooldown.0 - dt).max(0.0);
         // Le Rôdeur désarme en maintenant l'action près du piège, qu'il soit réveillé ou endormi.
-        let disarming = players.iter().any(|(p, class, interacting, _)| {
+        let disarming = players.iter().any(|(p, class, interacting, ..)| {
             interacting.0 && *class == HeroClass::Ranger && p.0.distance(pos.0) <= INTERACT_RANGE
         });
         if disarming {
@@ -2455,9 +2477,12 @@ fn run_traps(
         if !trap.armed || cooldown.0 > 0.0 {
             continue;
         }
-        for (p, _, _, mut health) in &mut players {
+        for (p, _, _, mut health, shielded) in &mut players {
             if p.0.distance(pos.0) <= balance().traps.trigger_radius {
-                health.current -= balance().traps.damage;
+                // L'immunité de l'Égide protège aussi des pointes.
+                if !shielded {
+                    health.current -= balance().traps.damage;
+                }
                 cooldown.0 = balance().traps.cooldown;
             }
         }

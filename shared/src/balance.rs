@@ -158,23 +158,20 @@ pub struct Traps {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Abilities {
-    pub bulwark_radius: f32,
-    pub bulwark_duration: f32,
-    /// Part des dégâts qui passe encore sous le Rempart.
-    pub bulwark_damage_factor: f32,
-    pub arcane_offset: f32,
-    pub arcane_radius: f32,
-    pub arcane_damage: f32,
-    pub rain_offset: f32,
-    pub rain_radius: f32,
-    pub rain_damage: f32,
-    pub rain_interval: f32,
-    pub rain_duration: f32,
-    pub turret_lifetime: f32,
-    pub turret_range: f32,
-    pub turret_cooldown: f32,
-    pub turret_damage: f32,
-    pub turret_shot_speed: f32,
+    /// Égide du Chevalier: durée de l'immunité de toute l'équipe, en secondes.
+    pub aegis_duration: f32,
+    /// Gel de l'Ensorceleur: rayon autour de lui, durée pour un monstre, et part de cette durée pour un boss.
+    pub freeze_radius: f32,
+    pub freeze_duration: f32,
+    pub freeze_boss_factor: f32,
+    /// Salve du Rôdeur: nombre de flèches, écart total de l'éventail (degrés) et multiplicateur de dégâts de chaque flèche.
+    pub volley_arrows: f32,
+    pub volley_spread: f32,
+    pub volley_damage_factor: f32,
+    /// Frappe titanesque du Forgebraise: distance où elle tombe devant lui, rayon de l'impact et multiple des dégâts de son marteau.
+    pub smash_offset: f32,
+    pub smash_radius: f32,
+    pub smash_factor: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

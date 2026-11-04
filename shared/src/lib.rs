@@ -695,16 +695,16 @@ impl Mana {
 #[derive(Component, Serialize, Deserialize)]
 pub struct Shielded;
 
-/// Zone d'effet au sol (Tempête Arcane, Pluie de Flèches), lancée par un héros de cette classe.
+/// Zone d'effet au sol (la Frappe titanesque du Forgebraise), lancée par un héros de cette classe.
 #[derive(Component, Clone, Copy, Serialize, Deserialize)]
 pub struct Zone {
     pub radius: f32,
     pub class: HeroClass,
 }
 
-/// Tourelle automatique du Forgebraise.
-#[derive(Component, Serialize, Deserialize)]
-pub struct Turret;
+/// Un monstre figé par le pouvoir de l'Ensorceleur: il ne bouge plus et n'attaque plus pendant ce nombre de secondes.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Frozen(pub f32);
 
 /// Obstacles de la porte royale: chacun demande une classe précise, et la couleur de son panneau est celle de cette
 /// classe (violet pour l'Ensorceleur, orange pour le Forgebraise, vert pour le Rôdeur, acier pour le Chevalier).
@@ -845,6 +845,17 @@ pub struct AttackFx {
     pub pos: Vec2,
     pub dir: Vec2,
     pub class: HeroClass,
+}
+
+/// Un héros lance son pouvoir spécial, pour l'effet visuel: `from` est le lanceur, `at` le centre de l'effet (là où la frappe tombe, ou
+/// le lanceur), `dir` sa direction, `radius` la portée en unités du monde (l'effet la montre).
+#[derive(Event, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct SpecialFx {
+    pub class: HeroClass,
+    pub from: Vec2,
+    pub at: Vec2,
+    pub dir: Vec2,
+    pub radius: f32,
 }
 
 /// Le serveur déclenche une scène de dialogue: chaque client la joue dans sa langue.

@@ -97,6 +97,7 @@ pub fn boss_ai(
     level: Res<Level>,
     mut rng: ResMut<Rng>,
     minions: Query<(&Monster, &Position), Without<BossBrain>>,
+    frozen: Query<(), With<Frozen>>,
     heroes: Query<&Position, (With<Player>, Without<BossBrain>)>,
     mut bosses: Query<
         (
@@ -117,7 +118,11 @@ pub fn boss_ai(
 ) {
     let dt = time.delta_secs();
     let ease = ease(level.0);
-    for (_entity, mut pos, health, monster, mut brain, mut cooldown, mut strikes) in &mut bosses {
+    for (entity, mut pos, health, monster, mut brain, mut cooldown, mut strikes) in &mut bosses {
+        // Un boss figé ne fait rien (et son temps de réflexion ne s'écoule pas).
+        if frozen.contains(entity) {
+            continue;
+        }
         let kind = monster.0;
         let stats = kind.stats();
         let fraction = health.current / health.max;
@@ -156,7 +161,7 @@ pub fn boss_ai(
                 if already.contains(&entity) || p.0.distance(center) > radius + HERO_HALF_SIZE {
                     continue;
                 }
-                let factor = if shielded { balance().abilities.bulwark_damage_factor } else { 1.0 };
+                let factor = if shielded { 0.0 } else { 1.0 };
                 health.current -= amount * factor * ease;
                 hit.push(entity);
             }
@@ -262,7 +267,7 @@ pub fn boss_ai(
                             .filter(|(_, p, ..)| p.0.distance(pos.0) <= reach)
                             .min_by(|a, b| a.1.0.distance(pos.0).total_cmp(&b.1.0.distance(pos.0)))
                         {
-                            let factor = if shielded { balance().abilities.bulwark_damage_factor } else { 1.0 };
+                            let factor = if shielded { 0.0 } else { 1.0 };
                             health.current -= stats.damage * factor * ease;
                             cooldown.0 = stats.cooldown;
                             strikes.0 = strikes.0.wrapping_add(1);
