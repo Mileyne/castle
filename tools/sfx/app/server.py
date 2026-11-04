@@ -68,8 +68,29 @@ class Handler(BaseHTTPRequestHandler):
             body = json.dumps(body).encode()
         elif isinstance(body, str):
             body = body.encode()
+        total = len(body)
+        start, end = 0, total - 1
+        # Safari ne lit un son que si le serveur sait répondre aux requêtes d'intervalle (Range): sans cela, aucun son.
+        spec = self.headers.get("Range", "")
+        if spec.startswith("bytes=") and status == 200:
+            first, _, last = spec[6:].partition("-")
+            try:
+                start = int(first) if first else max(0, total - int(last))
+                end = min(int(last), total - 1) if first and last else total - 1
+                if start > end or start >= total:
+                    raise ValueError
+                status = 206
+                body = body[start:end + 1]
+            except ValueError:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{total}")
+                self.end_headers()
+                return
         self.send_response(status)
         self.send_header("Content-Type", kind)
+        self.send_header("Accept-Ranges", "bytes")
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{total}")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()

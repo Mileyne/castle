@@ -54,6 +54,7 @@
 <script>
 const state = { groups: [], choices: {} };
 const audio = new Audio();
+audio.onerror = () => { $('#status').textContent = 'Fichier son illisible: ' + audio.src; };
 let playingEl = null;
 let tourTimer = null;
 const $ = (s) => document.querySelector(s);
@@ -114,8 +115,7 @@ function play(name, i, el) {
   audio.pause();
   audio.src = `/variants/${name}/${i}.wav`;
   audio.volume = Number($('#vol').value);
-  audio.currentTime = 0;
-  audio.play();
+  audio.play().catch(e => { $('#status').textContent = 'Lecture impossible: ' + e.message; });
   if (playingEl) playingEl.classList.remove('playing');
   playingEl = el || null;
   if (el) { el.classList.add('playing'); audio.onended = () => el.classList.remove('playing'); }
