@@ -1677,6 +1677,9 @@
     Captive(
       at: (49.5, 7.5),
     ),
+    Captive(
+      at: (12.5, 43.5),
+    ),
     Landmark(
       kind: Statue,
       at: (12.5, 36.5),
