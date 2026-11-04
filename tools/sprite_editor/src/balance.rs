@@ -178,7 +178,7 @@ fn label(key: &str) -> String {
         "wolf" => "Loup",
         "warg" => "Warg (boss)",
         "troll" => "Troll (boss)",
-        "muldant" => "Muldant (boss)",
+        "muldant" => "Vaelor (boss)",
         "gardener" => "Jardinier (boss)",
         "dragon" => "Dragon (boss)",
         "max_hp" => "Points de vie max",

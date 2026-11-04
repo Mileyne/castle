@@ -432,7 +432,7 @@ pub enum MonsterKind {
     Warg,
     /// Boss du niveau 8: un troll couronné, lent, qui frappe le sol de ses poings.
     Troll,
-    /// Boss du niveau 12: Lord Muldant, un colosse à la peau orange et à la crinière blonde, qui lance de la foudre noire et appelle des squelettes.
+    /// Boss du niveau 12: Vaelor, un colosse à la peau orange et à la crinière blonde, qui lance de la foudre noire et appelle des squelettes.
     Muldant,
     /// Boss de l'acte 2 (niveau 8): le Jardinier Noir, un elfe fondu à la forêt, qui frappe de ses racines et appelle des gobelins.
     Gardener,
@@ -882,7 +882,7 @@ pub struct ScreenShake(pub f32);
 pub enum BossMove {
     /// Coup de poing sur le sol: dégâts dans le cercle.
     Slam,
-    /// Onde de foudre noire autour de Muldant: dégâts dans le cercle.
+    /// Onde de foudre noire autour de Vaelor: dégâts dans le cercle.
     Nova,
     /// Cri qui appelle des renforts (pas de zone à éviter).
     Howl,

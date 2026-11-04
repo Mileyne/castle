@@ -196,7 +196,7 @@
         Line("knight", "courtyard_panel_01"),
         Line("knight", "courtyard_panel_02"),
     ]),
-    // Acte 5, niveau 3: le battement de la pierre, et la vérité sur Lord Muldant.
+    // Acte 5, niveau 3: le battement de la pierre, et la vérité sur Vaelor.
     (id: "heart_reveal", steps: [
         Line("samelia", "heart_reveal_01"),
         Line("sorcerer", "heart_reveal_02"),

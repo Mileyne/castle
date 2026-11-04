@@ -27,7 +27,7 @@ pub enum Monster {
     Warg,
     /// Boss: le roi-troll.
     Troll,
-    /// Boss: Lord Muldant.
+    /// Boss: Vaelor.
     Muldant,
     /// Boss de l'acte 2: le Jardinier Noir (modèle provisoire: le troll, verdi).
     Gardener,

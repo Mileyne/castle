@@ -56,7 +56,7 @@ fn monster_label(monster: Monster) -> &'static str {
         Monster::Troll => "Grogoth (boss)",
         Monster::Gardener => "Jardinier Noir (boss)",
         Monster::Dragon => "Dragon de la Forge (boss)",
-        Monster::Muldant => "Lord Muldant (boss)",
+        Monster::Muldant => "Vaelor (boss)",
     }
 }
 

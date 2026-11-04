@@ -1,5 +1,5 @@
 //! Les trois boss de la campagne, bâtis sur les modèles des ennemis ordinaires mais plus sombres et parés de leurs signes:
-//! le chef de meute (loup noir à collier de fer), le roi-troll (orque couronné) et Lord Muldant (colosse orange à crinière blonde).
+//! le chef de meute (loup noir à collier de fer), le roi-troll (orque couronné) et Vaelor (colosse orange à crinière blonde).
 //! Comme le loup et l'orque, ils sont dessinés à la taille de leur case; c'est le jeu qui les agrandit à l'écran.
 
 use std::f32::consts::TAU;
@@ -125,7 +125,7 @@ fn recolor(parts: &mut [Part], from: u32, to: u32) {
     }
 }
 
-/// Lord Muldant: un colosse (l'orque en bien plus large) au teint très orange, une crinière blonde très jaune qui
+/// Vaelor: un colosse (l'orque en bien plus large) au teint très orange, une crinière blonde très jaune qui
 /// l'entoure de partout, un manteau noir doublé de pourpre, et la Pierre Ancestrale corrompue qui brille sur sa poitrine.
 pub(crate) fn muldant(pose: Pose) -> Vec<Part> {
     let d = orc_dims();

@@ -6,7 +6,7 @@
 //! - **Warg** (niveau 4): hurle régulièrement pour rameuter des loups (davantage sous la moitié de vie), et mord.
 //! - **Troll** (niveau 8): frappe le sol de ses poings, zone à quitter avant le coup. À mi-vie il appelle des gobelins, se
 //!   met en rage (plus vite, coups plus rapprochés).
-//! - **Lord Muldant** (niveau 12): un colosse qui fonce au corps à corps, lance une onde de foudre noire autour de lui (et,
+//! - **Vaelor** (niveau 12): un colosse qui fonce au corps à corps, lance une onde de foudre noire autour de lui (et,
 //!   sous la moitié de vie, frappe aussi le sol), et appelle des squelettes à deux tiers puis à un tiers de vie.
 
 use super::*;
@@ -83,7 +83,7 @@ fn special(kind: MonsterKind, enraged: bool) -> BossMove {
         MonsterKind::Warg => BossMove::Howl,
         MonsterKind::Troll | MonsterKind::Gardener => BossMove::Slam,
         MonsterKind::Dragon => BossMove::Nova,
-        // Muldant alterne la foudre noire et les coups de poing au sol une fois enragé.
+        // Vaelor alterne la foudre noire et les coups de poing au sol une fois enragé.
         _ if enraged => BossMove::Slam,
         _ => BossMove::Nova,
     }

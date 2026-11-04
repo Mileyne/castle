@@ -129,7 +129,7 @@ Le château est lui-même vivant. Au fil des quêtes, les héros découvrent que
 - le château choisit quels héros laisser progresser ;
 - le véritable ennemi n'est pas un démon mais le château lui-même.
 
-**Boss final : Castle.** La forteresse entière prend vie et utilise contre les joueurs toutes les créatures, pièges et salles rencontrés durant leurs précédentes aventures.
+**Boss final : Nareff.** La forteresse entière prend vie et utilise contre les joueurs toutes les créatures, pièges et salles rencontrés durant leurs précédentes aventures.
 
 Thème central : quatre héros essaient de comprendre la volonté d'un château vivant qui les manipule depuis le début.
 
@@ -157,14 +157,14 @@ Vingt niveaux fixes (`shared/levels/01.ron` à `20.ron`), en cinq actes de quatr
 | | 14 | La bibliothèque vivante | Chasse | Chandelles |
 | | 15 | La forge infernale | Délivrer deux prisonniers | Rouge de forge |
 | | 16 | Le cœur de la forge (boss: le Dragon de la Forge) | Vaincre le boss | Lave |
-| **5. Le cœur de Castle** | 17 | La tour astrale | Chasse | Étoiles |
+| **5. Le cœur de Nareff** | 17 | La tour astrale | Chasse | Étoiles |
 | | 18 | Les appartements royaux | Retrouver des reliques | Lueurs de souvenirs |
 | | 19 | Les galeries royales | Objectif du niveau | Sombre |
-| | 20 | Le cœur de Nareff (boss: Lord Muldant, en attendant Castle) | Délivrer deux prisonniers, vaincre Muldant | Foudre noire |
+| | 20 | Le cœur de Nareff (boss: Vaelor, en attendant le boss final) | Délivrer deux prisonniers, vaincre Vaelor | Foudre noire |
 
 **Samélia** enlevée à la fin de l'acte 1, délivrée au bout de l'acte 2, reste ensuite aux portes de Nareff (`gate_farewell`) et ne revient qu'à l'acte 5 (`heart_reveal`). Ses lanternes, offertes au prologue, faiblissent pendant qu'elle est captive (niveaux 5 à 8).
 
-À faire pour boucler cette conception: modèles propres du Jardinier Noir et du Dragon (aujourd'hui le troll, verdi ou rougi), ennemis végétaux de l'acte 2 (aujourd'hui des goules), lumière colorée (vert des elfes, rouge de la forge), le boss final Castle, et les niveaux 14, 17 à 19 à écrire à la main (ce sont des châteaux générés).
+À faire pour boucler cette conception: modèles propres du Jardinier Noir et du Dragon (aujourd'hui le troll, verdi ou rougi), ennemis végétaux de l'acte 2 (aujourd'hui des goules), lumière colorée (vert des elfes, rouge de la forge), le boss final Nareff, et les niveaux 14, 17 à 19 à écrire à la main (ce sont des châteaux générés).
 
 ## Plan de développement
 
@@ -306,10 +306,10 @@ Objectif: de vrais objectifs de mission.
 - [ ] Polices pixel-art couvrant les langues prévues
 - [ ] Traductions relues pour les langues au lancement
 
-### Phase 8 — Le twist: Castle, boss final
+### Phase 8 — Le twist: Nareff, boss final
 - [ ] Le château observe: événements et dialogues qui le laissent deviner
 - [ ] Mémoire de la partie (créatures, pièges et salles rencontrés)
-- [ ] Combat final contre Castle, qui réutilise ce que les joueurs ont affronté
+- [ ] Combat final contre Nareff, qui réutilise ce que les joueurs ont affronté
 
 ### Phase 9 — Mise en ligne
 - [ ] Serveurs dédiés, matchmaking ou codes de salle
