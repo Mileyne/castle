@@ -62,6 +62,7 @@ const LANTERN_HEIGHT: f32 = 22.0;
 /// Hauteur de la lumière d'une torche (un peu au-dessus de sa flamme).
 const TORCH_LIGHT_HEIGHT: f32 = 21.0;
 
+mod fireflies;
 mod flame;
 mod gate;
 mod foliage;
@@ -91,14 +92,14 @@ impl Plugin for Decor3dPlugin {
             .init_resource::<Mood>()
             .add_observer(forget_walls)
             .add_observer(water::forget_water)
-            .add_systems(Startup, setup)
+            .add_systems(Startup, (setup, fireflies::setup))
             .add_systems(
                 Update,
                 (keep_the_image, build_chunks.after(crate::art::rebuild_world), water::build_water, rebuild_walls_for_view, follow_camera, update_materials, face_flames, apply_mood, drive_lamps).chain(),
             )
             .add_systems(
                 Update,
-                (gate::spawn_doors, gate::spawn_portcullises, gate::update_gates).chain(),
+                (gate::spawn_doors, gate::spawn_portcullises, gate::update_gates, fireflies::run_fireflies).chain(),
             )
             .add_systems(
                 Update,

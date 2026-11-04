@@ -53,6 +53,8 @@ pub struct LevelLight {
     pub lantern: [f32; 3],
     /// Couleur (linéaire) de la lumière des torches.
     pub torch: [f32; 3],
+    /// Nombre de lucioles qui flottent autour des héros (0: aucune).
+    pub fireflies: u32,
 }
 
 /// Couleur de lumière sans teinte, des lanternes et des torches.
@@ -82,6 +84,7 @@ impl LevelLight {
             tint: NO_TINT,
             lantern: LANTERN_COLOR,
             // À la forge, les torches sont rouges.
+            fireflies: 0,
             torch: if region == Region::Forge { [1.0, 0.16, 0.04] } else { TORCH_COLOR },
         }
     }
@@ -389,6 +392,7 @@ mod tests {
         let tuning: LightTuning = ron::from_str(&std::fs::read_to_string(LightTuning::file()).unwrap()).unwrap();
         let elves = tuning.light(6, Region::Marsh);
         assert!(elves.tint[1] > elves.tint[0] && elves.tint[1] > elves.tint[2]);
+        assert!(elves.fireflies > 0 && tuning.light(13, Region::Gardens).fireflies == 0);
         let forge = tuning.light(15, Region::Forge);
         assert!(forge.tint[0] > forge.tint[2] && forge.torch[0] > 3.0 * forge.torch[1]);
         assert_eq!(tuning.light(1, Region::Forest).tint, NO_TINT);
