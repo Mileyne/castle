@@ -335,7 +335,7 @@ pub fn in_game(campaign: Option<Res<Campaign>>) -> bool {
 /// premier niveau n'a pas été vue.
 pub fn needs_prologue(save_name: &str) -> bool {
     // L'aperçu de l'éditeur de niveaux va droit au niveau.
-    if crate::editor_view::active() {
+    if crate::editor_view::active() || std::env::var("CASTLE_START_LEVEL").is_ok() {
         return false;
     }
     save::load(save_name).is_none_or(|save| save.level == 1 && !save.intro_done)
@@ -396,8 +396,10 @@ fn open_campaign(name: &str) -> Campaign {
         }
     };
     // L'éditeur de niveaux lance le jeu sur un niveau précis pour l'essayer.
+    // (Pas d'introduction ni de prologue: on veut le niveau, pas l'histoire qui y mène.)
     if let Some(level) = std::env::var("CASTLE_START_LEVEL").ok().and_then(|v| v.parse::<u32>().ok()) {
         save.level = level.clamp(1, LEVEL_COUNT);
+        save.intro_done = true;
     }
     Campaign(save)
 }

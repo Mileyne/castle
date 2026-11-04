@@ -22,5 +22,26 @@ fn main() {
         castle_client::sim::decorate_levels(std::path::Path::new(dir), force).expect("décor des niveaux");
         return;
     }
+    // `castle_client --niveau=N` (ou `--niveau N`): commence directement au niveau N (1 à 20), sans écran titre ni prologue, dans une
+    // sauvegarde jetable (les vraies parties ne sont pas touchées).
+    let level = args.iter().enumerate().find_map(|(i, a)| match a.strip_prefix("--niveau") {
+        Some(rest) if rest.starts_with('=') => rest[1..].parse::<u32>().ok(),
+        Some("") => args.get(i + 1)?.parse::<u32>().ok(),
+        _ => None,
+    });
+    if args.iter().any(|a| a.starts_with("--niveau")) && level.is_none() {
+        eprintln!("usage: castle_client --niveau=N (N de 1 à 20)");
+        std::process::exit(2);
+    }
+    if let Some(level) = level {
+        let saves = std::env::temp_dir().join(format!("castle_niveau_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&saves);
+        // SAFETY: rien d'autre ne tourne encore, l'application n'est pas construite.
+        unsafe {
+            std::env::set_var("CASTLE_SAVE_DIR", &saves);
+            std::env::set_var("CASTLE_AUTOSTART", "niveau");
+            std::env::set_var("CASTLE_START_LEVEL", level.to_string());
+        }
+    }
     castle_client::run();
 }

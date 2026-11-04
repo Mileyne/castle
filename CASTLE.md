@@ -181,6 +181,7 @@ Chaque phase se termine par quelque chose de jouable et testable.
 
 ```sh
 cargo run -p castle_client              # le jeu
+./niveau.sh 13                          # le jeu, directement au niveau 13 (sans titre ni prologue, sauvegarde jetable)
 ```
 Dans le client: **ZQSD/WASD ou flèches** pour se déplacer, **Espace** pour attaquer, **E** pour le pouvoir spécial, **F** (maintenue) pour agir, **Entrée** pour avancer dans un dialogue (1-4 pour voter), **1 à 4** pour prendre la main sur un des quatre héros (Chevalier, Ensorceleur, Rôdeur, Forgebraise), **F1** pour changer de langue (FR/EN). Votre héros a un liseré blanc.
 
