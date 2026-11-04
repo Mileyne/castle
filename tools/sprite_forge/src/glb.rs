@@ -633,7 +633,7 @@ mod tests {
         let bytes = export_glb("hero:Knight", Some(&png)).expect("modèle connu");
         let (document, _, images) = gltf::import_slice(&bytes).expect("fichier valide");
         assert_eq!(images.len(), 1);
-        assert_eq!((images[0].width, images[0].height), (64, 64));
+        assert_eq!((images[0].width, images[0].height), (256, 140));
         let skin = document.materials().find(|m| m.name().is_some_and(|n| n.starts_with("Face_"))).expect("le crâne");
         assert!(skin.pbr_metallic_roughness().base_color_texture().is_some());
     }

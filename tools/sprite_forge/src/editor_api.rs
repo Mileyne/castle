@@ -553,10 +553,11 @@ fn to_live(parts: Vec<Part>) -> Vec<LivePart> {
 }
 
 
-/// Le calage de la photo d'un héros sur son crâne: la texture est dans les coordonnées de la photo (de 0 à 1, v vers le bas), le crâne dans
-/// les siennes (de -1 à 1 sur chaque axe de l'ellipsoïde, y vers le haut): `u = center + scale * x` et `v = origin - slope * y`. Les
-/// valeurs viennent des repères du modèle (yeux à y = 0,09 et x = ±0,36, bouche à y = -0,43) et de ceux de la photo (où sont les yeux et la
-/// bouche dans la découpe). Ce calage est approximatif: c'est un point de départ, à affiner dans Blender (voir `docs/blender.md`).
+/// La projection de la peau d'un héros sur son crâne: la texture est dans ses coordonnées (de 0 à 1, v vers le bas), le crâne dans les siennes
+/// (de -1 à 1 sur chaque axe de l'ellipsoïde, y vers le haut): `u = center + scale * x` et `v = origin - slope * y`.
+///
+/// La peau est une simple texture de peau sans aucun trait (les yeux, le nez, la bouche, les sourcils, la barbe sont des pièces modélisées
+/// posées par-dessus): elle couvre tout le crâne, sans calage à faire.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FaceMap {
     pub center: f32,
@@ -566,14 +567,8 @@ pub struct FaceMap {
 }
 
 impl FaceMap {
-    /// Calage d'après les repères de la photo: `center_u` (le centre du visage), `eye_u` (écart des yeux au centre, de 0 à 1 de la largeur de
-    /// la découpe), `eye_v` et `mouth_v` (hauteurs des yeux et de la bouche); `eye_x` est l'écart des yeux du modèle.
-    pub const fn from_landmarks(center_u: f32, eye_u: f32, eye_v: f32, mouth_v: f32, eye_x: f32) -> Self {
-        const MODEL_EYE_Y: f32 = 0.093;
-        const MODEL_MOUTH_Y: f32 = -0.426;
-        let slope = (mouth_v - eye_v) / (MODEL_EYE_Y - MODEL_MOUTH_Y);
-        Self { center: center_u, scale: eye_u / eye_x, origin: eye_v + MODEL_EYE_Y * slope, slope }
-    }
+    /// La texture entière étirée sur le crâne.
+    pub const WHOLE: Self = Self { center: 0.5, scale: 0.5, origin: 0.5, slope: 0.5 };
 
     /// Les coordonnées de texture d'un point du crâne (en coordonnées de -1 à 1).
     pub fn uv(self, x: f32, y: f32) -> [f32; 2] {
@@ -581,13 +576,7 @@ impl FaceMap {
     }
 }
 
-/// Le calage de la photo d'un héros d'après la clé de son modèle (`None` pour les autres modèles).
+/// La projection de la peau d'un héros d'après la clé de son modèle (`None` pour les autres modèles).
 pub fn face_map(key: &str) -> Option<FaceMap> {
-    Some(match key {
-        "hero:Knight" => FaceMap::from_landmarks(0.615, 0.225, 0.235, 0.66, 0.36),
-        "hero:Sorcerer" => FaceMap::from_landmarks(0.315, 0.195, 0.285, 0.82, 0.378),
-        "hero:Ranger" => FaceMap::from_landmarks(0.55, 0.235, 0.33, 0.62, 0.378),
-        "hero:Forgebraise" => FaceMap::from_landmarks(0.545, 0.275, 0.07, 0.78, 0.342),
-        _ => return None,
-    })
+    key.starts_with("hero:").then_some(FaceMap::WHOLE)
 }

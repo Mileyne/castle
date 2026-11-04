@@ -25,12 +25,10 @@ Chaque fichier contient:
 
 Les matières sont déduites du reflet de chaque pièce dans `sprite_forge`: tissu et cuir (mat), peau, mailles, métal (poli), lumière.
 
-**Le visage.** Le crâne de chaque héros (`Face_...`) porte la peau de sa photo de référence: un petit carré de **64 x 64 pixels** découpé dans
-`photos/` (`client/assets/art/medieval/faces/<classe>.png`), volontairement flou. Ses coordonnées de texture viennent d'un calage
-**approximatif** (`FaceMap` dans `tools/sprite_forge/src/editor_api.rs`): les yeux de la photo sont censés tomber sur ceux du modèle et la
-bouche sur la bouche, mais ce n'est pas vérifié à l'œil pour chaque héros. C'est un point de départ: dans Blender, on recale la texture à la
-main (éditeur UV: sélectionner le crâne, déplacer et échelonner les coordonnées jusqu'à ce que les yeux et la bouche coïncident), ou on la
-remplace par une meilleure découpe de la photo. Les yeux, le nez et la bouche du modèle sont des pièces à part, posées par-dessus.
+**Le visage.** Le crâne de chaque héros (`Face_...`) porte une texture de peau sans aucun trait (`client/assets/art/medieval/faces/<classe>.png`,
+256 x 140 pixels, réduite de `photos/skins/skin_<héros>.jpg`). Elle couvre tout le crâne (`FaceMap::WHOLE` dans
+`tools/sprite_forge/src/editor_api.rs`: `u = 0,5 + 0,5 x`, `v = 0,5 - 0,5 y`), donc rien à caler. Les yeux, les sourcils, le nez et la bouche
+du modèle sont des pièces à part, posées par-dessus: la peau ne doit porter aucun trait, sinon ils se doubleraient.
 
 **Repère**: le mètre, y vers le haut (Blender convertit en z vers le haut à l'import), le personnage regarde vers +z (vers -y dans Blender)
 et a les pieds au sol. Un héros mesure environ 1,8 m.
@@ -52,7 +50,7 @@ zoom. C'est aussi la façon de vérifier un fichier après l'avoir sauvé depuis
   personnage, qui remplacerait le modèle du code) est l'étape suivante; elle demande de fixer les conventions ci-dessous.
 - **Les traînées des armes** (pièces lumineuses qui apparaissent pendant un coup) ne sont pas exportées: elles viennent du code.
 - La texture de tissage des vêtements n'est pas exportée (seule la peau du crâne l'est).
-- Un recalage de la peau fait dans Blender se reporte ensuite dans le jeu à la main: les coordonnées de texture du jeu viennent de `FaceMap`.
+- Un recalage de la peau fait dans Blender se reporte ensuite dans le jeu à la main: les coordonnées de texture du jeu viennent de `FaceMap` (`WHOLE` par défaut).
 
 ## 4. Conventions à respecter pour un futur import dans le jeu
 
