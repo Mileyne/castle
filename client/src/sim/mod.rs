@@ -670,22 +670,37 @@ fn body_solid(half: f32, margin: f32) -> Vec2 {
     Vec2::splat(half + margin)
 }
 
+/// Les zones qu'un compagnon évite de toucher: chaque piège non désarmé (même endormi, il se réveille à l'approche). La boîte couvre le
+/// rayon de déclenchement autour du centre d'un héros.
+fn trap_solids(traps: &Query<(&Position, Has<Disarmed>), (With<Trap>, Without<Player>, Without<Monster>)>) -> Vec<(Vec2, Vec2)> {
+    let half = (balance().traps.trigger_radius - HERO_HALF_SIZE).max(0.0) + 0.5;
+    traps.iter().filter(|(_, disarmed)| !disarmed).map(|(p, _)| (p.0, Vec2::splat(half))).collect()
+}
+
 fn move_players(
     time: Res<Time>,
     room: Res<Room>,
     doors: Query<(&Position, &Solid), Without<Player>>,
     bodies: Query<(&Position, &Hurtbox), Without<Player>>,
-    mut players: Query<(&mut Position, &MoveDir, &HeroClass), (With<Player>, Without<Downed>)>,
+    traps: Query<(&Position, Has<Disarmed>), (With<Trap>, Without<Player>, Without<Monster>)>,
+    mut players: Query<(&mut Position, &MoveDir, &HeroClass, Has<Controlled>), (With<Player>, Without<Downed>)>,
 ) {
     // Portes, monstres et générateurs arrêtent les héros; les héros se traversent entre eux.
     let margin = crate::firstperson::body_margin();
     let solids: Vec<_> = doors.iter().map(|(p, s)| (p.0, s.0)).chain(bodies.iter().map(|(p, h)| (p.0, body_solid(h.0, margin)))).collect();
-    for (mut pos, dir, class) in &mut players {
+    // Les compagnons ne marchent jamais sur un piège (le héros que le joueur dirige, lui, fait ce qu'il veut).
+    let trap_solids = trap_solids(&traps);
+    for (mut pos, dir, class, controlled) in &mut players {
         if dir.0 == Vec2::ZERO {
             continue;
         }
         let delta = dir.0 * class.stats().speed * time.delta_secs();
-        pos.0 = room.move_and_collide_solids(pos.0, delta, HERO_HALF_SIZE, &solids);
+        pos.0 = if controlled {
+            room.move_and_collide_solids(pos.0, delta, HERO_HALF_SIZE, &solids)
+        } else {
+            let all: Vec<_> = solids.iter().copied().chain(trap_solids.iter().copied()).collect();
+            room.move_and_collide_solids(pos.0, delta, HERO_HALF_SIZE, &all)
+        };
     }
 }
 
@@ -2667,12 +2682,14 @@ const SEPARATION_SPEED: f32 = 140.0;
 fn separate_bodies(
     time: Res<Time>,
     room: Res<Room>,
-    mut bodies: Query<(Entity, &mut Position, Option<&Monster>, Has<Player>), (Or<(With<Player>, With<Monster>)>, Without<Downed>)>,
+    traps: Query<(&Position, Has<Disarmed>), (With<Trap>, Without<Player>, Without<Monster>)>,
+    mut bodies: Query<(Entity, &mut Position, Option<&Monster>, Has<Player>, Has<Controlled>), (Or<(With<Player>, With<Monster>)>, Without<Downed>)>,
 ) {
     let max_step = SEPARATION_SPEED * time.delta_secs();
-    let all: Vec<(Entity, Vec2, f32)> = bodies
+    // (corps, position, demi-taille, est le héros dirigé, est un héros)
+    let all: Vec<(Entity, Vec2, f32, bool, bool)> = bodies
         .iter()
-        .map(|(entity, pos, monster, _)| (entity, pos.0, monster.map_or(HERO_HALF_SIZE, |m| m.0.stats().half_size)))
+        .map(|(entity, pos, monster, hero, controlled)| (entity, pos.0, monster.map_or(HERO_HALF_SIZE, |m| m.0.stats().half_size), controlled, hero))
         .collect();
     let mut push = vec![Vec2::ZERO; all.len()];
     for i in 0..all.len() {
@@ -2683,25 +2700,31 @@ fn separate_bodies(
             if d.x.abs() >= reach || d.y.abs() >= reach {
                 continue;
             }
-            // Le long de l'axe où ils s'enfoncent le moins l'un dans l'autre; sur la même place, une direction propre à la paire.
-            let dir = if d.length_squared() > 1e-4 {
-                d.normalize()
-            } else {
-                Vec2::from_angle((i * 7 + j * 13) as f32)
-            };
+            // Sur la même place, une direction propre à la paire.
+            let dir = if d.length_squared() > 1e-4 { d.normalize() } else { Vec2::from_angle((i * 7 + j * 13) as f32) };
             let depth = (reach - d.length()).max(1.0);
-            let step = (depth * 0.5).min(max_step);
-            push[i] -= dir * step;
-            push[j] += dir * step;
+            // Le héros que le joueur dirige ne cède jamais la place à un compagnon: c'est le compagnon qui s'écarte, pour qu'on
+            // puisse avancer ou rebrousser chemin sans être repoussé.
+            let (share_a, share_b) = match (a.3 && b.4 && !b.3, b.3 && a.4 && !a.3) {
+                (true, _) => (0.0, 1.0),
+                (_, true) => (1.0, 0.0),
+                _ => (0.5, 0.5),
+            };
+            let step = depth.min(max_step * 2.0);
+            push[i] -= dir * step * share_a;
+            push[j] += dir * step * share_b;
         }
     }
-    for ((entity, pos, ..), push) in all.iter().zip(push) {
+    let trap_solids = trap_solids(&traps);
+    for ((entity, pos, _, controlled, _), push) in all.iter().zip(push) {
         if push == Vec2::ZERO {
             continue;
         }
-        if let Ok((_, mut position, monster, _)) = bodies.get_mut(*entity) {
+        if let Ok((_, mut position, monster, is_hero, _)) = bodies.get_mut(*entity) {
             let half = monster.map_or(HERO_HALF_SIZE, |m| m.0.stats().half_size);
-            let moved = room.move_and_collide_solids(*pos, push.clamp_length_max(max_step), half, &[]);
+            // Un compagnon poussé ne va pas sur un piège non plus.
+            let solids: &[(Vec2, Vec2)] = if is_hero && !controlled { &trap_solids } else { &[] };
+            let moved = room.move_and_collide_solids(*pos, push.clamp_length_max(max_step * 2.0), half, solids);
             if moved != position.0 {
                 position.0 = moved;
             }
@@ -2806,9 +2829,9 @@ fn hero_ai(
         ),
         (With<Player>, Without<Controlled>, Without<Downed>),
     >,
-    leaders: Query<(&PartyId, &Position), (With<Controlled>, Without<Downed>)>,
+    leaders: Query<(&PartyId, &Position, Option<&Facing>), (With<Controlled>, Without<Downed>)>,
     foods: Query<(&Position, &Pickup), Without<Player>>,
-    traps: Query<(&Position, Has<Disarmed>), (With<Trap>, Without<Player>)>,
+    traps: Query<(&Position, Has<Disarmed>), (With<Trap>, Without<Player>, Without<Monster>)>,
     downed: Query<(&PartyId, &Position), (With<Player>, With<Downed>)>,
     enemies: Query<&Position, (Or<(With<Monster>, With<Generator>)>, Without<Player>)>,
 ) {
@@ -2820,7 +2843,8 @@ fn hero_ai(
     for (party, class, pos, mut dir, mut facing, mut attacking, mut route, health) in &mut heroes {
         dir.0 = Vec2::ZERO;
         attacking.0 = false;
-        let leader = leaders.iter().find(|(id, _)| *id == party).map(|(_, p)| p.0);
+        let leader_facing = leaders.iter().find(|(id, ..)| *id == party).and_then(|(.., f)| f).map_or(Vec2::X, |f| f.0.try_normalize().unwrap_or(Vec2::X));
+        let leader = leaders.iter().find(|(id, ..)| *id == party).map(|(_, p, _)| p.0);
 
         // Un ennemi (monstre ou générateur) n'est engagé que s'il est visible (pas derrière un mur) et proche du groupe.
         let nearest = enemies
@@ -2876,7 +2900,9 @@ fn hero_ai(
             dir.0 = unstick(&mut route, pos.0, dir.0, dt);
         } else if let Some(leader) = leader {
             // Dans un couloir étroit la place prévue en formation tombe dans un mur: on suit alors le chef de près.
-            let slot = leader + formation_offset(*class);
+            // La formation suit le chef: elle reste derrière lui, de quelque côté qu'il aille (et non toujours à l'ouest, ce qui
+            // plaçait les compagnons sur son chemin dès qu'il faisait demi-tour).
+            let slot = leader + Vec2::from_angle(leader_facing.to_angle()).rotate(formation_offset(*class));
             let free = !room.overlaps_wall(slot, HERO_HALF_SIZE) && room.segment_clear(leader, slot, HERO_HALF_SIZE);
             let (goal, stop) = if free { (slot, 10.0) } else { (leader, 16.0) };
             if goal.distance(pos.0) > stop {
@@ -3123,6 +3149,44 @@ mod tests {
         assert!(clear(place(&app, first), place(&app, second), 2.0 * HERO_HALF_SIZE));
         assert!(clear(place(&app, first), place(&app, goblin), HERO_HALF_SIZE + goblin_half));
         assert!(clear(place(&app, second), place(&app, goblin), HERO_HALF_SIZE + goblin_half));
+    }
+
+    /// Le héros dirigé ne cède pas la place à un compagnon: c'est le compagnon qui s'écarte.
+    #[test]
+    fn a_companion_steps_aside_for_the_controlled_hero() {
+        let floor = vec![".".repeat(60); 40];
+        let rows: Vec<&str> = floor.iter().map(String::as_str).collect();
+        let mut app = app_with_time();
+        app.insert_resource(Room::from_rows(&rows));
+        app.add_systems(Update, separate_bodies);
+        let leader = hero(app.world_mut(), 0, Vec2::new(0.0, 0.0), true, 100.0);
+        let companion = hero(app.world_mut(), 0, Vec2::new(5.0, 0.0), false, 100.0);
+        for _ in 0..40 {
+            advance(&mut app, 0.05);
+        }
+        assert_eq!(app.world().get::<Position>(leader).unwrap().0, Vec2::new(0.0, 0.0), "le chef n'est pas repoussé");
+        assert!(app.world().get::<Position>(companion).unwrap().0.x >= 2.0 * HERO_HALF_SIZE - 0.01);
+    }
+
+    /// Un compagnon poussé, ou qui marche, ne va pas sur un piège.
+    #[test]
+    fn a_companion_never_steps_on_a_trap() {
+        let floor = vec![".".repeat(60); 40];
+        let rows: Vec<&str> = floor.iter().map(String::as_str).collect();
+        let mut app = app_with_time();
+        app.insert_resource(Room::from_rows(&rows));
+        app.add_systems(Update, (move_players, separate_bodies).chain());
+        let trap_at = Vec2::new(30.0, 0.0);
+        app.world_mut().spawn((Trap { armed: false }, Position(trap_at), Hold::default(), TrapCooldown::default(), TrapIdle::default()));
+        // Le chef est de l'autre côté du piège: il pousse le compagnon vers lui.
+        hero(app.world_mut(), 0, Vec2::new(40.0, 0.0), true, 100.0);
+        let companion = hero(app.world_mut(), 0, Vec2::new(18.0, 0.0), false, 100.0);
+        app.world_mut().entity_mut(companion).insert(MoveDir(Vec2::X));
+        for _ in 0..60 {
+            advance(&mut app, 0.05);
+            let at = app.world().get::<Position>(companion).unwrap().0;
+            assert!(at.distance(trap_at) > balance().traps.trigger_radius, "le compagnon est sur le piège en {at}");
+        }
     }
 
     /// Une place occupée par un personnage n'accueille personne.
