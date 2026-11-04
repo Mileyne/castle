@@ -32,7 +32,7 @@ pub const DIALOGUE_NODES: [&str; 30] = [
     "knight_door",
     "boss_warg",
     "boss_troll",
-    "boss_muldant",
+    "boss_vaelor",
     "samelia_freed",
     "samelia_taken",
     "elves_dawn",

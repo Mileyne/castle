@@ -163,7 +163,7 @@ mod tests {
             "prologue",
             "intro",
             "alcove",
-            "boss_muldant",
+            "boss_vaelor",
             // Le récit en cinq actes.
             "samelia_taken",
             "elves_dawn",

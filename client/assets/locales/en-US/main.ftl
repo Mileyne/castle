@@ -128,7 +128,7 @@ act-1 = The Misty Forest
 act-2 = The Elven Realm
 act-3 = The Gates of Nareff
 act-4 = The Entrails
-act-5 = The Heart of Nareff
+act-5 = The Heart of Castle
 level-1 = Dawn in the Mist
 level-2 = The Sodden Undergrowth
 level-3 = The Gamekeeper's Fort
@@ -267,7 +267,7 @@ ctl-continue-touch = OK
 # Bosses
 boss-warg = Blackfang
 boss-troll = Grogoth
-boss-muldant = Vaelor
+boss-vaelor = Vaelor
 boss-gardener = The Black Gardener
 boss-dragon = The Dragon of the Forge
 quest-boss = Defeat the boss

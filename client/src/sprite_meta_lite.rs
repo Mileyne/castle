@@ -18,7 +18,7 @@ pub const SHEETS: &[(&str, &str, u32, u32, u32, u32)] = &[
     ("monsters", "wolf", 0, 32, 192, 160),
     ("monsters", "warg", 0, 68, 192, 124),
     ("monsters", "troll", 0, 20, 192, 172),
-    ("monsters", "muldant", 9, 52, 176, 140),
+    ("monsters", "vaelor", 9, 52, 176, 140),
     ("objects", "generator", 9, 64, 176, 128),
     ("objects", "turret", 43, 92, 108, 100),
     ("objects", "coin", 54, 124, 84, 68),

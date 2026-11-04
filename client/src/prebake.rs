@@ -24,7 +24,7 @@ fn reinforcement(boss: MonsterKind) -> Option<MonsterKind> {
         MonsterKind::Warg => Some(MonsterKind::Wolf),
         MonsterKind::Troll | MonsterKind::Gardener => Some(MonsterKind::Goblin),
         MonsterKind::Dragon => Some(MonsterKind::Skeleton),
-        MonsterKind::Muldant => Some(MonsterKind::Skeleton),
+        MonsterKind::Vaelor => Some(MonsterKind::Skeleton),
         _ => None,
     }
 }

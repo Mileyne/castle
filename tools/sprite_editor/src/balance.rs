@@ -13,7 +13,7 @@ const HEADER: &str = "// Équilibrage de Castle: points de vie, dégâts, porté
 // Édité dans l'éditeur (onglet « Équilibrage »). `CASTLE_BALANCE_FILE=<fichier>` lance le jeu avec un autre fichier, sans recompiler.\n";
 
 /// Les monstres qu'une table d'apparition peut contenir.
-const MONSTERS: [&str; 11] = ["Skeleton", "Bat", "Goblin", "Orc", "Ghoul", "Wolf", "Warg", "Troll", "Muldant", "Gardener", "Dragon"];
+const MONSTERS: [&str; 11] = ["Skeleton", "Bat", "Goblin", "Orc", "Ghoul", "Wolf", "Warg", "Troll", "Vaelor", "Gardener", "Dragon"];
 
 const CHANGED: Color32 = Color32::from_rgb(255, 190, 80);
 
@@ -178,7 +178,7 @@ fn label(key: &str) -> String {
         "wolf" => "Loup",
         "warg" => "Warg (boss)",
         "troll" => "Troll (boss)",
-        "muldant" => "Vaelor (boss)",
+        "vaelor" => "Vaelor (boss)",
         "gardener" => "Jardinier (boss)",
         "dragon" => "Dragon (boss)",
         "max_hp" => "Points de vie max",

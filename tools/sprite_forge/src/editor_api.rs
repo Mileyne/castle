@@ -56,7 +56,7 @@ fn monster_label(monster: Monster) -> &'static str {
         Monster::Troll => "Grogoth (boss)",
         Monster::Gardener => "Jardinier Noir (boss)",
         Monster::Dragon => "Dragon de la Forge (boss)",
-        Monster::Muldant => "Vaelor (boss)",
+        Monster::Vaelor => "Vaelor (boss)",
     }
 }
 
@@ -182,7 +182,7 @@ pub fn model_params(key: &str, theme: Theme) -> Vec<(String, f32)> {
                 params.extend(crate::monsters_more::ghoul_dims().fields().map(|(n, v)| (format!("dims.{n}"), v)));
             }
             Model::Monster(
-                Monster::Bat | Monster::Wolf | Monster::Warg | Monster::Troll | Monster::Muldant | Monster::Gardener | Monster::Dragon,
+                Monster::Bat | Monster::Wolf | Monster::Warg | Monster::Troll | Monster::Vaelor | Monster::Gardener | Monster::Dragon,
             )
             | Model::Prop(_) => {}
         }

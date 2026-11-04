@@ -945,7 +945,7 @@
       delay: 3.0,
     ),
     Monster(
-      kind: Muldant,
+      kind: Vaelor,
       at: (34.5, 7.5),
     ),
     Generator(
@@ -1401,7 +1401,7 @@
       at: (10.5, 38.5),
     ),
     Trigger(
-      node: "boss_muldant",
+      node: "boss_vaelor",
       at: (45.5, 6.5),
       radius: 60.0,
       delay: 0.5,

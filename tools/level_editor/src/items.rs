@@ -40,7 +40,7 @@ impl Item {
         Item::Monster(MonsterKind::Wolf),
         Item::Monster(MonsterKind::Warg),
         Item::Monster(MonsterKind::Troll),
-        Item::Monster(MonsterKind::Muldant),
+        Item::Monster(MonsterKind::Vaelor),
         Item::Monster(MonsterKind::Gardener),
         Item::Monster(MonsterKind::Dragon),
     ];
@@ -89,7 +89,7 @@ impl Item {
             Item::Monster(MonsterKind::Wolf) => "Loup",
             Item::Monster(MonsterKind::Warg) => "Boss: Croc-Noir (chef de meute)",
             Item::Monster(MonsterKind::Troll) => "Boss: Grogoth (roi-troll)",
-            Item::Monster(MonsterKind::Muldant) => "Boss: Vaelor",
+            Item::Monster(MonsterKind::Vaelor) => "Boss: Vaelor",
             Item::Monster(MonsterKind::Gardener) => "Boss: le Jardinier Noir",
             Item::Monster(MonsterKind::Dragon) => "Boss: le Dragon de la Forge",
             Item::Generator => "Générateur",

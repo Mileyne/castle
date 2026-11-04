@@ -128,7 +128,7 @@ act-1 = La forêt de brume
 act-2 = Le monde des elfes
 act-3 = Les portes de Nareff
 act-4 = Les entrailles
-act-5 = Le cœur de Nareff
+act-5 = Le cœur de Castle
 level-1 = L'aube dans la brume
 level-2 = Le sous-bois détrempé
 level-3 = Le fortin du garde-chasse
@@ -267,7 +267,7 @@ ctl-continue-touch = OK
 # Boss
 boss-warg = Croc-Noir
 boss-troll = Grogoth
-boss-muldant = Vaelor
+boss-vaelor = Vaelor
 boss-gardener = Le Jardinier Noir
 boss-dragon = Le Dragon de la Forge
 quest-boss = Vainquez le boss

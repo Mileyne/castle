@@ -78,7 +78,7 @@ pub struct Monsters {
     pub wolf: MonsterStats,
     pub warg: MonsterStats,
     pub troll: MonsterStats,
-    pub muldant: MonsterStats,
+    pub vaelor: MonsterStats,
     pub gardener: MonsterStats,
     pub dragon: MonsterStats,
 }

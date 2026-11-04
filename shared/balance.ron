@@ -156,7 +156,7 @@
       half_size: 22.0,
       sight: 600.0,
     ),
-    muldant: (
+    vaelor: (
       max_hp: 3000.0,
       speed: 40.0,
       damage: 28.0,

@@ -128,7 +128,7 @@
         Line("sorcerer", "bt_03"),
         Line("knight", "bt_04"),
     ]),
-    (id: "boss_muldant", steps: [
+    (id: "boss_vaelor", steps: [
         Line("samelia", "bm_01"),
         Line("sorcerer", "bm_02"),
         Line("ranger", "bm_03"),

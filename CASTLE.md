@@ -157,7 +157,7 @@ Vingt niveaux fixes (`shared/levels/01.ron` à `20.ron`), en cinq actes de quatr
 | | 14 | La bibliothèque vivante | Chasse | Chandelles |
 | | 15 | La forge infernale | Délivrer deux prisonniers | Rouge de forge |
 | | 16 | Le cœur de la forge (boss: le Dragon de la Forge) | Vaincre le boss | Lave |
-| **5. Le cœur de Nareff** | 17 | La tour astrale | Chasse | Étoiles |
+| **5. Le cœur de Castle** | 17 | La tour astrale | Chasse | Étoiles |
 | | 18 | Les appartements royaux | Retrouver des reliques | Lueurs de souvenirs |
 | | 19 | Les galeries royales | Objectif du niveau | Sombre |
 | | 20 | Le cœur de Nareff (boss: Vaelor, en attendant le boss final) | Délivrer deux prisonniers, vaincre Vaelor | Foudre noire |

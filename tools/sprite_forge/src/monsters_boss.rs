@@ -127,7 +127,7 @@ fn recolor(parts: &mut [Part], from: u32, to: u32) {
 
 /// Vaelor: un colosse (l'orque en bien plus large) au teint très orange, une crinière blonde très jaune qui
 /// l'entoure de partout, un manteau noir doublé de pourpre, et la Pierre Ancestrale corrompue qui brille sur sa poitrine.
-pub(crate) fn muldant(pose: Pose) -> Vec<Part> {
+pub(crate) fn vaelor(pose: Pose) -> Vec<Part> {
     let d = orc_dims();
     let j = joints(&d, pose, None);
     let mut p = orc(pose);

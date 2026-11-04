@@ -433,7 +433,7 @@ pub enum MonsterKind {
     /// Boss du niveau 8: un troll couronné, lent, qui frappe le sol de ses poings.
     Troll,
     /// Boss du niveau 12: Vaelor, un colosse à la peau orange et à la crinière blonde, qui lance de la foudre noire et appelle des squelettes.
-    Muldant,
+    Vaelor,
     /// Boss de l'acte 2 (niveau 8): le Jardinier Noir, un elfe fondu à la forêt, qui frappe de ses racines et appelle des gobelins.
     Gardener,
     /// Boss de l'acte 4 (niveau 16): le Dragon de la Forge, gardien des profondeurs, qui lance des ondes de feu.
@@ -463,7 +463,7 @@ impl MonsterKind {
             Self::Wolf => m.wolf,
             Self::Warg => m.warg,
             Self::Troll => m.troll,
-            Self::Muldant => m.muldant,
+            Self::Vaelor => m.vaelor,
             Self::Gardener => m.gardener,
             Self::Dragon => m.dragon,
         }
@@ -471,7 +471,7 @@ impl MonsterKind {
 
     /// Un boss: personnage unique du niveau, qu'il faut vaincre en groupe pour libérer la sortie.
     pub fn is_boss(self) -> bool {
-        matches!(self, Self::Warg | Self::Troll | Self::Muldant | Self::Gardener | Self::Dragon)
+        matches!(self, Self::Warg | Self::Troll | Self::Vaelor | Self::Gardener | Self::Dragon)
     }
 
     /// Clé de traduction du nom d'un boss (barre de vie).
@@ -479,7 +479,7 @@ impl MonsterKind {
         match self {
             Self::Warg => Some("boss-warg"),
             Self::Troll => Some("boss-troll"),
-            Self::Muldant => Some("boss-muldant"),
+            Self::Vaelor => Some("boss-vaelor"),
             Self::Gardener => Some("boss-gardener"),
             Self::Dragon => Some("boss-dragon"),
             _ => None,

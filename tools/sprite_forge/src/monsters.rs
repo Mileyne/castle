@@ -28,7 +28,7 @@ pub enum Monster {
     /// Boss: le roi-troll.
     Troll,
     /// Boss: Vaelor.
-    Muldant,
+    Vaelor,
     /// Boss de l'acte 2: le Jardinier Noir (modèle provisoire: le troll, verdi).
     Gardener,
     /// Boss de l'acte 4: le Dragon de la Forge (modèle provisoire: le troll, rougi).
@@ -45,7 +45,7 @@ pub const MONSTERS: [Monster; 11] = [
     Monster::Wolf,
     Monster::Warg,
     Monster::Troll,
-    Monster::Muldant,
+    Monster::Vaelor,
     Monster::Gardener,
     Monster::Dragon,
 ];
@@ -236,7 +236,7 @@ pub(crate) fn build_manga(monster: Monster, pose: Pose) -> Vec<Part> {
         Monster::Wolf => scaled(crate::monsters_more::wolf(pose, false), 1.7),
         Monster::Warg => crate::monsters_boss::warg(pose),
         Monster::Troll => crate::monsters_boss::troll(pose),
-        Monster::Muldant => crate::monsters_boss::muldant(pose),
+        Monster::Vaelor => crate::monsters_boss::vaelor(pose),
         Monster::Gardener => crate::monsters_boss::gardener(pose),
         Monster::Dragon => crate::monsters_boss::dragon(pose),
     }
