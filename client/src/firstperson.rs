@@ -23,8 +23,10 @@ pub const FIELD_OF_VIEW: f32 = 78.0;
 /// Degrés de rotation de la vue par pixel de déplacement de la souris, pour l'angle (sur le côté) et l'inclinaison (haut et bas).
 const MOUSE_TURN: f32 = 0.12;
 const MOUSE_TILT: f32 = 0.10;
-/// Les compagnons plus près que cela de la caméra sont cachés, en unités du monde.
-const HIDE_DISTANCE: f32 = 40.0;
+/// Les compagnons plus près que cela de la caméra sont cachés, en unités du monde: seulement ceux qui sont presque dans la tête du héros
+/// (deux corps ne se chevauchent pas: ils restent à 12 unités au moins l'un de l'autre). Plus loin, on les voit, en particulier quand on se
+/// retourne: leur place en formation est à 20 ou 35 unités.
+const HIDE_DISTANCE: f32 = 14.0;
 /// Limites de l'inclinaison de la vue, en degrés (négatif: vers le sol).
 const PITCH_RANGE: (f32, f32) = (-55.0, 40.0);
 
@@ -88,8 +90,8 @@ fn look(motion: Res<AccumulatedMouseMotion>, mut view: ResMut<FirstPerson>, paus
     view.pitch = (view.pitch - motion.delta.y * MOUSE_TILT).clamp(PITCH_RANGE.0, PITCH_RANGE.1);
 }
 
-/// Dans cette vue, le héros dirigé est caché (on est dans sa tête), ainsi que ses compagnons qui sont si près de la caméra que leur corps
-/// remplirait l'écran. Ils reviennent en sortant, ou en s'éloignant.
+/// Dans cette vue, le héros dirigé est caché (on est dans sa tête), ainsi que ses compagnons qui sont si près de la caméra qu'on serait dans
+/// leur corps. Ils reviennent en sortant, ou en s'éloignant.
 fn hide_own_model(
     view: Res<FirstPerson>,
     title: Res<TitleActive>,
