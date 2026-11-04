@@ -2468,7 +2468,7 @@ dependencies = [
 
 [[package]]
 name = "castle_client"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "basis-universal",
  "bevy",
@@ -2486,7 +2486,7 @@ dependencies = [
 
 [[package]]
 name = "castle_shared"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "bevy",
  "ron",
