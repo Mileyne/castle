@@ -141,7 +141,7 @@
         Line("samelia", "samelia_freed_03"),
     ]),
     // Le récit en cinq actes (voir CASTLE.md): Samélia est enlevée à la fin de l'acte 1, délivrée au bout de l'acte 2, puis elle attend aux
-    // portes de Nareff et ne revient qu'à l'acte 5. Ces scènes sont prêtes; les niveaux qui les appellent restent à écrire.
+    // portes de Castle Noir et ne revient qu'à l'acte 5. Ces scènes sont prêtes; les niveaux qui les appellent restent à écrire.
     // Fin de l'acte 1, après la mort du Warg, en pleine nuit: sa voix s'éteint et les lanternes baissent.
     (id: "samelia_taken", steps: [
         Line("sorcerer", "samelia_taken_01"),
@@ -170,7 +170,7 @@
         Line("samelia", "samelia_rescued_03"),
         Line("samelia", "samelia_rescued_04"),
     ]),
-    // Acte 3, niveau 1: les murs de Nareff rejettent la magie des elfes, elle reste à la porte.
+    // Acte 3, niveau 1: les murs de Castle Noir rejettent la magie des elfes, elle reste à la porte.
     (id: "gate_farewell", steps: [
         Line("samelia", "gate_farewell_01"),
         Line("samelia", "gate_farewell_02"),

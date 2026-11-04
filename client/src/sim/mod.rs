@@ -1791,7 +1791,7 @@ fn spawn_level(commands: &mut Commands, def: &LevelDef, level: u32, first: bool,
 const KNIGHT_LEVEL: u32 = 11;
 
 /// Région de chaque niveau de la campagne, acte par acte: la forêt et ses brumes (acte 1), le monde des elfes (acte 2), les portes de
-/// Nareff et les cryptes (acte 3), les jardins, la bibliothèque et la forge (acte 4), la tour et les appartements royaux (acte 5).
+/// Castle Noir et les cryptes (acte 3), les jardins, la bibliothèque et la forge (acte 4), la tour et les appartements royaux (acte 5).
 const CAMPAIGN_REGIONS: [Region; LEVEL_COUNT as usize] = [
     Region::Forest,
     Region::Marsh,
@@ -1821,7 +1821,7 @@ const CAMPAIGN_REGIONS: [Region; LEVEL_COUNT as usize] = [
 /// - Acte 1, la forêt: la brume (1), le sous-bois sous la pluie (2), le fortin du garde-chasse (3), la meute, de nuit (4).
 /// - Acte 2, le monde des elfes: les racines (5), le marais luminescent (6), la rivière et son pont de corde (7), la clairière du
 ///   Jardinier Noir, qui retient Samélia (8).
-/// - Acte 3: les abords de Nareff (9, un niveau de fichier), la cour d'honneur (10), les cryptes (11, fichier), le tombeau du roi (12).
+/// - Acte 3: les abords de Castle Noir (9, un niveau de fichier), la cour d'honneur (10), les cryptes (11, fichier), le tombeau du roi (12).
 /// - Acte 4: le combat du Dragon est dans la forge (16).
 fn outdoor_spec(level: u32) -> Option<outdoor::OutdoorSpec> {
     use outdoor::{Mechanism, OutdoorSpec};
@@ -1897,7 +1897,7 @@ fn outdoor_spec(level: u32) -> Option<outdoor::OutdoorSpec> {
             guide: true,
             ..base("La clairière du trône vert", Region::Forest, level, 1, 8, Some((QuestKind::Rescue, 1)), ExitKind::Gate, Some(Region::Marsh))
         },
-        // Acte 3. La cour d'honneur de Nareff: le Chevalier force la grande porte.
+        // Acte 3. La cour d'honneur de Castle Noir: le Chevalier force la grande porte.
         10 => OutdoorSpec {
             mechanism: Some(Mechanism { kind: InteractKind::Push, intro: "courtyard_intro", panel: "courtyard_panel" }),
             ..base("La cour d'honneur", Region::Approach, level, 3, 5, Some((QuestKind::Breach, 1)), ExitKind::Gate, Some(Region::Approach))

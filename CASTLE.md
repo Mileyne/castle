@@ -122,16 +122,16 @@ Chaque partie peut permettre de trouver un artefact unique.
 
 ## Twist narratif
 
-Le château est lui-même vivant. Au fil des quêtes, les héros découvrent que :
+Le château n'est pas vivant. Au fil des quêtes, les héros découvrent que :
 
-- le château pense ;
-- le château les observe ;
-- le château choisit quels héros laisser progresser ;
-- le véritable ennemi n'est pas un démon mais le château lui-même.
+- le seigneur Vaelor n'est qu'un prisonnier de la Pierre Ancestrale ;
+- la pierre est un cœur, et une volonté s'y cache ;
+- cette volonté, **Nareff**, manipule Vaelor et les créatures de Castle Noir depuis le début ;
+- le véritable ennemi n'est pas le seigneur noir mais Nareff.
 
-**Boss final : Nareff.** La forteresse entière prend vie et utilise contre les joueurs toutes les créatures, pièges et salles rencontrés durant leurs précédentes aventures.
+**Boss final : Nareff.** Il utilise contre les joueurs toutes les créatures, pièges et salles rencontrés durant leurs précédentes aventures.
 
-Thème central : quatre héros essaient de comprendre la volonté d'un château vivant qui les manipule depuis le début.
+Thème central : quatre héros essaient de comprendre la volonté qui se cache derrière la Pierre Ancestrale et qui les manipule depuis le début.
 
 ---
 
@@ -149,7 +149,7 @@ Vingt niveaux fixes (`shared/levels/01.ron` à `20.ron`), en cinq actes de quatr
 | | 6 | Le marais luminescent | Le Forgebraise remet l'écluse en marche | Plus vive, bioluminescente |
 | | 7 | La rivière et le pont de corde | Le Chevalier tend le pont | Heure bleue |
 | | 8 | La clairière du trône vert (boss: le Jardinier Noir) | Délivrer Samélia, qui ouvre la Porte des Racines | Clairière froide et verte |
-| **3. Les portes de Nareff** | 9 | Le chemin du château | Le Rôdeur lève le pont-levis | Gris d'avant l'aube |
+| **3. Les portes de Castle Noir** | 9 | Le chemin du château | Le Rôdeur lève le pont-levis | Gris d'avant l'aube |
 | | 10 | La cour d'honneur | Le Chevalier force la grande porte | Brasiers |
 | | 11 | Les cryptes | Le Chevalier pousse la porte royale | Torches |
 | | 12 | Le tombeau du roi (boss: Grogoth, le Roi Sans Visage) | Vaincre le boss | Torches, brume froide |
@@ -160,9 +160,9 @@ Vingt niveaux fixes (`shared/levels/01.ron` à `20.ron`), en cinq actes de quatr
 | **5. Le cœur de Castle** | 17 | La tour astrale | Chasse | Étoiles |
 | | 18 | Les appartements royaux | Retrouver des reliques | Lueurs de souvenirs |
 | | 19 | Les galeries royales | Objectif du niveau | Sombre |
-| | 20 | Le cœur de Nareff (boss: Vaelor, en attendant le boss final) | Délivrer deux prisonniers, vaincre Vaelor | Foudre noire |
+| | 20 | Le cœur de Castle Noir (boss: Vaelor, en attendant le boss final) | Délivrer deux prisonniers, vaincre Vaelor | Foudre noire |
 
-**Samélia** enlevée à la fin de l'acte 1, délivrée au bout de l'acte 2, reste ensuite aux portes de Nareff (`gate_farewell`) et ne revient qu'à l'acte 5 (`heart_reveal`). Ses lanternes, offertes au prologue, faiblissent pendant qu'elle est captive (niveaux 5 à 8).
+**Samélia** enlevée à la fin de l'acte 1, délivrée au bout de l'acte 2, reste ensuite aux portes de Castle Noir (`gate_farewell`) et ne revient qu'à l'acte 5 (`heart_reveal`). Ses lanternes, offertes au prologue, faiblissent pendant qu'elle est captive (niveaux 5 à 8).
 
 À faire pour boucler cette conception: modèles propres du Jardinier Noir et du Dragon (aujourd'hui le troll, verdi ou rougi), ennemis végétaux de l'acte 2 (aujourd'hui des goules), lumière colorée (vert des elfes, rouge de la forge), le boss final Nareff, et les niveaux 14, 17 à 19 à écrire à la main (ce sont des châteaux générés).
 
@@ -309,7 +309,7 @@ Objectif: de vrais objectifs de mission.
 ### Phase 8 — Le twist: Nareff, boss final
 - [ ] Le château observe: événements et dialogues qui le laissent deviner
 - [ ] Mémoire de la partie (créatures, pièges et salles rencontrés)
-- [ ] Combat final contre Nareff, qui réutilise ce que les joueurs ont affronté
+- [ ] Combat final contre Nareff, (la volonté cachée dans la Pierre), qui réutilise ce que les joueurs ont affronté
 
 ### Phase 9 — Mise en ligne
 - [ ] Serveurs dédiés, matchmaking ou codes de salle
