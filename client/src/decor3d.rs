@@ -643,6 +643,8 @@ fn update_materials(
     });
     // La couleur de la lumière du niveau (vert chez les elfes, rouge à la forge) s'ajoute à celle du héros.
     let tint = tint * Vec3::from(active.0.tint).extend(1.0);
+    // Le dernier canal dit au shader que la vue est à la première personne (lisières de forêt opaques: voir `thicket`).
+    let tint = Vec4::new(tint.x, tint.y, tint.z, if crate::firstperson::wall_factor() > 1.5 { 2.0 } else { 1.0 });
     let wall = wall_height();
     let angle = yaw();
     // Les lampes sont données dans le monde 2D (x, hauteur, y): le shader a besoin de distances non étirées. D'abord le héros que l'on

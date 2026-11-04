@@ -447,6 +447,19 @@ fn tile_origin() -> vec2<f32> {
     return decor.room.xy * 0.5 * decor.params.w;
 }
 
+// Le sous-bois qui bouche les vides entre les troncs et dans le feuillage clairsemé, à la première personne (`decor.tint.w` vaut 2): à
+// hauteur d'yeux on verrait sinon à travers la lisière jusqu'au vide derrière. Plus de 90 % de la lisière est alors opaque: des fourrés
+// sombres, avec quelques trouées de la taille d'une touffe.
+fn thicket(fx: f32, h: f32, ground: vec2<f32>) -> vec4<f32> {
+    let cell = floor(vec2<f32>(fx, h) / 3.0);
+    if hash21(cell + vec2<f32>(11.0, 4.0)) < 0.07 {
+        return vec4<f32>(0.0);
+    }
+    let at = vec3<f32>(ground.x, h, ground.y);
+    let dark = 0.4 + 0.25 * hash21(cell);
+    return vec4<f32>(leaves(at) * dark, 1.0);
+}
+
 // La face d'un mur (au sud): `fx` position le long du mur, `h` hauteur, `ground` le point du sol au pied de la face. Le résultat est la
 // couleur, et en alpha 0 ce qui est vide (entre les troncs, trous du feuillage): on y voit à travers.
 fn wall_face(fx: f32, h: f32, ground: vec2<f32>, n: vec3<f32>) -> vec4<f32> {
@@ -487,6 +500,9 @@ fn wall_face(fx: f32, h: f32, ground: vec2<f32>, n: vec3<f32>) -> vec4<f32> {
         if leaf_present(at, 1.0, ragged) {
             return vec4<f32>(leaves(at), 1.0);
         }
+        if decor.tint.w > 1.5 {
+            return thicket(fx, h, ground);
+        }
     }
     // Le pied du tronc est arrondi (la base d'un cylindre vu de biais): ses coins du bas sont coupés en arc, au lieu d'une base droite posée
     // sur le bord du bloc.
@@ -497,7 +513,10 @@ fn wall_face(fx: f32, h: f32, ground: vec2<f32>, n: vec3<f32>) -> vec4<f32> {
         let bark = decor.color_f.rgb * 1.5 * streak * mix(0.6, 1.0, clamp(h / canopy, 0.0, 1.0));
         return vec4<f32>(bark * (1.15 - 0.55 * smoothstep(-0.2, 1.0, side)), 1.0);
     }
-    // Entre les troncs: rien, on voit le bois derrière puis l'herbe.
+    // Entre les troncs: rien, on voit le bois derrière puis l'herbe (à la première personne, des fourrés).
+    if decor.tint.w > 1.5 {
+        return thicket(fx, h, ground);
+    }
     return vec4<f32>(0.0);
 }
 
