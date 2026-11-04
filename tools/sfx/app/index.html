@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Castle — choix des sons</title>
+<style>
+  :root { --bg:#14120f; --panel:#1f1b16; --line:#3a3228; --text:#ece3d0; --dim:#9a8f7a; --gold:#e0b050; --green:#7fc46a; --red:#c4584a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.4 -apple-system, "Segoe UI", sans-serif; }
+  header { position:sticky; top:0; z-index:5; background:#0e0c0a; border-bottom:1px solid var(--line); padding:10px 20px; display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+  h1 { font-size:18px; margin:0 12px 0 0; color:var(--gold); letter-spacing:.04em; }
+  button { font:inherit; color:var(--text); background:#2a241c; border:1px solid var(--line); border-radius:6px; padding:6px 12px; cursor:pointer; }
+  button:hover { border-color:var(--gold); }
+  button.primary { background:var(--gold); color:#1a1408; border-color:var(--gold); font-weight:600; }
+  button:disabled { opacity:.5; cursor:default; }
+  #status { color:var(--dim); margin-left:auto; }
+  label.vol { display:flex; align-items:center; gap:6px; color:var(--dim); }
+  nav { display:flex; gap:8px; padding:8px 20px; flex-wrap:wrap; background:#0e0c0a; }
+  nav a { color:var(--dim); text-decoration:none; padding:2px 8px; border-radius:12px; border:1px solid transparent; }
+  nav a:hover { color:var(--gold); border-color:var(--line); }
+  main { padding:8px 20px 80px; max-width:1100px; margin:auto; }
+  h2 { margin:28px 0 8px; font-size:15px; text-transform:uppercase; letter-spacing:.12em; color:var(--gold); }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin:8px 0; }
+  .card.changed { border-color:#6b5524; }
+  .head { display:flex; align-items:baseline; gap:10px; margin-bottom:8px; }
+  .head b { font-size:15px; }
+  .head code { color:var(--dim); font-size:12px; }
+  .head .pick { margin-left:auto; color:var(--green); font-size:13px; }
+  .row { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:6px; }
+  .v { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; cursor:pointer; user-select:none; background:#241f19; }
+  .v:hover { border-color:var(--gold); }
+  .v .n { width:22px; height:22px; border-radius:50%; background:#3a3228; color:var(--dim); display:grid; place-items:center; font-size:12px; flex:none; }
+  .v .t { font-size:13px; line-height:1.2; flex:1; }
+  .v .play { color:var(--dim); font-size:12px; }
+  .v.playing .n { background:var(--gold); color:#1a1408; }
+  .v.chosen { border-color:var(--green); background:#1f2a1c; }
+  .v.chosen .n { background:var(--green); color:#10200c; }
+  .v.chosen .t::after { content:" ✓"; color:var(--green); }
+  .hint { color:var(--dim); font-size:13px; margin:6px 0 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Choix des sons</h1>
+  <button class="primary" id="apply">Appliquer au jeu</button>
+  <button id="reset">Tout remettre « Actuel »</button>
+  <button id="tour">Écouter ma sélection</button>
+  <label class="vol">Volume <input type="range" id="vol" min="0" max="1" step="0.05" value="0.8"></label>
+  <span id="status"></span>
+</header>
+<nav id="nav"></nav>
+<main id="main"><p class="hint">Clique une variante pour l'écouter et la choisir. <b>Appliquer au jeu</b> écrit les choix dans <code>client/assets/audio/sfx/</code> (relance le jeu pour les entendre). « Actuel » est le son d'aujourd'hui.</p></main>
+<script>
+const state = { groups: [], choices: {} };
+const audio = new Audio();
+let playingEl = null;
+let tourTimer = null;
+const $ = (s) => document.querySelector(s);
+
+async function load() {
+  const r = await fetch('/api/state');
+  const data = await r.json();
+  state.groups = data.groups;
+  state.choices = data.choices;
+  render();
+}
+
+function render() {
+  const main = $('#main'), nav = $('#nav');
+  nav.innerHTML = '';
+  main.querySelectorAll('section').forEach(e => e.remove());
+  for (const group of state.groups) {
+    const id = 'g-' + group.title;
+    const link = document.createElement('a'); link.href = '#' + id; link.textContent = group.title; nav.append(link);
+    const section = document.createElement('section'); section.id = id;
+    section.innerHTML = `<h2>${group.title}</h2>`;
+    for (const sound of group.sounds) {
+      const card = document.createElement('div'); card.className = 'card'; card.dataset.name = sound.name;
+      card.innerHTML = `<div class="head"><b>${sound.label}</b><code>${sound.name}</code><span class="pick"></span></div><div class="row"></div>`;
+      const row = card.querySelector('.row');
+      sound.variants.forEach((label, i) => {
+        const v = document.createElement('div'); v.className = 'v'; v.dataset.i = i;
+        v.innerHTML = `<span class="n">${i === 0 ? '•' : i}</span><span class="t">${label}</span><span class="play">▶</span>`;
+        v.onclick = () => { choose(sound.name, i); play(sound.name, i, v); };
+        row.append(v);
+      });
+      section.append(card);
+    }
+    main.append(section);
+  }
+  refresh();
+}
+
+function refresh() {
+  let changed = 0;
+  document.querySelectorAll('.card').forEach(card => {
+    const name = card.dataset.name, pick = state.choices[name] || 0;
+    card.querySelectorAll('.v').forEach(v => v.classList.toggle('chosen', Number(v.dataset.i) === pick));
+    card.classList.toggle('changed', pick !== 0);
+    card.querySelector('.pick').textContent = pick ? `Variante ${pick}` : '';
+    if (pick) changed++;
+  });
+  $('#apply').textContent = changed ? `Appliquer au jeu (${changed} son${changed > 1 ? 's' : ''} modifié${changed > 1 ? 's' : ''})` : 'Appliquer au jeu';
+}
+
+function choose(name, i) {
+  if (i === 0) delete state.choices[name]; else state.choices[name] = i;
+  refresh();
+  fetch('/api/choices', { method: 'POST', body: JSON.stringify(state.choices) });
+}
+
+function play(name, i, el) {
+  audio.pause();
+  audio.src = `/variants/${name}/${i}.wav`;
+  audio.volume = Number($('#vol').value);
+  audio.currentTime = 0;
+  audio.play();
+  if (playingEl) playingEl.classList.remove('playing');
+  playingEl = el || null;
+  if (el) { el.classList.add('playing'); audio.onended = () => el.classList.remove('playing'); }
+}
+
+$('#vol').oninput = () => { audio.volume = Number($('#vol').value); };
+
+$('#reset').onclick = () => {
+  if (!confirm('Remettre tous les sons à « Actuel » ?')) return;
+  state.choices = {}; refresh();
+  fetch('/api/choices', { method: 'POST', body: JSON.stringify(state.choices) });
+};
+
+$('#apply').onclick = async () => {
+  $('#apply').disabled = true; $('#status').textContent = 'Écriture des sons…';
+  try {
+    const r = await fetch('/api/apply', { method: 'POST', body: JSON.stringify(state.choices) });
+    const data = await r.json();
+    $('#status').textContent = data.ok ? `${data.applied.length} sons écrits dans le jeu. Relance le jeu pour les entendre.` : 'Erreur: ' + data.error;
+  } catch (e) { $('#status').textContent = 'Erreur: ' + e; }
+  $('#apply').disabled = false;
+};
+
+// Écoute la sélection, un son après l'autre (les sons « Actuel » aussi).
+$('#tour').onclick = () => {
+  if (tourTimer) { clearTimeout(tourTimer); tourTimer = null; audio.pause(); $('#tour').textContent = 'Écouter ma sélection'; return; }
+  const list = state.groups.flatMap(g => g.sounds).map(s => [s.name, state.choices[s.name] || 0]);
+  let k = 0;
+  $('#tour').textContent = 'Arrêter';
+  const next = () => {
+    if (k >= list.length) { tourTimer = null; $('#tour').textContent = 'Écouter ma sélection'; return; }
+    const [name, i] = list[k++];
+    const card = document.querySelector(`.card[data-name="${name}"]`);
+    const el = card.querySelector(`.v[data-i="${i}"]`);
+    card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    play(name, i, el);
+    tourTimer = setTimeout(next, 1500);
+  };
+  next();
+};
+
+load();
+</script>
+</body>
+</html>

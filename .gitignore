@@ -12,3 +12,5 @@ tvos_build.log
 target-win/
 client/assets/art/*/sprite_meta.rs
 trace-*.json
+tools/sfx/variants/
+tools/sfx/choices.json
