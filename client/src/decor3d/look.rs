@@ -47,7 +47,18 @@ pub struct LevelLight {
     pub hero: Response,
     pub enemy: Response,
     pub object: Response,
+    /// Couleur de la lumière ambiante: multiplie le sol, les murs, l'eau et la lumière ambiante des modèles (blanc: aucune teinte).
+    pub tint: [f32; 3],
+    /// Couleur (linéaire) des lanternes des héros.
+    pub lantern: [f32; 3],
+    /// Couleur (linéaire) de la lumière des torches.
+    pub torch: [f32; 3],
 }
+
+/// Couleur de lumière sans teinte, des lanternes et des torches.
+pub const NO_TINT: [f32; 3] = [1.0, 1.0, 1.0];
+pub const LANTERN_COLOR: [f32; 3] = [1.0, 0.87, 0.68];
+pub const TORCH_COLOR: [f32; 3] = [1.0, 0.42, 0.10];
 
 impl Default for LevelLight {
     fn default() -> Self {
@@ -68,6 +79,10 @@ impl LevelLight {
             hero: Response { gain: 2.5, glow: 0.0 },
             enemy: Response::default(),
             object: Response::default(),
+            tint: NO_TINT,
+            lantern: LANTERN_COLOR,
+            // À la forge, les torches sont rouges.
+            torch: if region == Region::Forge { [1.0, 0.16, 0.04] } else { TORCH_COLOR },
         }
     }
 
@@ -135,6 +150,7 @@ impl LightTuning {
             hero: self.hero,
             enemy: self.enemy,
             object: self.object,
+            ..LevelLight::base(region)
         }
     }
 
@@ -326,7 +342,7 @@ pub fn lights(heroes: &[Vec2], torches: &[Torch], focus: Vec2, light: &LevelLigh
     for (i, hero) in heroes.iter().take(4).enumerate() {
         let weight = if i == 0 { 1.0 } else { 0.6 };
         pos[count] = Vec4::new(hero.x, super::LANTERN_HEIGHT, hero.y, (95.0 + 39.0 * dark) * light.lantern_radius);
-        color[count] = super::LANTERN_COLOR.extend((0.2125 + 0.1875 * dark) * light.lantern_intensity * weight);
+        color[count] = Vec3::from(light.lantern).extend((0.2125 + 0.1875 * dark) * light.lantern_intensity * weight);
         count += 1;
     }
     let mut near: Vec<(f32, &Torch)> = torches.iter().map(|torch| (torch.at.distance(focus), torch)).filter(|(d, _)| *d < 300.0).collect();
@@ -335,7 +351,7 @@ pub fn lights(heroes: &[Vec2], torches: &[Torch], focus: Vec2, light: &LevelLigh
         // La lampe est un peu en avant du mur, pour éclairer le mur et le sol.
         let at = torch.at + torch.normal * 4.0;
         pos[count] = Vec4::new(at.x, super::TORCH_LIGHT_HEIGHT, at.y, 110.0);
-        color[count] = Vec4::new(1.0, 0.42, 0.10, 1.6);
+        color[count] = Vec3::from(light.torch).extend(1.6);
         count += 1;
     }
     Lights { pos, color, count: count as f32 }
@@ -367,6 +383,16 @@ pub fn light_on(at: Vec3, flat: bool, lights: &Lights, mood: Mood) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_shipped_lighting_colours_the_elves_green_and_the_forge_red() {
+        let tuning: LightTuning = ron::from_str(&std::fs::read_to_string(LightTuning::file()).unwrap()).unwrap();
+        let elves = tuning.light(6, Region::Marsh);
+        assert!(elves.tint[1] > elves.tint[0] && elves.tint[1] > elves.tint[2]);
+        let forge = tuning.light(15, Region::Forge);
+        assert!(forge.tint[0] > forge.tint[2] && forge.torch[0] > 3.0 * forge.torch[1]);
+        assert_eq!(tuning.light(1, Region::Forest).tint, NO_TINT);
+    }
 
     #[test]
     fn the_tuning_survives_being_written_and_read_back() {

@@ -61,7 +61,6 @@ const MAX_LIGHTS: usize = 8;
 const LANTERN_HEIGHT: f32 = 22.0;
 /// Hauteur de la lumière d'une torche (un peu au-dessus de sa flamme).
 const TORCH_LIGHT_HEIGHT: f32 = 21.0;
-const LANTERN_COLOR: Vec3 = Vec3::new(1.0, 0.87, 0.68);
 
 mod flame;
 mod foliage;
@@ -636,6 +635,8 @@ fn update_materials(
         let tint = sprite.color.to_linear();
         Vec4::new(tint.red, tint.green, tint.blue, 1.0)
     });
+    // La couleur de la lumière du niveau (vert chez les elfes, rouge à la forge) s'ajoute à celle du héros.
+    let tint = tint * Vec3::from(active.0.tint).extend(1.0);
     let wall = wall_height();
     let angle = yaw();
     // Les lampes sont données dans le monde 2D (x, hauteur, y): le shader a besoin de distances non étirées. D'abord le héros que l'on
@@ -709,8 +710,8 @@ const LUMENS_PER_UNIT: f32 = 150.0 * std::f32::consts::PI;
 
 /// Le soleil et la lumière ambiante des modèles 3D suivent l'ambiance du niveau (très sombre dans les bois à la nuit tombante et dans le
 /// château), comme le décor.
-fn apply_mood(mood: Res<Mood>, mut sun: Query<&mut DirectionalLight>, mut ambient: ResMut<GlobalAmbientLight>) {
-    if !mood.is_changed() {
+fn apply_mood(mood: Res<Mood>, active: Res<ActiveLight>, mut sun: Query<&mut DirectionalLight>, mut ambient: ResMut<GlobalAmbientLight>) {
+    if !mood.is_changed() && !active.is_changed() {
         return;
     }
     // Le ton d'une surface horizontale au soleil, comme sur le sol (1 en plein jour); de nuit, les modèles s'alignent sur le sol (leurs
@@ -722,6 +723,8 @@ fn apply_mood(mood: Res<Mood>, mut sun: Query<&mut DirectionalLight>, mut ambien
         light.illuminance = 9000.0 * tone * night_factor;
     }
     ambient.brightness = 450.0 * tone * night_factor;
+    let [r, g, b] = active.0.tint;
+    ambient.color = Color::linear_rgb(r, g, b);
 }
 
 /// Les lampes de Bevy reprennent celles du shader: lanternes des héros, torches proches.

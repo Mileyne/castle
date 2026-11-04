@@ -164,7 +164,7 @@ Vingt niveaux fixes (`shared/levels/01.ron` à `20.ron`), en cinq actes de quatr
 
 **Samélia** enlevée à la fin de l'acte 1, délivrée au bout de l'acte 2, reste ensuite aux portes de Castle Noir (`gate_farewell`) et ne revient qu'à l'acte 5 (`heart_reveal`). Ses lanternes, offertes au prologue, faiblissent pendant qu'elle est captive (niveaux 5 à 8).
 
-À faire pour boucler cette conception: modèles propres du Jardinier Noir et du Dragon (aujourd'hui le troll, verdi ou rougi), ennemis végétaux de l'acte 2 (aujourd'hui des goules), lumière colorée (vert des elfes, rouge de la forge), le boss final Nareff, et les niveaux 14, 17 à 19 à écrire à la main (ce sont des châteaux générés).
+À faire pour boucler cette conception: modèles propres du Jardinier Noir et du Dragon (aujourd'hui le troll, verdi ou rougi), ennemis végétaux de l'acte 2 (aujourd'hui des goules), le boss final Nareff, et les niveaux 14, 17 à 19 à écrire à la main (ce sont des châteaux générés).
 
 ## Plan de développement
 
