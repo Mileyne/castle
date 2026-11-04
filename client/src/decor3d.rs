@@ -131,7 +131,7 @@ fn diag_hide(
 }
 
 #[derive(Component)]
-pub(crate) struct DecorCamera;
+pub struct DecorCamera;
 
 /// Un bloc de décor en 3D, et le sprite à plat dont il reprend l'image.
 #[derive(Component)]

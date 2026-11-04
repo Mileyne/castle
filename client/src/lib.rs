@@ -10,6 +10,8 @@ use castle_shared::*;
 use art::{Art, Prop, SPRITE_SIZE, WalkCycle, object, projectile};
 use live3d::ModelTint;
 
+pub use decor3d::{DecorCamera, LAYER as DECOR_LAYER};
+
 mod art;
 mod boss;
 mod camera;
@@ -24,9 +26,7 @@ mod firstperson;
 mod i18n;
 mod lighting;
 mod decor3d;
-#[cfg(feature = "editor")]
-mod editor;
-mod editor_view;
+pub mod editor_view;
 mod live3d;
 mod merged;
 mod prebake;
@@ -206,18 +206,12 @@ pub fn light_tuner() {
     decor3d::tuner::run();
 }
 
-#[cfg(feature = "editor")]
-pub fn run_editor() {
-    // L'éditeur est le jeu avec des panneaux en plus (voir `editor`).
-    editor::run();
-}
-
 pub fn run() {
     build_app().run();
 }
 
 /// L'application du jeu, prête à tourner (l'éditeur de niveaux y ajoute ses panneaux).
-pub(crate) fn build_app() -> App {
+pub fn build_app() -> App {
     #[cfg(target_os = "ios")]
     {
         log_objc_exceptions();

@@ -2472,7 +2472,6 @@ version = "0.8.0"
 dependencies = [
  "basis-universal",
  "bevy",
- "bevy_egui",
  "bevy_fluent",
  "castle_shared",
  "fluent_content",
@@ -4327,6 +4326,18 @@ name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
+
+[[package]]
+name = "level_editor"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_egui",
+ "castle_client",
+ "castle_shared",
+ "ron",
+ "serde",
+]
 
 [[package]]
 name = "lewton"

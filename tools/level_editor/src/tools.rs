@@ -8,8 +8,8 @@ use castle_shared::{Decor, ExitKind, LevelDef, RoomInfo, TILE_SIZE, Thing};
 
 use super::items::Item;
 use super::state::{Editing, PanelRects, Paint, Shape, StyleTarget, Tool, Tools};
-use crate::decor3d::DecorCamera;
-use crate::editor_view::EditorCamera;
+use castle_client::DecorCamera;
+use castle_client::editor_view::EditorCamera;
 
 /// Tangente de la moitié du champ de vision (45 degrés).
 const TAN_HALF_FOV: f32 = 0.4142;
@@ -439,7 +439,7 @@ pub fn sync_scene(
         return;
     };
     castle_shared::override_level(level, def);
-    commands.trigger(crate::sim::ReloadLevel(level));
+    commands.trigger(castle_client::sim::ReloadLevel(level));
     editing.stale = false;
     *last = now;
 }

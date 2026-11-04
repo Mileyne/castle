@@ -14,7 +14,7 @@ use super::tools::to_world;
 /// Les traits de l'éditeur se dessinent avec la scène (même couche que la caméra du décor), par-dessus tout le reste.
 pub fn setup_gizmos(mut store: ResMut<GizmoConfigStore>) {
     let (config, _) = store.config_mut::<DefaultGizmoConfigGroup>();
-    config.render_layers = RenderLayers::layer(crate::decor3d::LAYER);
+    config.render_layers = RenderLayers::layer(castle_client::DECOR_LAYER);
     config.depth_bias = -1.0;
     config.line.width = 3.0;
 }

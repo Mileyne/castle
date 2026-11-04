@@ -1,0 +1,17 @@
+[package]
+name = "level_editor"
+version = "0.1.0"
+edition = "2024"
+description = "Éditeur de niveaux de Castle: le jeu lui-même (bibliothèque castle_client) avec des panneaux egui par-dessus"
+
+[[bin]]
+name = "castle_editor"
+path = "src/main.rs"
+
+[dependencies]
+castle_client = { path = "../../client" }
+castle_shared = { path = "../../shared" }
+bevy = { workspace = true, default-features = false, features = ["2d", "3d", "ui"] }
+serde.workspace = true
+ron = "0.12"
+bevy_egui = { version = "0.43.1", default-features = false, features = ["render", "default_fonts", "manage_clipboard"] }

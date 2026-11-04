@@ -12,7 +12,7 @@ use super::items::{Item, choose, default_node, panel_label, quest_label, region_
 use super::overlay::draw_labels;
 use super::state::{Editing, PanelRects, Shape, Tool, Tools};
 use super::tools::snap_bridge;
-use crate::decor3d::DecorCamera;
+use castle_client::DecorCamera;
 
 /// Tous les panneaux, dessinés autour de la scène.
 pub fn panels(

@@ -1,7 +1,7 @@
 //! L'éditeur de niveaux: le jeu lui-même (même rendu, mêmes lumières), avec des panneaux egui par-dessus et des outils qui visent le
 //! sol de la scène. Le niveau modifié remplace celui du jeu à chaud (`castle_shared::override_level`, `sim::ReloadLevel`).
 //!
-//! `cargo run --release -p castle_client --features editor --bin castle_editor [-- --niveau=N]`
+//! `./editeur.sh [--niveau=N]` (ou `cargo run --release -p level_editor -- --niveau=N`)
 
 mod items;
 mod overlay;
@@ -16,10 +16,10 @@ use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
 use castle_shared::{Room, SetPause};
 
-use crate::editor_view::EditorCamera;
+use castle_client::editor_view::EditorCamera;
 use state::{Editing, Tools};
 
-pub fn run() {
+fn main() {
     let first: u32 = std::env::args().find_map(|a| a.strip_prefix("--niveau=")?.parse().ok()).unwrap_or(1);
     // Le jeu démarre tout seul sur ce niveau, dans une sauvegarde jetable.
     let saves = std::env::temp_dir().join(format!("castle_editor_{}", std::process::id()));
@@ -30,9 +30,9 @@ pub fn run() {
         std::env::set_var("CASTLE_AUTOSTART", "editeur");
         std::env::set_var("CASTLE_START_LEVEL", first.to_string());
     }
-    crate::editor_view::set_editor();
-    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../shared/levels"));
-    let mut app = crate::build_app();
+    castle_client::editor_view::set_editor();
+    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../shared/levels"));
+    let mut app = castle_client::build_app();
     app.add_plugins(EguiPlugin::default())
         .insert_resource(EguiGlobalSettings { auto_create_primary_context: false, ..default() })
         .insert_resource(Editing::new(dir, first))
